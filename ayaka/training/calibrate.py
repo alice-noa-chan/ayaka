@@ -34,7 +34,7 @@ def fit_temperatures(
 
 
 def _fit_one(logits: torch.Tensor, targets: torch.Tensor, cu: torch.Tensor, iters: int) -> float:
-    log_t = torch.zeros(1, requires_grad=True)
+    log_t = torch.zeros(1, requires_grad=True, device=logits.device)
     opt = torch.optim.LBFGS([log_t], lr=0.1, max_iter=iters)
 
     def closure():

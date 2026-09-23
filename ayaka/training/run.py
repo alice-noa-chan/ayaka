@@ -407,13 +407,16 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
         eval_metrics = trainer.evaluate(eval_batches)
         if verbose:
             print(f"[eval] {eval_metrics}", flush=True)
-    if cfg.calibrate:
-        temps = _calibrate(model, eval_samples, tok, cfg, mcfg.block_size, device)
-        if verbose:
-            print(f"[calibrate] temperatures: {temps}", flush=True)
 
+    # save before calibration so a late failure can't lose the run;
+    # calibration mutates only the temperature buffer, saved again after
     ckpt = os.path.join(art, "checkpoint_final.pt")
     torch.save(trainer.state_dict(), ckpt)
+    if cfg.calibrate:
+        temps = _calibrate(model, eval_samples, tok, cfg, mcfg.block_size, device)
+        torch.save(trainer.state_dict(), ckpt)
+        if verbose:
+            print(f"[calibrate] temperatures: {temps}", flush=True)
     with open(os.path.join(art, "history.json"), "w") as f:
         json.dump(history, f)
     with open(os.path.join(art, "pretrain_history.json"), "w") as f:

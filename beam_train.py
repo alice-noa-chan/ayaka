@@ -122,6 +122,8 @@ def _run(smoke: bool, **overrides) -> dict:
     env={
         "TOKENIZERS_PARALLELISM": "false",
         "HF_DATASETS_TRUST_REMOTE_CODE": "0",
+        # persist the HF datasets cache on the volume so reruns skip downloads
+        "HF_HOME": "/artifacts/hf-cache",
     },
 )
 def train(**overrides) -> dict:
