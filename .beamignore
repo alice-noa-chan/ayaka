@@ -32,3 +32,5 @@ artifacts/
 *.ckpt
 *.egg-info/
 *.egg-info
+uv.lock
+nul
