@@ -66,6 +66,7 @@ class RunConfig:
     train_tokenizer: bool = False  # train BPE on pooled text when path missing
     pretrain_steps: int = 0  # RTD + structured-corruption stage first
     pretrain_lr: float = 3e-4
+    pretrain_tokens: int = 8192  # per-step token cap for pretrain batches
     augment_p: float = 0.0  # per-sample candidate permutation prob
     evidence_aug_p: float = 0.0  # insufficient-evidence counterfactual prob
     eval_samples: int = 0  # held-out rows for eval + temperature fit
@@ -229,16 +230,21 @@ def pretrain_stage(
     opt = torch.optim.AdamW(list(model.parameters()) + list(head.parameters()), lr=cfg.pretrain_lr)
     rng = random.Random(cfg.seed + 2)
     all_samples = [s for cell in pools.values() for s in cell]
+    use_amp = cfg.bf16 and device.type == "cuda"
     history = []
     model.train()
     for step in range(1, cfg.pretrain_steps + 1):
-        drawn = rng.sample(all_samples, min(cfg.samples_per_step, len(all_samples)))
+        # token-budgeted batch: states accumulate until pretrain_tokens
         ids: list[int] = []
         cu = [0]
-        for s in drawn:
-            sids = encode_state(s.state, tokenizer)
+        for s in rng.sample(all_samples, min(cfg.samples_per_step, len(all_samples))):
+            sids = encode_state(s.state, tokenizer)[: cfg.pretrain_tokens]
+            if ids and len(ids) + len(sids) > cfg.pretrain_tokens:
+                break
             ids += sids
             cu.append(len(ids))
+        if len(cu) < 2:
+            continue
         ids_t = torch.tensor(ids, dtype=torch.long, device=device)
         cu_t = torch.tensor(cu, dtype=torch.long, device=device)
         gen = torch.Generator(device=device)
@@ -248,14 +254,22 @@ def pretrain_stage(
         )
         corrupt_struct, struct_labels = structured_corrupt(ids_t, generator=gen)
         opt.zero_grad(set_to_none=True)
-        loss = rtd_loss(model, head, ids_t, corrupt_rtd, rtd_labels, cu_t)
-        loss = loss + 0.3 * structured_corrupt_loss(
-            model, head, ids_t, corrupt_struct, struct_labels, cu_t
-        )
-        loss.backward()
+        # separate backwards: each pass holds its own activation graph
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+            loss_rtd = rtd_loss(model, head, ids_t, corrupt_rtd, rtd_labels, cu_t)
+        loss_rtd.backward()
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+            loss_struct = structured_corrupt_loss(
+                model, head, ids_t, corrupt_struct, struct_labels, cu_t
+            )
+        (0.3 * loss_struct).backward()
         torch.nn.utils.clip_grad_norm_(list(model.parameters()) + list(head.parameters()), 1.0)
         opt.step()
-        rec = {"step": step, "pretrain_loss": float(loss.detach())}
+        rec = {
+            "step": step,
+            "pretrain_loss": float(loss_rtd.detach() + 0.3 * loss_struct.detach()),
+            "tokens": len(ids),
+        }
         history.append(rec)
         if verbose and cfg.log_every and step % cfg.log_every == 0:
             print(
