@@ -65,9 +65,10 @@ def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
-def _run(smoke: bool) -> dict:
+def _run(smoke: bool, **overrides) -> dict:
     """Executed inside the remote container. The synced repo is the
-    working directory; make it importable, then drive run_training."""
+    working directory; make it importable, then drive run_training.
+    Keyword args override the env-derived RunConfig fields."""
     sys.path.insert(0, os.getcwd())
     import torch
 
@@ -77,7 +78,6 @@ def _run(smoke: bool) -> dict:
     if torch.cuda.is_available():
         print(f"[beam] gpu: {torch.cuda.get_device_name(0)}", flush=True)
 
-    run_name = _env("AYAKA_RUN_NAME", time.strftime("%Y%m%d-%H%M%S"))
     specs = [s for s in _env("AYAKA_SPECS", "").split(",") if s] or None
     cfg = RunConfig(
         model_size=_env("AYAKA_MODEL_SIZE", "tiny" if smoke else "electra-small"),
@@ -88,11 +88,17 @@ def _run(smoke: bool) -> dict:
         limit_per_spec=int(_env("AYAKA_LIMIT_PER_SPEC", "20000")),
         tokenizer_path=_env("AYAKA_TOKENIZER", ""),
         artifacts_dir="/artifacts",
-        run_name=run_name,
+        run_name=_env("AYAKA_RUN_NAME", time.strftime("%Y%m%d-%H%M%S")),
         compile=_env("AYAKA_COMPILE", "0") == "1",
     )
     if specs:
         cfg.specs = specs
+    if "specs" in overrides and isinstance(overrides["specs"], str):
+        overrides["specs"] = [s for s in overrides["specs"].split(",") if s]
+    for k, v in overrides.items():
+        if not hasattr(cfg, k):
+            raise TypeError(f"unknown RunConfig field: {k}")
+        setattr(cfg, k, v)
 
     # Smoke mode skips dataset downloads: synthetic pools validate the
     # whole path (forward/backward, packing, checkpoint, volume writes).
@@ -118,9 +124,13 @@ def _run(smoke: bool) -> dict:
         "HF_DATASETS_TRUST_REMOTE_CODE": "0",
     },
 )
-def train() -> dict:
-    """Full fine-tune run on GPU (sec 49.1 stage-1, token-budget)."""
-    return _run(smoke=False)
+def train(**overrides) -> dict:
+    """Full fine-tune run on GPU (sec 49.1 stage-1, token-budget).
+
+    Per-invocation config: `train.remote(steps=300, limit_per_spec=3000)`
+    — kwargs are RunConfig fields; `specs` also accepts a comma string.
+    """
+    return _run(smoke=False, **overrides)
 
 
 @function(
