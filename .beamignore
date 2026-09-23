@@ -30,3 +30,5 @@ tests/
 artifacts/
 *.pt
 *.ckpt
+*.egg-info/
+*.egg-info

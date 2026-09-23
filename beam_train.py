@@ -118,7 +118,7 @@ def _run(smoke: bool, **overrides) -> dict:
     timeout=-1,  # long-running: no container cap
     retries=0,
     headless=True,  # keep training after the client disconnects
-    secrets=["HF_TOKEN"],
+    # add secrets=["HF_TOKEN"] here if gated datasets are ever needed
     env={
         "TOKENIZERS_PARALLELISM": "false",
         "HF_DATASETS_TRUST_REMOTE_CODE": "0",
