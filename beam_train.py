@@ -1,10 +1,15 @@
 """beam.cloud GPU training deployment for Electra/AYAKA.
 
 Run from the repo root — beam syncs the workspace (see .beamignore)
-into the remote container and executes the decorated function on GPU:
+into the remote container and executes the decorated function on GPU.
+Invoke by calling the wrapper remotely under the beam SDK env:
 
-    beam run deploy/beam_train.py:train     # real fine-tune run
-    beam run deploy/beam_train.py:smoke     # tiny env-validation run
+    python -c "import beam_train; beam_train.smoke.remote()"  # env check
+    python -c "import beam_train; beam_train.train.remote()"  # real run
+
+The file must live at the repo root: the SDK derives the remote
+handler name from the module's relative path, so a nested file
+produces an unimportable handler on Windows.
 
 Runtime configuration comes from env vars (pass via --env KEY=VAL or
 the function's env mapping below):

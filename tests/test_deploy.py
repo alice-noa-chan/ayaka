@@ -327,7 +327,7 @@ def test_train_bpe_roundtrip(tmp_path):
 def test_beam_app_importable():
     if importlib.util.find_spec("beam") is None:
         pytest.skip("beam sdk not installed in this env (beam CLI env only)")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     try:
         import beam_train  # noqa: F401
     finally:

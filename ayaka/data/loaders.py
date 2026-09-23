@@ -374,7 +374,26 @@ def load_pools(
     pools: dict[tuple[str, str], list[Sample]] = {}
     manifests: list[DatasetManifest] = []
     for name in spec_names:
-        samples, manifest = load_spec_samples(name, limit_per_spec, dedup)
+        try:
+            samples, manifest = load_spec_samples(name, limit_per_spec, dedup)
+        except Exception as e:  # a broken spec must not kill the run
+            print(f"[loaders] spec {name!r} failed, skipping: {e}")
+            manifests.append(
+                DatasetManifest(
+                    dataset_id=name,
+                    source_url="",
+                    revision="",
+                    config="",
+                    split="",
+                    license=DATASET_SPECS.get(name, {}).get("license", ""),
+                    language=DATASET_SPECS.get(name, {}).get("lang", ""),
+                    task_family=DATASET_SPECS.get(name, {}).get("family", ""),
+                    primitive_mapping=DATASET_SPECS.get(name, {}).get("transform", ""),
+                    original_label_schema="",
+                    notes=f"LOAD FAILED: {e}",
+                )
+            )
+            continue
         pools.setdefault((manifest.task_family, manifest.language), []).extend(samples)
         manifests.append(manifest)
     return pools, manifests

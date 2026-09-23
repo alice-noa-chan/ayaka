@@ -30,6 +30,3 @@ tests/
 artifacts/
 *.pt
 *.ckpt
-data/
-*.jsonl
-!dataset_manifest.jsonl

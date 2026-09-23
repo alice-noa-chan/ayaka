@@ -150,6 +150,8 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     if verbose:
         total = sum(len(v) for v in pools.values())
         print(f"[run] pools: {total} samples across {len(pools)} cells", flush=True)
+    if not any(pools.values()):
+        raise RuntimeError("no training samples: every dataset spec failed to load")
 
     sampler = MixtureSampler(temperature=cfg.temperature, seed=cfg.seed)
     model = ElectraDecisionModel(mcfg)
