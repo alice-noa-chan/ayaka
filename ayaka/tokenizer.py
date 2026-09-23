@@ -83,3 +83,38 @@ class HFTokenizer:
 
     def decode(self, ids: list[int]) -> str:
         return self._tok.decode(ids)
+
+
+def train_bpe(
+    texts,
+    vocab_size: int = 64_000,
+    save_path: str | None = None,
+) -> HFTokenizer:
+    """Train a byte-level multilingual BPE (addendum A7).
+
+    ``tokenizers`` is an optional dependency (remote image). Special
+    tokens are reserved *inside* the vocab budget so the resulting
+    vocab_size never exceeds ``vocab_size``.
+    """
+    from tokenizers import Tokenizer as _Tk
+    from tokenizers import decoders, models, pre_tokenizers, trainers
+
+    tok = _Tk(models.BPE(unk_token="<unk>"))
+    tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tok.decoder = decoders.ByteLevel()
+    trainer = trainers.BpeTrainer(
+        vocab_size=vocab_size,
+        special_tokens=list(SPECIAL_TOKEN_IDS),
+        show_progress=False,
+    )
+    tok.train_from_iterator(iter(texts), trainer=trainer)
+    if save_path:
+        tok.save(save_path)
+    return HFTokenizer(tok)
+
+
+def load_bpe(path: str) -> HFTokenizer:
+    """Load a tokenizers JSON saved by train_bpe."""
+    from tokenizers import Tokenizer as _Tk
+
+    return HFTokenizer(_Tk.from_file(path))

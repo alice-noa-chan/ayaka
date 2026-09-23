@@ -1,0 +1,380 @@
+"""Dataset loading: HF datasets -> canonical Samples (sec 29/42/49).
+
+``datasets`` is an optional dependency — it is imported lazily inside
+the loaders so tests and CPU-only installs never require it. Specs
+pin the exact HF path/config/split plus transform kwargs; a manifest
+record is emitted per loaded spec (sec 37).
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+
+from .dedup import dedup_samples
+from .manifest import DatasetManifest
+from .schema import Sample
+from .transforms import TRANSFORMS
+
+# --------------------------------------------------------- spec registry
+#
+# Each spec: hf = (path, config, split) | jsonl = path
+#            transform -> TRANSFORMS key + kwargs
+#            family -> task family quota bucket (sec 41)
+#            lang, license, label_schema for the manifest
+#
+# Feature-resolution kwargs handled by _apply before dispatch:
+#   ontology_from_features: ClassLabel names -> intent ontology
+#   label_names_from_features: Sequence(ClassLabel) -> multilabel names
+#   labels_from_features: ClassLabel names -> nli `labels` tuple
+#   label_list_to_dict: list[int] labels -> {id: 0/1} for multilabel
+#   score_from_labels: klue sts labels dict -> real-label score
+
+DATASET_SPECS: dict[str, dict] = {
+    "snli": {
+        "hf": ("stanfordnlp/snli", None, "train"),
+        "transform": "nli",
+        "kwargs": {"labels_from_features": "label"},
+        "family": "nli",
+        "lang": "en",
+        "license": "CC BY-SA 3.0",
+        "label_schema": "entailment/neutral/contradiction",
+        "source_family": "snli_mnli",
+    },
+    "multi_nli": {
+        "hf": ("nyu-mll/multi_nli", None, "train"),
+        "transform": "nli",
+        "kwargs": {"labels_from_features": "label"},
+        "family": "nli",
+        "lang": "en",
+        "license": "see dataset card",
+        "label_schema": "entailment/neutral/contradiction",
+        "source_family": "snli_mnli",
+    },
+    "anli_r1": {
+        "hf": ("facebook/anli", None, "train_r1"),
+        "transform": "nli",
+        "kwargs": {"labels_from_features": "label"},
+        "family": "nli",
+        "lang": "en",
+        "license": "non-commercial (review before commercial use)",
+        "label_schema": "entailment/neutral/contradiction",
+        "source_family": "anli",
+    },
+    "boolq": {
+        "hf": ("google/boolq", None, "train"),
+        "transform": "boolq",
+        "kwargs": {},
+        "family": "noul",
+        "lang": "en",
+        "license": "CC BY-SA 3.0",
+        "label_schema": "bool",
+    },
+    "banking77": {
+        "hf": ("PolyAI/banking77", None, "train"),
+        "transform": "intent",
+        "kwargs": {
+            "text_key": "text",
+            "label_key": "label",
+            "ontology_from_features": "label",
+        },
+        "family": "choice",
+        "lang": "en",
+        "license": "CC BY 4.0",
+        "label_schema": "77 intent classes",
+    },
+    "clinc_oos": {
+        "hf": ("clinc_oos", "plus", "train"),
+        "transform": "intent",
+        "kwargs": {
+            "text_key": "text",
+            "label_key": "intent",
+            "ontology_from_features": "intent",
+            "oos_label": "oos",
+        },
+        "family": "hard_adversarial",
+        "lang": "en",
+        "license": "CC BY 3.0",
+        "label_schema": "150 intents + oos",
+    },
+    "super_glue_multirc": {
+        "hf": ("aps/super_glue", "multirc", "train"),
+        "transform": "multirc_grouped",
+        "kwargs": {},
+        "family": "noul",
+        "lang": "en",
+        "license": "see super_glue card",
+        "label_schema": "per-answer bool",
+    },
+    "klue_nli": {
+        "hf": ("klue/klue", "nli", "train"),
+        "transform": "nli",
+        "kwargs": {"labels_from_features": "label"},
+        "family": "nli",
+        "lang": "ko",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "entailment/neutral/contradiction",
+        "source_family": "klue_nli",
+    },
+    "klue_sts": {
+        "hf": ("klue/klue", "sts", "train"),
+        "transform": "sts",
+        "kwargs": {
+            "sent1_key": "sentence1",
+            "sent2_key": "sentence2",
+            "score_key": "labels",
+            "score_from_labels": "real-score",
+            "n_levels": 6,
+        },
+        "family": "score",
+        "lang": "ko",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "0..5 real",
+    },
+    "klue_ynat": {
+        "hf": ("klue/klue", "ynat", "train"),
+        "transform": "intent",
+        "kwargs": {
+            "text_key": "title",
+            "label_key": "label",
+            "ontology_from_features": "label",
+            "instruction": "Which topic does this news headline belong to?",
+        },
+        "family": "choice",
+        "lang": "ko",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "7 topics",
+    },
+    "kor_nli_multi": {
+        "hf": ("kakaobrain/kor_nli", "multi_nli", "train"),
+        "transform": "nli",
+        "kwargs": {"labels_from_features": "label"},
+        "family": "nli",
+        "lang": "ko",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "entailment/neutral/contradiction",
+        "source_family": "kornli",
+    },
+    "massive_ja": {
+        "hf": ("AmazonScience/massive", "ja-JP", "train"),
+        "transform": "intent",
+        "kwargs": {
+            "text_key": "utt",
+            "label_key": "intent",
+            "ontology_from_features": "intent",
+        },
+        "family": "choice",
+        "lang": "ja",
+        "license": "CC BY 4.0",
+        "label_schema": "60 intents",
+    },
+    "massive_ko": {
+        "hf": ("AmazonScience/massive", "ko-KR", "train"),
+        "transform": "intent",
+        "kwargs": {
+            "text_key": "utt",
+            "label_key": "intent",
+            "ontology_from_features": "intent",
+        },
+        "family": "choice",
+        "lang": "ko",
+        "license": "CC BY 4.0",
+        "label_schema": "60 intents",
+    },
+    "jglue_jnli": {
+        "hf": ("shunk031/JGLUE", "JNLI", "train"),
+        "transform": "nli",
+        "kwargs": {
+            "premise_key": "sentence1",
+            "hypothesis_key": "sentence2",
+            "labels_from_features": "label",
+        },
+        "family": "nli",
+        "lang": "ja",
+        "license": "see JGLUE repo (pin revision)",
+        "label_schema": "entailment/neutral/contradiction",
+        "source_family": "jnli",
+    },
+    "jglue_jsts": {
+        "hf": ("shunk031/JGLUE", "JSTS", "train"),
+        "transform": "sts",
+        "kwargs": {
+            "sent1_key": "sentence1",
+            "sent2_key": "sentence2",
+            "score_key": "label",
+            "n_levels": 6,
+        },
+        "family": "score",
+        "lang": "ja",
+        "license": "see JGLUE repo (pin revision)",
+        "label_schema": "0..5 real",
+    },
+    "jglue_commonsense": {
+        "hf": ("shunk031/JGLUE", "JCommonsenseQA", "train"),
+        "transform": "mc",
+        "kwargs": {
+            "context_key": "question",
+            "options_key": "choices",
+            "label_key": "label",
+            "instruction": "Choose the most appropriate answer.",
+        },
+        "family": "choice",
+        "lang": "ja",
+        "license": "see JGLUE repo (pin revision)",
+        "label_schema": "5 options",
+    },
+    "go_emotions": {
+        "hf": ("google-research-datasets/go_emotions", "simplified", "train"),
+        "transform": "multilabel",
+        "kwargs": {
+            "text_key": "text",
+            "labels_key": "labels",
+            "label_names_from_features": "labels",
+            "label_list_to_dict": True,
+            "instruction_template": "Does this text express {label}?",
+        },
+        "family": "human_soft_label",
+        "lang": "en",
+        "license": "Apache 2.0",
+        "label_schema": "27+1 emotions multi-label",
+    },
+    "amazon_reviews": {
+        "hf": ("mteb/amazon_reviews_multi", "en", "train"),
+        "transform": "ordinal",
+        "kwargs": {
+            "text_key": "text",
+            "label_key": "label",
+            "n_levels": 5,
+            "instruction": "What star rating does this review give?",
+        },
+        "family": "score",
+        "lang": "en",
+        "license": "Apache 2.0",
+        "label_schema": "0..4 stars",
+    },
+}
+
+
+def _humanize(label: str) -> str:
+    return label.replace("_", " ")
+
+
+def _apply(transform: str, kwargs: dict, row: dict, ds, metadata: dict) -> list[Sample]:
+    kw = dict(kwargs)
+    if "labels_from_features" in kw:
+        kw["labels"] = tuple(ds.features[kw.pop("labels_from_features")].names)
+    if "ontology_from_features" in kw:
+        feat = kw.pop("ontology_from_features")
+        names = ds.features[feat].names
+        kw["ontology"] = {str(i): _humanize(n) for i, n in enumerate(names)}
+        if kw.get("oos_label") in names:
+            kw["oos_label"] = str(names.index(kw["oos_label"]))
+    if "label_names_from_features" in kw:
+        feat = kw.pop("label_names_from_features")
+        names = ds.features[feat].feature.names
+        kw["label_names"] = {str(i): _humanize(n) for i, n in enumerate(names)}
+        if kw.pop("label_list_to_dict", False):
+            row = dict(row)
+            active = set(row[kw["labels_key"]])
+            row[kw["labels_key"]] = {str(i): int(i in active) for i in range(len(names))}
+    else:
+        kw.pop("label_list_to_dict", None)
+    if kw.pop("score_from_labels", None) == "real-score":
+        # klue sts rows carry labels dict {'label': x, 'real-label': y}
+        row = dict(row)
+        row[kw["score_key"]] = row[kw["score_key"]].get("real-label", 0.0)
+    return TRANSFORMS[transform](row, metadata=metadata, **kw)
+
+
+def _group_multirc(rows: Iterable[dict]) -> Iterable[dict]:
+    """Group super_glue multirc rows into per-(paragraph,question)
+    rows with answers lists for multirc_nouls."""
+    groups: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["idx"]["paragraph"], r["idx"]["question"])
+        g = groups.setdefault(
+            key, {"paragraph": r["paragraph"], "question": r["question"], "answers": []}
+        )
+        g["answers"].append((r["answer"], bool(r["label"])))
+    return groups.values()
+
+
+def load_spec_samples(
+    spec_name: str,
+    limit: int | None = None,
+    dedup: bool = True,
+) -> tuple[list[Sample], DatasetManifest]:
+    """Load one spec into canonical Samples + its manifest record."""
+    spec = DATASET_SPECS[spec_name]
+    metadata = {
+        "language": spec["lang"],
+        "source": spec_name,
+        "task_family": spec["family"],
+        "evidence_state": "intact",
+    }
+    if "jsonl" in spec:
+        ds = None
+        with open(spec["jsonl"], encoding="utf-8") as f:
+            rows = [json.loads(line) for line in f]
+        source = spec["jsonl"]
+        revision = spec.get("revision", "local")
+        config, split = "", ""
+    else:
+        from datasets import load_dataset  # optional dep (remote image)
+
+        path, config, split = spec["hf"]
+        ds = load_dataset(path, config, split=split)
+        rows = ds.select(range(min(limit or len(ds), len(ds))))
+        source = f"hf://{path}/{config}/{split}"
+        info = getattr(ds, "info", None)
+        revision = str(getattr(info, "version", "") or "")
+    samples = _rows_to_samples(spec, rows, ds, metadata, limit)
+    if dedup:
+        samples = dedup_samples(samples)
+    manifest = DatasetManifest(
+        dataset_id=spec_name,
+        source_url=source,
+        revision=revision,
+        config=config or "",
+        split=split or "",
+        license=spec["license"],
+        language=spec["lang"],
+        task_family=spec["family"],
+        primitive_mapping=spec["transform"],
+        original_label_schema=spec["label_schema"],
+        notes=spec.get("notes", ""),
+    )
+    return samples, manifest
+
+
+def _rows_to_samples(spec, rows, ds, metadata, limit) -> list[Sample]:
+    transform = spec["transform"]
+    kwargs = dict(spec["kwargs"])
+    if transform == "multirc_grouped":
+        transform = "multirc"
+        rows = _group_multirc(rows)
+    out: list[Sample] = []
+    for i, row in enumerate(rows):
+        if limit is not None and len(out) >= limit:
+            break
+        md = dict(metadata)
+        idx = row.get("idx", row.get("id", i))
+        md["source_example_id"] = str(idx)
+        md["source_family"] = spec.get("source_family", "")
+        out.extend(_apply(transform, kwargs, dict(row), ds, md))
+    return out
+
+
+def load_pools(
+    spec_names: list[str],
+    limit_per_spec: int | None = None,
+    dedup: bool = True,
+) -> tuple[dict[tuple[str, str], list[Sample]], list[DatasetManifest]]:
+    """Load specs into (family, language) pools for the MixtureSampler."""
+    pools: dict[tuple[str, str], list[Sample]] = {}
+    manifests: list[DatasetManifest] = []
+    for name in spec_names:
+        samples, manifest = load_spec_samples(name, limit_per_spec, dedup)
+        pools.setdefault((manifest.task_family, manifest.language), []).extend(samples)
+        manifests.append(manifest)
+    return pools, manifests
