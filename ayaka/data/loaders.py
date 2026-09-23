@@ -23,12 +23,17 @@ from .transforms import TRANSFORMS
 #            family -> task family quota bucket (sec 41)
 #            lang, license, label_schema for the manifest
 #
-# Feature-resolution kwargs handled by _apply before dispatch:
+# Feature-resolution kwargs handled by _apply/_rows_to_samples:
 #   ontology_from_features: ClassLabel names -> intent ontology
+#   ontology_from_column:  (label,label_text) row pairs -> ontology
+#   options_from_columns:  choice0..N columns -> options list
 #   label_names_from_features: Sequence(ClassLabel) -> multilabel names
 #   labels_from_features: ClassLabel names -> nli `labels` tuple
 #   label_list_to_dict: list[int] labels -> {id: 0/1} for multilabel
 #   score_from_labels: klue sts labels dict -> real-label score
+# Specs with parquet=True load script-era datasets through HF's
+# auto-converted parquet branch via a data_files glob (datasets 5.x
+# removed loading-script support).
 
 DATASET_SPECS: dict[str, dict] = {
     "snli": {
@@ -71,13 +76,13 @@ DATASET_SPECS: dict[str, dict] = {
         "label_schema": "bool",
     },
     "banking77": {
-        "hf": ("mteb/banking77", None, "train"),
-        "revision": "refs/convert/parquet",
+        "hf": ("mteb/banking77", "default", "train"),
+        "parquet": True,
         "transform": "intent",
         "kwargs": {
             "text_key": "text",
             "label_key": "label",
-            "ontology_from_features": "label",
+            "ontology_from_column": "label_text",
         },
         "family": "choice",
         "lang": "en",
@@ -86,7 +91,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "clinc_oos": {
         "hf": ("clinc/clinc_oos", "plus", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "intent",
         "kwargs": {
             "text_key": "text",
@@ -159,7 +164,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "massive_ja": {
         "hf": ("AmazonScience/massive", "ja-JP", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "intent",
         "kwargs": {
             "text_key": "utt",
@@ -173,7 +178,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "massive_ko": {
         "hf": ("AmazonScience/massive", "ko-KR", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "intent",
         "kwargs": {
             "text_key": "utt",
@@ -187,7 +192,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "jglue_jnli": {
         "hf": ("shunk031/JGLUE", "JNLI", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "nli",
         "kwargs": {
             "premise_key": "sentence1",
@@ -202,7 +207,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "jglue_jsts": {
         "hf": ("shunk031/JGLUE", "JSTS", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "sts",
         "kwargs": {
             "sent1_key": "sentence1",
@@ -217,11 +222,12 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "jglue_commonsense": {
         "hf": ("shunk031/JGLUE", "JCommonsenseQA", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "mc",
         "kwargs": {
             "context_key": "question",
             "options_key": "choices",
+            "options_from_columns": ["choice0", "choice1", "choice2", "choice3", "choice4"],
             "label_key": "label",
             "instruction": "Choose the most appropriate answer.",
         },
@@ -247,7 +253,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "amazon_reviews": {
         "hf": ("mteb/amazon_reviews_multi", "en", "train"),
-        "revision": "refs/convert/parquet",
+        "parquet": True,
         "transform": "ordinal",
         "kwargs": {
             "text_key": "text",
@@ -269,6 +275,10 @@ def _humanize(label: str) -> str:
 
 def _apply(transform: str, kwargs: dict, row: dict, ds, metadata: dict) -> list[Sample]:
     kw = dict(kwargs)
+    if "options_from_columns" in kw:
+        cols = kw.pop("options_from_columns")
+        row = dict(row)
+        row[kw["options_key"]] = [row[c] for c in cols]
     if "labels_from_features" in kw:
         kw["labels"] = tuple(ds.features[kw.pop("labels_from_features")].names)
     if "ontology_from_features" in kw:
@@ -331,13 +341,23 @@ def load_spec_samples(
         from datasets import load_dataset  # optional dep (remote image)
 
         path, config, split = spec["hf"]
-        # datasets 5.x dropped loading scripts; script-era datasets load
-        # via HF's auto-converted parquet branch (refs/convert/parquet)
-        revision = spec.get("revision")
-        ds = load_dataset(path, config, split=split, revision=revision)
+        if spec.get("parquet"):
+            # datasets 5.x dropped loading scripts; script-era datasets
+            # load via the auto-converted parquet branch. The branch has
+            # one 'default' BuilderConfig — per-config data is selected
+            # through a data_files glob instead.
+            cfg_dir = config or "default"
+            url = f"hf://datasets/{path}@refs/convert/parquet/{cfg_dir}/{split}/*.parquet"
+            ds = load_dataset("parquet", data_files=url, split="train")
+        else:
+            ds = load_dataset(path, config, split=split)
         rows = ds.select(range(min(limit or len(ds), len(ds))))
         source = f"hf://{path}/{config}/{split}"
-        revision = revision or str(getattr(getattr(ds, "info", None), "version", "") or "")
+        revision = (
+            "refs/convert/parquet"
+            if spec.get("parquet")
+            else str(getattr(getattr(ds, "info", None), "version", "") or "")
+        )
     samples = _rows_to_samples(spec, rows, ds, metadata, limit)
     if dedup:
         samples = dedup_samples(samples)
@@ -363,6 +383,13 @@ def _rows_to_samples(spec, rows, ds, metadata, limit) -> list[Sample]:
     if transform == "multirc_grouped":
         transform = "multirc"
         rows = _group_multirc(rows)
+    if "ontology_from_column" in kwargs:
+        # build {label_id: humanized description} from row pairs
+        col = kwargs.pop("ontology_from_column")
+        label_key = kwargs.get("label_key", "label")
+        kwargs["ontology"] = {
+            str(r[label_key]): _humanize(str(r[col])) for r in rows if r.get(col) is not None
+        }
     out: list[Sample] = []
     for i, row in enumerate(rows):
         if limit is not None and len(out) >= limit:
