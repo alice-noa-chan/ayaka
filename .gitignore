@@ -1,0 +1,38 @@
+# Design docs / scratch — not part of the codebase
+.dev/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Training artifacts
+checkpoints/
+runs/
+wandb/
+*.ckpt
+*.pt
+*.safetensors
+data/raw/
+data/cache/
+
+# OS
+.DS_Store
+Thumbs.db
+nul

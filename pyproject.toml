@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ayaka"
+version = "0.1.0"
+description = "Electra: a non-autoregressive decision foundation model (shared evidence encoder + isolated decision branches + permutation-equivariant candidate set reasoning + pointer distribution head)"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+]
+
+[project.optional-dependencies]
+tokenizer = ["tokenizers>=0.19"]
+data = ["datasets>=2.18"]
+beam = ["beam-client>=0.2.200"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "tokenizers>=0.19",
+]
+
+[tool.setuptools.packages.find]
+include = ["ayaka*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # line length handled by formatter
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ayaka"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
