@@ -71,7 +71,8 @@ DATASET_SPECS: dict[str, dict] = {
         "label_schema": "bool",
     },
     "banking77": {
-        "hf": ("PolyAI/banking77", None, "train"),
+        "hf": ("mteb/banking77", None, "train"),
+        "revision": "refs/convert/parquet",
         "transform": "intent",
         "kwargs": {
             "text_key": "text",
@@ -84,7 +85,8 @@ DATASET_SPECS: dict[str, dict] = {
         "label_schema": "77 intent classes",
     },
     "clinc_oos": {
-        "hf": ("clinc_oos", "plus", "train"),
+        "hf": ("clinc/clinc_oos", "plus", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "intent",
         "kwargs": {
             "text_key": "text",
@@ -157,6 +159,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "massive_ja": {
         "hf": ("AmazonScience/massive", "ja-JP", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "intent",
         "kwargs": {
             "text_key": "utt",
@@ -170,6 +173,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "massive_ko": {
         "hf": ("AmazonScience/massive", "ko-KR", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "intent",
         "kwargs": {
             "text_key": "utt",
@@ -183,6 +187,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "jglue_jnli": {
         "hf": ("shunk031/JGLUE", "JNLI", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "nli",
         "kwargs": {
             "premise_key": "sentence1",
@@ -197,6 +202,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "jglue_jsts": {
         "hf": ("shunk031/JGLUE", "JSTS", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "sts",
         "kwargs": {
             "sent1_key": "sentence1",
@@ -211,6 +217,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "jglue_commonsense": {
         "hf": ("shunk031/JGLUE", "JCommonsenseQA", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "mc",
         "kwargs": {
             "context_key": "question",
@@ -240,6 +247,7 @@ DATASET_SPECS: dict[str, dict] = {
     },
     "amazon_reviews": {
         "hf": ("mteb/amazon_reviews_multi", "en", "train"),
+        "revision": "refs/convert/parquet",
         "transform": "ordinal",
         "kwargs": {
             "text_key": "text",
@@ -323,11 +331,13 @@ def load_spec_samples(
         from datasets import load_dataset  # optional dep (remote image)
 
         path, config, split = spec["hf"]
-        ds = load_dataset(path, config, split=split)
+        # datasets 5.x dropped loading scripts; script-era datasets load
+        # via HF's auto-converted parquet branch (refs/convert/parquet)
+        revision = spec.get("revision")
+        ds = load_dataset(path, config, split=split, revision=revision)
         rows = ds.select(range(min(limit or len(ds), len(ds))))
         source = f"hf://{path}/{config}/{split}"
-        info = getattr(ds, "info", None)
-        revision = str(getattr(info, "version", "") or "")
+        revision = revision or str(getattr(getattr(ds, "info", None), "version", "") or "")
     samples = _rows_to_samples(spec, rows, ds, metadata, limit)
     if dedup:
         samples = dedup_samples(samples)
