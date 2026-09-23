@@ -49,13 +49,14 @@ def test_evidence_cross_attention_shapes_and_isolation():
     cfg = tiny_config(cross_attn_blocks=2)
     eca = EvidenceCrossAttention(cfg).eval()
     m = cfg.candidate_latents
-    latents = torch.randn(3, m, cfg.hidden)  # 3 candidates
+    flat = torch.randn(3 * m, cfg.hidden)  # 3 candidates x Mc latents
+    item_cu = torch.tensor([0, m, 2 * m, 3 * m])
     memory = torch.randn(20, cfg.hidden)
-    mem_cu = torch.tensor([0, 8, 14, 20])  # per-candidate memory
-    out = eca(latents, memory, mem_cu)
-    assert out.shape == (3, m, cfg.hidden)
-    # candidate 0 unaffected by other segments' memory
+    mem_cu = torch.tensor([0, 8, 14, 20])  # per-item memory
+    out = eca(flat, item_cu, memory, mem_cu)
+    assert out.shape == (3 * m, cfg.hidden)
+    # item 0 unaffected by other segments' memory
     mem2 = memory.clone()
     mem2[8:] = 100.0
-    out2 = eca(latents, mem2, mem_cu)
-    assert torch.allclose(out[0], out2[0], atol=1e-5)
+    out2 = eca(flat, item_cu, mem2, mem_cu)
+    assert torch.allclose(out[:m], out2[:m], atol=1e-5)

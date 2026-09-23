@@ -43,8 +43,9 @@ def test_segment_mean():
 def test_gather_block_tokens():
     hs = torch.arange(20, dtype=torch.float32).reshape(10, 2)
     blk_cu = torch.tensor([0, 4, 7, 10])
-    sel = torch.tensor([[0, 2], [1, 2]])
-    toks, cu = gather_block_tokens(hs, blk_cu, sel)
+    flat_sel = torch.tensor([0, 2, 1, 2])  # item0: blocks 0,2; item1: 1,2
+    counts = torch.tensor([2, 2])
+    toks, cu = gather_block_tokens(hs, blk_cu, flat_sel, counts)
     assert cu.tolist() == [0, 7, 13]
     assert torch.equal(toks[:4], hs[0:4])
     assert torch.equal(toks[4:7], hs[7:10])

@@ -1,9 +1,10 @@
 """Candidate <-> state evidence cross-attention (docs.md section 12/22).
 
-Each candidate's latent set attends to its owning state's evidence
-memory — the full Hs for short states or the router-selected block
-tokens for long ones. Cross-attention blocks are stacked per
-config.cross_attn_blocks.
+Each query segment's latents attend to its matching memory segment —
+the full Hs for short states or the router-selected block tokens for
+long ones. Query segments are defined by the caller so the same code
+serves per-state grouping (shared-memory path, sec 21.2) and
+per-candidate grouping (routed path, sec 19).
 """
 
 from __future__ import annotations
@@ -28,10 +29,10 @@ class EvidenceBlock(nn.Module):
 
     def forward(
         self,
-        latents: torch.Tensor,  # [n_items*M, D]
+        latents: torch.Tensor,  # [T_lat, D]
         memory: torch.Tensor,  # [Tm, D]
-        item_cu: torch.Tensor,  # latent segment boundaries (every M)
-        mem_cu: torch.Tensor,  # memory segment boundaries per item
+        item_cu: torch.Tensor,  # query segment boundaries
+        mem_cu: torch.Tensor,  # memory segment boundaries
     ) -> torch.Tensor:
         latents = latents + self.drop(
             self.attn(self.ln_q(latents), self.ln_kv(memory), item_cu, mem_cu)
@@ -53,13 +54,11 @@ class EvidenceCrossAttention(nn.Module):
 
     def forward(
         self,
-        latents: torch.Tensor,  # [n_items, M, D]
+        flat_latents: torch.Tensor,  # [T_lat, D]
+        item_cu: torch.Tensor,  # [n_items + 1]
         memory: torch.Tensor,  # [Tm, D]
         mem_cu: torch.Tensor,  # [n_items + 1]
     ) -> torch.Tensor:
-        n_items, m, d = latents.shape
-        flat = latents.reshape(n_items * m, d)
-        item_cu = torch.arange(0, n_items * m + 1, m, dtype=mem_cu.dtype, device=latents.device)
         for block in self.blocks:
-            flat = block(flat, memory, item_cu, mem_cu)
-        return self.ln_out(flat).view(n_items, m, d)
+            flat_latents = block(flat_latents, memory, item_cu, mem_cu)
+        return self.ln_out(flat_latents)

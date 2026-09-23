@@ -86,24 +86,51 @@ def segment_mean(x: torch.Tensor, cu_seqlens: torch.Tensor) -> torch.Tensor:
     return summed / lens.clamp(min=1).unsqueeze(-1)
 
 
+def gather_segments(
+    x: torch.Tensor, cu_seqlens: torch.Tensor, segment_ids: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gather whole segments by id (vectorized).
+
+    Returns (tokens [T_sel, D], cu [len(segment_ids)+1]) in the order
+    the ids were given.
+    """
+    src_start = cu_seqlens[:-1][segment_ids]
+    sel_lens = cu_seqlens[1:][segment_ids] - src_start
+    cu = torch.zeros(segment_ids.numel() + 1, dtype=cu_seqlens.dtype, device=x.device)
+    cu[1:] = torch.cumsum(sel_lens, 0)
+    cum = torch.cumsum(sel_lens, 0)
+    dst_off = cum - sel_lens
+    total = int(cum[-1].item())
+    tok = torch.arange(total, device=x.device)
+    seg_of_tok = torch.searchsorted(cum, tok, right=True)
+    src_idx = src_start[seg_of_tok] + tok - dst_off[seg_of_tok]
+    return x[src_idx], cu
+
+
 def gather_block_tokens(
     hs: torch.Tensor,
     blk_cu: torch.Tensor,
-    selected_blocks: torch.Tensor,
+    flat_sel: torch.Tensor,
+    counts: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Gather token memory for selected blocks (vectorized).
 
-    selected_blocks: [n_q, k] block indices (per query). Returns
-    (tokens [n_sel_tokens, D], cu [n_q + 1]) — ragged, padding-free.
+    flat_sel: block ids grouped by item (e.g. from flatten_selection);
+    counts:   [n_items] how many ids each item contributes.
+    Returns (tokens [T_sel, D], cu [n_items + 1]) — ragged.
     """
-    n_q, k = selected_blocks.shape
-    sel = selected_blocks.reshape(-1)
-    src_start = blk_cu[:-1][sel]
-    sel_lens = blk_cu[1:][sel] - src_start  # [n_q*k]
-
-    per_q_lens = sel_lens.reshape(n_q, k).sum(dim=1)
-    cu = torch.zeros(n_q + 1, dtype=blk_cu.dtype, device=hs.device)
-    cu[1:] = torch.cumsum(per_q_lens, 0)
+    src_start = blk_cu[:-1][flat_sel]
+    sel_lens = blk_cu[1:][flat_sel] - src_start
+    n_items = counts.numel()
+    cu = torch.zeros(n_items + 1, dtype=blk_cu.dtype, device=hs.device)
+    cu[1:] = torch.cumsum(
+        torch.zeros(n_items, dtype=sel_lens.dtype, device=hs.device).index_add_(
+            0,
+            torch.repeat_interleave(torch.arange(n_items, device=hs.device), counts),
+            sel_lens,
+        ),
+        0,
+    )
 
     cum = torch.cumsum(sel_lens, 0)
     dst_off = cum - sel_lens
