@@ -337,7 +337,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     )
 
     sampler = MixtureSampler(temperature=cfg.temperature, seed=cfg.seed)
-    model = ElectraDecisionModel(mcfg)
+    model = ElectraDecisionModel(mcfg).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     if verbose:
         print(
