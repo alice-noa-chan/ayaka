@@ -23,6 +23,7 @@ import torch.nn as nn
 
 from ..backbone import embedding_rows, label_logits, load_text_backbone
 from ..config import ElectraConfig
+from .attention import enable_windowed_attention
 from .fastpath import forward_kept, kv_shared_start, prefix_cache
 from .heads import PointerHead
 from .ragged import ragged_log_softmax
@@ -74,9 +75,14 @@ class DecisionOutput:
         return ragged_log_softmax(self.pointer_logits, self.cand_cu)
 
 
+def at_least_fp32(t: torch.Tensor) -> torch.Tensor:
+    """bf16/fp16 -> fp32 for the head; fp32/fp64 pass through unchanged."""
+    return t.to(torch.promote_types(t.dtype, torch.float32))
+
+
 def span_means(hidden: torch.Tensor, rows: torch.Tensor, spans: torch.Tensor) -> torch.Tensor:
     """Mean hidden state over [start, end) per candidate (fp32)."""
-    cs = torch.nn.functional.pad(hidden.float().cumsum(1), (0, 0, 1, 0))  # [B, L+1, D]
+    cs = torch.nn.functional.pad(at_least_fp32(hidden).cumsum(1), (0, 0, 1, 0))  # [B, L+1, D]
     s, e = spans[:, 0], spans[:, 1]
     total = cs[rows, e] - cs[rows, s]
     return total / (e - s).clamp(min=1).unsqueeze(-1).to(total.dtype)
@@ -89,6 +95,8 @@ class ElectraDecisionModel(nn.Module):
         self.backbone = backbone
         self.text_config = text_config
         self.softcap = getattr(text_config, "final_logit_softcapping", None)
+        for c in {id(text_config): text_config, id(backbone.config): backbone.config}.values():
+            enable_windowed_attention(c)  # exact; skips masked-out key blocks
         self.head = PointerHead(
             text_config.hidden_size, cfg.pointer_dim, cfg.set_mixer_layers, cfg.set_mixer_heads
         )
@@ -174,14 +182,14 @@ class ElectraDecisionModel(nn.Module):
         span_hidden: torch.Tensor | None = None,
     ) -> DecisionOutput:
         n_q = batch.answer_pos.numel()
-        q = hidden[torch.arange(n_q, device=hidden.device), batch.answer_pos].float()
+        q = at_least_fp32(hidden[torch.arange(n_q, device=hidden.device), batch.answer_pos])
         spans_h = hidden if span_hidden is None else span_hidden
         r = span_means(spans_h, batch.cand_question, batch.cand_spans)
         cq = batch.cand_question
         has_label_c = batch.has_label[cq]
         lab = label_logits(q[cq], self.label_rows(batch.label_ids), self.softcap)
         lab = torch.where(has_label_c, lab, torch.zeros_like(lab))
-        ptr = self.head(r, q, batch.cand_cu, cq).float()
+        ptr = at_least_fp32(self.head(r, q, batch.cand_cu, cq))
         prim_c = batch.primitive[cq]
         logits = torch.where(has_label_c, lab + self.gate[prim_c] * ptr, ptr)
         if apply_temperature:

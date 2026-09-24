@@ -88,4 +88,5 @@ def label_logits(hidden: torch.Tensor, rows: torch.Tensor, cap: float | None) ->
     """hidden: [n, D] answer-position states (one per candidate row);
     rows: [n, D] tied LM-head rows of each candidate's readout token.
     Returns [n] fp32 logits."""
-    return softcap((hidden.float() * rows.float()).sum(-1), cap)
+    dt = torch.promote_types(hidden.dtype, torch.float32)
+    return softcap((hidden.to(dt) * rows.to(dt)).sum(-1), cap)

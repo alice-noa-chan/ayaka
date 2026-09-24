@@ -212,3 +212,43 @@ def test_head_cache_reuse_is_exact(model):
         b = d.decide(state, qs)
         for ra, rb in zip(a, b, strict=True):
             assert ra.probs == pytest.approx(rb.probs, abs=1e-5)
+
+
+@pytest.mark.parametrize("block", [4, 7, 16])
+def test_windowed_attention_is_exact(block, monkeypatch):
+    """Block-wise sliding attention equals full masked SDPA (tiny window 16),
+    on training rows, the prefix-cache path and gradients."""
+    from ayaka.model import attention
+
+    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float64)
+    m.head.double()
+    m.gate.data = m.gate.data.double()
+    cfg = m.text_model().config
+    assert cfg._attn_implementation == attention.NAME
+    long_state = {"log": [f"line {i}: the parcel moved through hub {i % 7}" for i in range(12)]}
+    views = [
+        QuestionView("choice", "Where is the parcel?", ["hub 3", "hub 5", "delivered"]),
+        QuestionView("noul", "Did it move?", ["no", "yes"]),
+    ]
+    _, items = encode_decision(long_state, views, TOK, max_seq_len=1024)
+    batch = full_rows(items, TOK.pad_id)
+    assert batch.input_ids.shape[1] > 16 + block  # windowing actually engages
+
+    def run():
+        m.zero_grad()
+        out = m(batch)
+        out.logits.logsumexp(0).backward()
+        grad = m.text_model().layers[0].self_attn.q_proj.weight.grad.clone()
+        probs = Decision(m, TOK, max_seq_len=1024).decide(
+            long_state, [QuestionSpec(v.type, v.instruction, v.descriptions) for v in views]
+        )
+        return out.logits.detach(), grad, [p for r in probs for p in r.probs]
+
+    monkeypatch.setattr(attention, "QUERY_BLOCK", block)
+    win = run()
+    cfg._attn_implementation_internal = "sdpa"
+    ref = run()
+    # float64: any real difference would show; reordering noise is ~1e-15
+    assert torch.allclose(win[0], ref[0], atol=1e-10)
+    assert torch.allclose(win[1], ref[1], atol=1e-10)
+    assert win[2] == pytest.approx(ref[2], abs=1e-10)

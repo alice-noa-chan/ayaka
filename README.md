@@ -51,6 +51,13 @@ Guarantees, each covered by `tests/test_model.py`:
   cache. SDPA also takes its `is_causal` fast path (flash on GPU) whenever
   no mask is needed. Together on E2B CPU p50: easy 0.99 → 0.69 s, hard
   14.0 → 12.7 s. The result is exact: in fp32 the difference is ≤ 1e-5.
+- **Windowed sliding attention.** Gemma 4 sliding layers only see the last
+  512 keys, yet masked SDPA computes the full S×S. Queries now run in blocks
+  against the key range their mask allows. A guard falls back to the full
+  range whenever the mask would allow a key outside the block. Tests match to
+  1e-10 in float64, including gradients. On E2B CPU hard items it measured
+  1.18× in bf16 (13.8 → 11.8 s) and was neutral in fp32. Short inputs never
+  engage it.
 - **bf16 vs fp32.** On CPU, bf16 activations moved a few near-tie answers by
   up to 0.2 probability relative to fp32. `ayaka.serve --dtype float32`
   follows the reference probabilities more closely at about 1.3–1.5× CPU
