@@ -142,6 +142,40 @@ def mc_choice(
     return [Sample(state=row[context_key], questions=[q], metadata=dict(metadata or {}))]
 
 
+def reading_mc(
+    row: dict,
+    *,
+    article_key: str,
+    question_key: str,
+    options_key: str,
+    label_key: str,
+    max_chars: int | None = None,
+    metadata: dict | None = None,
+) -> list[Sample]:
+    """Long-document multiple choice (QuALITY): the article is the state,
+    the row's own question is the instruction. Articles longer than
+    ``max_chars`` are skipped rather than truncated — cutting the middle
+    could remove the evidence and silently corrupt the label."""
+    article = str(row[article_key])
+    if max_chars is not None and len(article) > max_chars:
+        return []
+    options = [str(o) for o in row[options_key]]
+    label = int(row[label_key])
+    if not 0 <= label < len(options) or len(set(options)) != len(options):
+        return []
+    cands = [Candidate(f"c{i}", opt) for i, opt in enumerate(options)]
+    q = Question(
+        id="q0",
+        type="choice",
+        instruction=str(row[question_key]),
+        candidates=cands,
+        target_distribution=one_hot(cands, f"c{label}"),
+    )
+    md = dict(metadata or {})
+    md["task_family"] = "long_context"
+    return [Sample(state=article, questions=[q], metadata=md)]
+
+
 # ------------------------------------------------------------------ Noul
 
 
@@ -322,6 +356,48 @@ def jev_direct(row: dict, *, metadata: dict | None = None) -> list[Sample]:
     return [Sample(state=row["state"], questions=questions, metadata=md)]
 
 
+def jev_distill(row: dict, *, metadata: dict | None = None) -> list[Sample]:
+    """SargeDev/jev-distill-corpus-v3 row -> Sample.
+
+    Row: {kind, options[], target[], state, question, domain, family,
+    source}. Targets are Jev 1.13 (or 32B-teacher) distributions aligned
+    with ``options``; noul options are ["false", "true"].
+    """
+    kind = row["kind"]
+    opts = [str(o) for o in row["options"]]
+    tgt = [max(float(x), 0.0) for x in row["target"]]
+    z = sum(tgt) or 1.0
+    tgt = [x / z for x in tgt]
+    if kind == "noul":
+        cands = [Candidate("false", "false"), Candidate("true", "true")]
+        dist = {"false": tgt[0], "true": tgt[1]}
+    elif kind == "score":
+        cands = [
+            Candidate(f"s{i}", o, ordinal=int(o) if o.lstrip("-").isdigit() else i)
+            for i, o in enumerate(opts)
+        ]
+        if len({c.ordinal for c in cands}) != len(cands):
+            cands = [Candidate(f"s{i}", o, ordinal=i) for i, o in enumerate(opts)]
+        dist = {c.id: t for c, t in zip(cands, tgt, strict=True)}
+    else:
+        cands = [Candidate(f"o{i}", o) for i, o in enumerate(opts)]
+        dist = {c.id: t for c, t in zip(cands, tgt, strict=True)}
+    q = Question(
+        id="q0", type=kind, instruction=row["question"], candidates=cands, target_distribution=dist
+    )
+    md = dict(metadata or {})
+    md.update(
+        {
+            "task_family": "direct_jev",
+            "domain": row.get("domain", ""),
+            "jev_family": row.get("family", ""),
+            "teacher_stream": row.get("source", ""),
+            "source_example_id": row.get("id", ""),
+        }
+    )
+    return [Sample(state=row["state"], questions=[q], metadata=md)]
+
+
 TRANSFORMS = {
     "nli": nli_choice,
     "chaos_nli": chaos_nli,
@@ -334,4 +410,6 @@ TRANSFORMS = {
     "sts": sts_score,
     "ordinal": ordinal_score,
     "jev": jev_direct,
+    "jev_distill": jev_distill,
+    "reading_mc": reading_mc,
 }

@@ -5,7 +5,6 @@ from ayaka.serialization import (
     serialize_typed,
     state_cache_key,
 )
-from ayaka.special_tokens import NUM_SPECIAL_TOKENS, SPECIAL_TOKEN_IDS, SPECIAL_TOKENS
 
 
 def test_typed_serialization_distinguishes_types():
@@ -68,9 +67,3 @@ def test_state_cache_key_versions():
     k3 = state_cache_key(state, model_version="m1", tokenizer_version="t1")
     assert k1 == k3 and k1 != k2
     assert len(k1) == 64
-
-
-def test_special_token_inventory_unique_and_ordered():
-    assert len(SPECIAL_TOKENS) == len(set(SPECIAL_TOKENS))
-    assert len(SPECIAL_TOKENS) == NUM_SPECIAL_TOKENS
-    assert SPECIAL_TOKEN_IDS["<pad>"] == 0

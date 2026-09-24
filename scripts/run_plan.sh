@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Staged Electra plan on one GPU box (A100-80GB or H100 recommended).
+#
+#   STAGES="smoke"                    bash scripts/run_plan.sh   # ~10 min sanity + step-time measurement
+#   STAGES="zeroshot small"           bash scripts/run_plan.sh   # small baseline + small LoRA run
+#   STAGES="large teacher distill export" bash scripts/run_plan.sh
+#
+# Knobs (env): SMALL_STEPS LARGE_STEPS BASE_STEPS TEACHER_N WITH_BASE=1 AUTO_STOP=1
+# AUTO_STOP=1 stops the RunPod pod / vast.ai instance at the end so an idle
+# GPU does not keep billing.
+set -euo pipefail
+
+export HF_HOME=${HF_HOME:-/workspace/hf-cache}
+export AYAKA_ARTIFACTS=${AYAKA_ARTIFACTS:-/workspace/runs}
+STAGES=${STAGES:-smoke}
+SMALL_STEPS=${SMALL_STEPS:-2000}
+BASE_STEPS=${BASE_STEPS:-2000}
+LARGE_STEPS=${LARGE_STEPS:-3000}
+TEACHER_N=${TEACHER_N:-120000}
+WITH_BASE=${WITH_BASE:-0}
+R=$AYAKA_ARTIFACTS
+P="python -m ayaka.pipeline"
+
+stop_instance() {
+  if [ "${AUTO_STOP:-0}" != 1 ]; then return; fi
+  if [ -n "${RUNPOD_POD_ID:-}" ] && command -v runpodctl >/dev/null; then
+    echo "[plan] stopping RunPod pod $RUNPOD_POD_ID"; runpodctl stop pod "$RUNPOD_POD_ID"
+  elif [ -n "${CONTAINER_ID:-}" ] && command -v vastai >/dev/null; then
+    echo "[plan] stopping vast.ai instance $CONTAINER_ID"; vastai stop instance "$CONTAINER_ID"
+  else
+    echo "[plan] AUTO_STOP=1 but no runpodctl/vastai context found: stop the instance manually!"
+  fi
+}
+trap stop_instance EXIT
+
+for stage in $STAGES; do
+  echo "================ stage: $stage ($(date -u +%H:%M:%S) UTC)"
+  case $stage in
+    smoke)
+      # real E2B, 20 LoRA steps on a small slice: verifies the GPU path and
+      # prints per-step time -> use it to refine the cost estimate
+      $P train --model electra-small --run smoke --set steps=20 --set log_every=1 \
+        --set 'specs=["jev_distill","boolq","quality"]' --set limit_per_spec=300 \
+        --set 'spec_limits={"jev_distill":2000}' --set eval_questions=64 --set eval_every=0 \
+        --set calibration_questions=200 --set fidelity_questions=200 ;;
+    zeroshot)
+      $P eval --model electra-small --zero-shot ;;
+    zeroshot-large)
+      $P eval --model electra-large --zero-shot ;;
+    small)
+      $P train --model electra-small --run small-v1 --set steps="$SMALL_STEPS" ;;
+    base)
+      $P train --model electra-base --run base-v1 --set steps="$BASE_STEPS" ;;
+    large)
+      $P train --model electra-large --run large-v1 --set steps="$LARGE_STEPS" ;;
+    teacher)
+      $P teacher --ckpt "$R/large-v1/checkpoint" --out "$R/large-v1/teacher.jsonl" --n-samples "$TEACHER_N" ;;
+    distill)
+      $P train --model electra-small --run small-distill --set steps="$SMALL_STEPS" \
+        --set teacher_labels="$R/large-v1/teacher.jsonl"
+      if [ "$WITH_BASE" = 1 ]; then
+        $P train --model electra-base --run base-distill --set steps="$BASE_STEPS" \
+          --set teacher_labels="$R/large-v1/teacher.jsonl"
+      fi ;;
+    export)
+      [ -d "$R/large-v1/checkpoint" ] && $P export --ckpt "$R/large-v1/checkpoint" --name electra-large
+      [ -d "$R/small-distill/checkpoint" ] && $P export --ckpt "$R/small-distill/checkpoint" --name electra-small
+      [ -d "$R/base-distill/checkpoint" ] && $P export --ckpt "$R/base-distill/checkpoint" --name electra-base
+      true ;;
+    *)
+      echo "unknown stage: $stage" >&2; exit 2 ;;
+  esac
+done
+echo "[plan] done. Reports: $R/*/report.json  $R/evals/  exports: $R/exports/"

@@ -3,41 +3,29 @@ from ayaka.config import (
     ELECTRA_LARGE,
     ELECTRA_SMALL,
     MODEL_FAMILY,
+    model_config,
     tiny_config,
 )
 
 
-def test_family_shapes_match_spec():
-    # docs.md section 39 table
-    assert ELECTRA_LARGE.hidden == 1536 and ELECTRA_LARGE.state_layers == 24
-    assert ELECTRA_BASE.hidden == 1024 and ELECTRA_BASE.state_layers == 18
-    assert ELECTRA_SMALL.hidden == 768 and ELECTRA_SMALL.state_layers == 12
-    for cfg in (ELECTRA_LARGE, ELECTRA_BASE, ELECTRA_SMALL):
-        assert cfg.head_dim == 64
-        assert cfg.max_state == 65_536
-        assert cfg.max_candidates == 255
-        assert cfg.vocab_size == 64_000
+def test_family_backbones_are_gemma4_instruct():
+    assert ELECTRA_SMALL.backbone == "google/gemma-4-E2B-it"
+    assert ELECTRA_BASE.backbone == "google/gemma-4-E4B-it"
+    assert ELECTRA_LARGE.backbone == "google/gemma-4-12B-it"
+    assert set(MODEL_FAMILY) == {"electra-small", "electra-base", "electra-large"}
 
 
-def test_param_estimates_in_documented_ballpark():
-    # spec targets: ~1.4B / ~500M / ~220M (order of magnitude check)
-    assert 1.0e9 < ELECTRA_LARGE.estimate_params() < 2.0e9
-    assert 3.5e8 < ELECTRA_BASE.estimate_params() < 7.5e8
-    assert 1.4e8 < ELECTRA_SMALL.estimate_params() < 3.2e8
+def test_capacity_grows_with_size_topology_fixed():
+    s, b, lg = ELECTRA_SMALL, ELECTRA_BASE, ELECTRA_LARGE
+    assert s.pointer_dim < b.pointer_dim < lg.pointer_dim
+    assert s.lora_r <= b.lora_r <= lg.lora_r
+    for c in (s, b, lg):
+        assert c.set_mixer_layers >= 2  # the Set Mixer is never dropped
+        assert c.pointer_dim % c.set_mixer_heads == 0
+        assert c.max_label_candidates == 26
 
 
-def test_topology_preserved_across_sizes():
-    # Small keeps Set Mixer / pointer head / router (docs.md section 28.1)
-    for cfg in (ELECTRA_LARGE, ELECTRA_BASE, ELECTRA_SMALL):
-        assert cfg.set_mixer_layers >= 1
-        assert cfg.cross_attn_blocks >= 1
-        assert cfg.pointer_dim > 0
-        assert cfg.block_topk >= 1
-        assert cfg.question_latents >= 1 and cfg.candidate_latents >= 1
-
-
-def test_family_registry_and_tiny():
-    assert set(MODEL_FAMILY) == {"electra-large", "electra-base", "electra-small"}
-    cfg = tiny_config()
-    assert cfg.head_dim == 16
-    assert cfg.max_blocks == cfg.max_state // cfg.block_size
+def test_model_config_lookup():
+    assert model_config("tiny").backbone == "tiny"
+    assert model_config("electra-base") is ELECTRA_BASE
+    assert tiny_config(pointer_dim=16).pointer_dim == 16

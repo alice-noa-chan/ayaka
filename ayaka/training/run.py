@@ -1,9 +1,13 @@
-"""End-to-end fine-tune run driver (sec 41/45/49).
+"""End-to-end decision training run.
 
-Pools -> MixtureSampler -> pack_by_token_budget -> build_train_batch
--> Trainer, with checkpoints, metrics history, and dataset manifests
-written under ``artifacts_dir``. Device-agnostic: the same function
-runs locally (smoke) and inside the beam GPU container.
+    pools (decontaminated) ─► LoRA Electra ─► train ─► checkpoint
+        ─► temperature calibration (jev-distill calibration split)
+        ─► evals: held-out mix, Jev fidelity (test_set_30k), JevBench public
+
+Distillation (Large -> Base/Small) is the same run with
+``teacher_labels`` pointing at a jsonl written by training.distill:
+those samples carry the teacher's distributions and are trained with
+KL-to-teacher instead of the gold NLL term.
 """
 
 from __future__ import annotations
@@ -16,18 +20,21 @@ from dataclasses import asdict, dataclass, field
 
 import torch
 
-from ..config import MODEL_FAMILY, ElectraConfig, tiny_config
-from ..data.loaders import load_pools
+from ..checkpoint import apply_lora, save_checkpoint
+from ..config import model_config
+from ..data.decontam import Decontaminator
+from ..data.loaders import load_pools, load_spec_samples
 from ..data.manifest import write_manifest
-from ..data.mixture import MixtureSampler
-from ..data.packing import pack_by_token_budget
-from ..data.schema import Sample
-from ..model.model import ElectraDecisionModel
-from ..tokenizer import HashTokenizer, load_bpe
-from .batch import build_train_batch
+from ..data.mixture import TASK_FAMILY_QUOTA, MixtureSampler
+from ..data.schema import Candidate, Question, Sample
+from ..model.electra import ElectraDecisionModel
+from ..tokenization import HFTokenizer, ToyTokenizer
+from .batching import TrainItem, sample_to_items
+from .calibrate import apply_temperatures, fit_temperatures
 from .trainer import TrainConfig, Trainer
 
 DEFAULT_SPECS = [
+    "jev_distill",
     "snli",
     "multi_nli",
     "anli_r1",
@@ -36,7 +43,6 @@ DEFAULT_SPECS = [
     "clinc_oos",
     "super_glue_multirc",
     "klue_nli",
-    "klue_sts",
     "klue_ynat",
     "kor_nli_multi",
     "massive_ja",
@@ -46,392 +52,329 @@ DEFAULT_SPECS = [
     "jglue_commonsense",
     "go_emotions",
     "amazon_reviews",
+    "quality",
+    "quality_dev",
 ]
 
-SMOKE_SPECS = ["snli", "boolq", "banking77"]
+SMOKE_SPECS = ["jev_distill", "boolq", "banking77"]
 
 
 @dataclass
 class RunConfig:
-    model_size: str = "electra-small"  # electra-small|base|large|tiny
+    model_size: str = "electra-small"
     specs: list[str] = field(default_factory=lambda: list(DEFAULT_SPECS))
     limit_per_spec: int | None = 20_000
-    steps: int = 1_000
-    samples_per_step: int = 64
-    token_budget: int = 65_536
-    lr: float = 3e-5
-    warmup_frac: float = 0.02
-    temperature: float = 0.5
-    tokenizer_path: str = ""  # tokenizers JSON; "" -> HashTokenizer
-    train_tokenizer: bool = False  # train BPE on pooled text when path missing
-    pretrain_steps: int = 0  # RTD + structured-corruption stage first
-    pretrain_lr: float = 3e-4
-    pretrain_tokens: int = 8192  # per-step token cap for pretrain batches
-    augment_p: float = 0.0  # per-sample candidate permutation prob
-    evidence_aug_p: float = 0.0  # insufficient-evidence counterfactual prob
-    eval_samples: int = 0  # held-out rows for eval + temperature fit
-    calibrate: bool = False
+    spec_limits: dict = field(default_factory=lambda: {"jev_distill": 200_000})
+    steps: int = 2000
+    questions_per_step: int = 64
+    micro_batch_tokens: int = 8_192  # auto-halved on CUDA OOM
+    lr: float = 1e-4
+    head_lr: float = 5e-4
+    max_seq_len: int | None = None  # override the size default
+    eval_questions: int = 1000
+    eval_every: int = 250
+    calibrate: bool = True
+    calibration_questions: int = 4000
+    fidelity_questions: int = 3000  # Jev test_set_30k slice
+    jevbench: bool = True
+    teacher_labels: str = ""  # jsonl from training.distill -> distillation run
+    teacher_quota: float = 0.6
+    evidence_aug_p: float = 0.0
+    decontaminate: bool = True
     artifacts_dir: str = "artifacts"
     run_name: str = "run"
     seed: int = 0
-    compile: bool = False
     bf16: bool = True
+    grad_checkpointing: bool = False  # enabled automatically if OOM persists
+    liger: bool = False  # fused RMSNorm/GeGLU (CUDA+Triton), parity-checked
+    compile: bool = False  # torch.compile per decoder layer (experimental)
     log_every: int = 20
-    save_every: int = 0  # 0 -> only final checkpoint
-    dedup: bool = True
+    save_every: int = 0
 
 
-def model_config(name: str) -> ElectraConfig:
-    return tiny_config() if name == "tiny" else MODEL_FAMILY[name]
+def build_tokenizer(backbone: str):
+    return ToyTokenizer() if backbone == "tiny" else HFTokenizer.from_pretrained(backbone)
 
 
-def _corpus_texts(pools: dict[tuple[str, str], list[Sample]], limit: int = 50_000):
-    """Raw text for BPE training: serialized states + instructions +
-    candidate descriptions across all pools."""
-    from ..serialization import serialize_typed
+def build_model(cfg: RunConfig, device) -> ElectraDecisionModel:
+    mcfg = model_config(cfg.model_size)
+    if cfg.max_seq_len:
+        from dataclasses import replace
 
-    n = 0
-    for cell in pools.values():
-        for s in cell:
-            yield serialize_typed(s.state)
-            for q in s.questions:
-                yield q.instruction
-                for c in q.candidates:
-                    yield c.description
-            n += 1
-            if n >= limit:
-                return
-
-
-def build_tokenizer(
-    vocab_size: int,
-    tokenizer_path: str,
-    train: bool = False,
-    corpus=None,
-    verbose: bool = True,
-):
-    """Load a trained BPE if the path exists; optionally train one on
-    the pooled corpus; else fall back to HashTokenizer."""
-    from ..tokenizer import train_bpe
-
-    if tokenizer_path and os.path.exists(tokenizer_path):
-        if verbose:
-            print(f"[run] tokenizer: load {tokenizer_path}", flush=True)
-        return load_bpe(tokenizer_path)
-    if train and corpus is not None:
-        if verbose:
-            print("[run] tokenizer: training BPE on pooled corpus", flush=True)
-        tok = train_bpe(corpus, vocab_size=vocab_size, save_path=tokenizer_path or None)
-        return tok
-    if verbose:
-        print("[run] tokenizer: HashTokenizer fallback", flush=True)
-    return HashTokenizer(vocab_size)
+        mcfg = replace(mcfg, max_seq_len=cfg.max_seq_len)
+    dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
+    model = ElectraDecisionModel.from_config(mcfg, dtype=dtype, device=device)
+    for p in model.backbone.parameters():
+        p.requires_grad_(False)
+    if cfg.liger and device.type == "cuda":
+        apply_liger(model, device)
+    model = apply_lora(model)
+    if cfg.compile:
+        for layer in model.text_model().layers:
+            layer.compile(dynamic=True)
+    return model
 
 
-def synthetic_pools(n_per_cell: int = 32, seed: int = 0) -> dict[tuple[str, str], list[Sample]]:
-    """Offline pools for smoke runs — no datasets dependency needed."""
-    from ..data.schema import Candidate, Question, one_hot
+def apply_liger(model: ElectraDecisionModel, device) -> bool:
+    """Swap in Liger's fused RMSNorm/GeGLU kernels, keeping them only if
+    the backbone output is unchanged on a probe input. Liger targets the
+    plain Gemma 4 31B layer stack; E2B/E4B add per-layer embeddings and
+    KV sharing, so parity is checked instead of assumed."""
+    try:
+        from liger_kernel.transformers import apply_liger_kernel_to_gemma4_text
+    except ImportError:
+        print("[liger] liger-kernel not installed; skipped", flush=True)
+        return False
+    text = model.text_model()
+    probe = torch.randint(10, 1000, (2, 64), device=device)
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        ref = text(input_ids=probe).last_hidden_state.float()
+    try:
+        apply_liger_kernel_to_gemma4_text(
+            rope=False,
+            cross_entropy=False,
+            fused_linear_cross_entropy=False,
+            rms_norm=True,
+            geglu=True,
+            model=text,
+        )
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+            got = text(input_ids=probe).last_hidden_state.float()
+    except Exception as e:
+        raise RuntimeError(
+            f"liger patch failed on this backbone ({e}); rerun without --liger"
+        ) from e
+    rel = float((got - ref).abs().max() / ref.abs().max().clamp(min=1e-6))
+    print(f"[liger] applied, parity rel-err={rel:.2e}", flush=True)
+    if rel > 2e-2:
+        raise RuntimeError(
+            f"liger changed backbone outputs (rel-err {rel:.2e}); rerun without --liger"
+        )
+    return True
 
+
+def synthetic_pools(n_per_cell: int = 16, seed: int = 0) -> dict[tuple[str, str], list[Sample]]:
+    """Tiny rule-labeled pools for smoke/CPU tests (no downloads)."""
     rng = random.Random(seed)
-    cells = [("nli", "en"), ("choice", "en"), ("noul", "ko"), ("score", "ja")]
     pools: dict[tuple[str, str], list[Sample]] = {}
-    for fam, lang in cells:
+    colors = ["red", "green", "blue", "amber"]
+    for fam in ("direct_jev", "choice", "noul", "score"):
         cell = []
         for i in range(n_per_cell):
+            c = rng.choice(colors)
+            state = {"light": c, "ticket": i}
             if fam == "noul":
-                q = Question.noul("q0", f"proposition {i}?", float(rng.random() > 0.5))
-            else:
-                k = 3 if fam != "score" else 5
-                cands = [
-                    Candidate(f"c{j}", f"option {j}", ordinal=j if fam == "score" else None)
-                    for j in range(k)
-                ]
+                q = Question.noul("q0", f"Is the light {c}?", 1.0 if i % 2 == 0 else 0.0)
+                if i % 2:
+                    state["light"] = rng.choice([x for x in colors if x != c])
+            elif fam == "score":
+                cands = [Candidate(f"s{k}", f"level {k}", ordinal=k) for k in range(4)]
+                lvl = colors.index(c)
                 q = Question(
-                    id="q0",
-                    type="score" if fam == "score" else "choice",
-                    instruction=f"question {i}?",
-                    candidates=cands,
-                    target_distribution=one_hot(cands, f"c{rng.randrange(k)}"),
+                    "q0",
+                    "score",
+                    "How warm is the light color?",
+                    cands,
+                    {f"s{k}": float(k == lvl) for k in range(4)},
+                )
+            else:
+                cands = [Candidate(x, f"the light is {x}") for x in colors]
+                q = Question(
+                    "q0",
+                    "choice",
+                    "Which color is the light?",
+                    cands,
+                    {x: float(x == c) for x in colors},
                 )
             cell.append(
                 Sample(
-                    state={"text": f"{lang} synthetic state {i}"},
+                    state=state,
                     questions=[q],
-                    metadata={"language": lang, "task_family": fam, "source": "synthetic"},
+                    metadata={
+                        "language": "en",
+                        "task_family": fam,
+                        "source_example_id": f"{fam}-{i}",
+                    },
                 )
             )
-        pools[(fam, lang)] = cell
+        pools[(fam, "en")] = cell
     return pools
 
 
-def _augment_sample(sample: Sample, cfg: RunConfig, rng: random.Random) -> Sample:
-    """Counterfactual augmentation (sec 34/44): candidate permutation
-    keeps the target attached to its candidate; evidence deletion
-    produces a flagged insufficient-evidence variant with a uniform
-    target (never a forced one-hot, A5)."""
-    import copy
-
-    from ..data.augment import evidence_deletion_variant, permute_candidates
-
-    s = sample
-    if cfg.augment_p > 0 and rng.random() < cfg.augment_p:
-        s = copy.deepcopy(s)
-        s.questions = [permute_candidates(q, rng) for q in s.questions]
-    if cfg.evidence_aug_p > 0 and rng.random() < cfg.evidence_aug_p:
-        s = evidence_deletion_variant(s, rng, target="uniform")
-    return s
-
-
-def packed_stream(
-    pools: dict[tuple[str, str], list[Sample]],
-    sampler: MixtureSampler,
-    tokenizer,
-    cfg: RunConfig,
-    block_size: int,
-    device,
-    rng: random.Random | None = None,
-):
-    """Infinite stream of packed TrainBatches under the mixture quotas."""
-    rng = rng or random.Random(cfg.seed + 1)
-    while True:
-        drawn = sampler.sample(pools, cfg.samples_per_step)
-        drawn = [_augment_sample(s, cfg, rng) for s in drawn]
-        for ss, _desc in pack_by_token_budget(drawn, tokenizer, cfg.token_budget):
-            yield build_train_batch(ss, tokenizer, block_size, device)
-
-
-def pretrain_stage(
-    model: ElectraDecisionModel,
-    pools: dict[tuple[str, str], list[Sample]],
-    tokenizer,
-    cfg: RunConfig,
-    device,
-    verbose: bool = True,
-) -> list[dict]:
-    """Foundation stage (sec 40.1): RTD + structured-corruption
-    discriminator losses over encoded states from all pools.
-
-    v1 generator policy (A10): uniform corruption, no learned MLM
-    generator. Span-relation / multilingual-alignment / evidence-
-    retrieval heads exist in pretrain.py but need paired data that
-    this corpus does not provide — they are not wired here.
-    """
-    from ..collate import encode_state
-    from ..special_tokens import NUM_SPECIAL_TOKENS
-    from .pretrain import (
-        RTDHead,
-        rtd_corrupt,
-        rtd_loss,
-        structured_corrupt,
-        structured_corrupt_loss,
-    )
-
-    head = RTDHead(model.cfg.hidden).to(device)
-    opt = torch.optim.AdamW(list(model.parameters()) + list(head.parameters()), lr=cfg.pretrain_lr)
-    rng = random.Random(cfg.seed + 2)
-    all_samples = [s for cell in pools.values() for s in cell]
-    use_amp = cfg.bf16 and device.type == "cuda"
-    history = []
-    model.train()
-    for step in range(1, cfg.pretrain_steps + 1):
-        # token-budgeted batch: states accumulate until pretrain_tokens
-        ids: list[int] = []
-        cu = [0]
-        for s in rng.sample(all_samples, min(cfg.samples_per_step, len(all_samples))):
-            sids = encode_state(s.state, tokenizer)[: cfg.pretrain_tokens]
-            if ids and len(ids) + len(sids) > cfg.pretrain_tokens:
-                break
-            ids += sids
-            cu.append(len(ids))
-        if len(cu) < 2:
-            continue
-        ids_t = torch.tensor(ids, dtype=torch.long, device=device)
-        cu_t = torch.tensor(cu, dtype=torch.long, device=device)
-        gen = torch.Generator(device=device)
-        gen.manual_seed(cfg.seed + step)
-        corrupt_rtd, rtd_labels = rtd_corrupt(
-            ids_t, cu_t, NUM_SPECIAL_TOKENS, tokenizer.vocab_size, generator=gen
-        )
-        corrupt_struct, struct_labels = structured_corrupt(ids_t, generator=gen)
-        opt.zero_grad(set_to_none=True)
-        # separate backwards: each pass holds its own activation graph
-        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
-            loss_rtd = rtd_loss(model, head, ids_t, corrupt_rtd, rtd_labels, cu_t)
-        loss_rtd.backward()
-        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
-            loss_struct = structured_corrupt_loss(
-                model, head, ids_t, corrupt_struct, struct_labels, cu_t
-            )
-        (0.3 * loss_struct).backward()
-        torch.nn.utils.clip_grad_norm_(list(model.parameters()) + list(head.parameters()), 1.0)
-        opt.step()
-        rec = {
-            "step": step,
-            "pretrain_loss": float(loss_rtd.detach() + 0.3 * loss_struct.detach()),
-            "tokens": len(ids),
-        }
-        history.append(rec)
-        if verbose and cfg.log_every and step % cfg.log_every == 0:
-            print(
-                f"[pretrain] step {step}/{cfg.pretrain_steps} loss={rec['pretrain_loss']:.4f}",
-                flush=True,
-            )
-    return history
-
-
-def _split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: int) -> list[Sample]:
-    """Pop a proportional held-out eval set out of the pools."""
+def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: int) -> list[Sample]:
+    """Pop a proportional held-out set out of the pools."""
     rng = random.Random(seed + 3)
     total = sum(len(v) for v in pools.values())
-    eval_set: list[Sample] = []
+    held: list[Sample] = []
     for cell in pools.values():
-        if not cell or not total:
+        if len(cell) < 2 or not total:
             continue
-        n = max(1, round(n_eval * len(cell) / total)) if cell else 0
-        n = min(n, len(cell) // 10, len(cell) - 1) if len(cell) > 1 else 0
-        if n > 0:
-            eval_set.extend(rng.sample(cell, n))
-            del_ids = {id(s) for s in eval_set[-n:]}
-            cell[:] = [s for s in cell if id(s) not in del_ids]
-    return eval_set
+        n = min(max(1, round(n_eval * len(cell) / total)), len(cell) // 10 or 1)
+        idx = set(rng.sample(range(len(cell)), n))
+        held.extend(cell[i] for i in sorted(idx))
+        cell[:] = [s for i, s in enumerate(cell) if i not in idx]
+    return held
 
 
-def _calibrate(
-    model: ElectraDecisionModel,
-    eval_samples: list[Sample],
-    tokenizer,
-    cfg: RunConfig,
-    block_size: int,
-    device,
-) -> dict[int, float]:
-    """Fit per-primitive scalar temperatures on held-out data (A8)."""
-    from .calibrate import apply_temperatures, collect_logits_by_primitive, fit_temperatures
+def item_stream(pools, sampler: MixtureSampler, tok, mcfg, cfg: RunConfig, rng: random.Random):
+    from ..data.augment import evidence_deletion_variant
 
-    if not eval_samples:
-        return {}
-    batches = []
-    for ss, _ in pack_by_token_budget(eval_samples, tokenizer, cfg.token_budget):
-        batches.append(build_train_batch(ss, tokenizer, block_size, device))
-    collected = collect_logits_by_primitive(model, batches)
-    temps = fit_temperatures(
-        {p: v["logits"] for p, v in collected.items()},
-        {p: v["targets"] for p, v in collected.items()},
-        {p: v["cu"] for p, v in collected.items()},
-    )
-    apply_temperatures(model, temps)
-    return temps
+    buf: list[TrainItem] = []
+    while True:
+        while len(buf) < cfg.questions_per_step:
+            drawn = sampler.sample(pools, cfg.questions_per_step)
+            if not drawn:
+                raise RuntimeError("mixture sampler drew nothing: check family quotas vs pools")
+            for s in drawn:
+                if (
+                    cfg.evidence_aug_p
+                    and rng.random() < cfg.evidence_aug_p
+                    and "teacher_probs" not in s.metadata
+                ):
+                    s = evidence_deletion_variant(s, rng, target="uniform")
+                buf.extend(sample_to_items(s, tok, mcfg))
+        yield buf[: cfg.questions_per_step]
+        buf = buf[cfg.questions_per_step :]
+
+
+def load_teacher_samples(path: str) -> list[Sample]:
+    out = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                out.append(Sample.from_json(json.loads(line)))
+    return out
+
+
+def items_from_spec(
+    spec: str, n: int, tok, mcfg, seed: int, decon: Decontaminator | None
+) -> list[TrainItem]:
+    samples, _ = load_spec_samples(spec, limit=n, dedup=False, seed=seed)
+    if decon is not None:
+        samples, _ = decon.filter(samples)
+    return [it for s in samples for it in sample_to_items(s, tok, mcfg)][:n]
 
 
 def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
-    """Load data, build the model + trainer, run, checkpoint. Returns
-    a summary dict (history tail, artifacts written, param count)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    mcfg = model_config(cfg.model_size)
     art = os.path.join(cfg.artifacts_dir, cfg.run_name)
     os.makedirs(art, exist_ok=True)
+    with open(os.path.join(art, "run_config.json"), "w") as f:
+        json.dump(asdict(cfg), f, indent=2)
+    model = build_model(cfg, device)
+    mcfg = model.cfg
+    tok = build_tokenizer(mcfg.backbone)
+    decon = Decontaminator.from_jevbench() if cfg.decontaminate else None
 
     manifests = []
     if pools is None:
-        pools, manifests = load_pools(cfg.specs, cfg.limit_per_spec, cfg.dedup)
+        pools, manifests = load_pools(
+            cfg.specs,
+            cfg.limit_per_spec,
+            dedup=True,
+            limits=cfg.spec_limits,
+            seed=cfg.seed,
+            decontaminator=decon,
+        )
         write_manifest(manifests, os.path.join(art, "dataset_manifest.jsonl"))
-    if verbose:
-        total = sum(len(v) for v in pools.values())
-        print(f"[run] pools: {total} samples across {len(pools)} cells", flush=True)
+    quota = dict(TASK_FAMILY_QUOTA)
+    if cfg.teacher_labels:
+        pools[("teacher_distill", "en")] = load_teacher_samples(cfg.teacher_labels)
+        quota = {k: v * (1 - cfg.teacher_quota) for k, v in quota.items()}
+        quota["teacher_distill"] = cfg.teacher_quota
     if not any(pools.values()):
         raise RuntimeError("no training samples: every dataset spec failed to load")
+    held = split_eval(pools, cfg.eval_questions, cfg.seed) if cfg.eval_questions else []
+    eval_items = [it for s in held for it in sample_to_items(s, tok, mcfg)]
+    if verbose:
+        sizes = {f"{f}/{lang}": len(v) for (f, lang), v in pools.items()}
+        print(f"[run] pools: {sizes} | held-out questions: {len(eval_items)}", flush=True)
 
-    eval_samples = _split_eval(pools, cfg.eval_samples, cfg.seed) if cfg.eval_samples else []
-    tok_path = cfg.tokenizer_path or os.path.join(art, "tokenizer.json")
-    tok = build_tokenizer(
-        mcfg.vocab_size,
-        tok_path,
-        train=cfg.train_tokenizer,
-        corpus=_corpus_texts(pools) if cfg.train_tokenizer else None,
-        verbose=verbose,
+    tcfg = TrainConfig(
+        steps=cfg.steps,
+        questions_per_step=cfg.questions_per_step,
+        micro_batch_tokens=cfg.micro_batch_tokens,
+        lr=cfg.lr,
+        head_lr=cfg.head_lr,
+        bf16=cfg.bf16,
+        grad_checkpointing=cfg.grad_checkpointing and device.type == "cuda",
+        log_every=cfg.log_every,
+        eval_every=cfg.eval_every,
+        seed=cfg.seed,
     )
-
-    sampler = MixtureSampler(temperature=cfg.temperature, seed=cfg.seed)
-    model = ElectraDecisionModel(mcfg).to(device)
-    n_params = sum(p.numel() for p in model.parameters())
+    trainer = Trainer(model, tok, tcfg, device)
     if verbose:
         print(
-            f"[run] {mcfg.name} ~{n_params / 1e6:.0f}M params on {device}",
+            f"[run] {mcfg.name} ({mcfg.backbone}) trainable={trainer.n_trainable() / 1e6:.1f}M on {device}",
             flush=True,
         )
 
-    pretrain_hist = []
-    if cfg.pretrain_steps:
-        t0 = time.time()
-        pretrain_hist = pretrain_stage(model, pools, tok, cfg, device, verbose)
-        if verbose:
-            print(f"[pretrain] done in {time.time() - t0:.0f}s", flush=True)
+    ckpt_dir = os.path.join(art, "checkpoint")
 
-    eval_batches = None
-    if eval_samples:
-        eval_batches = [
-            build_train_batch(ss, tok, mcfg.block_size, device)
-            for ss, _ in pack_by_token_budget(eval_samples, tok, cfg.token_budget)
-        ]
+    def on_step(step, _rec):
+        if cfg.save_every and step % cfg.save_every == 0:
+            save_checkpoint(model, os.path.join(art, f"checkpoint-{step}"), {"step": step})
 
-    tcfg = TrainConfig(
-        lr=cfg.lr,
-        steps=cfg.steps,
-        warmup_frac=cfg.warmup_frac,
-        bf16=cfg.bf16,
-        compile=cfg.compile,
-        log_every=cfg.log_every,
-        eval_every=cfg.log_every if eval_batches else 0,
-        seed=cfg.seed,
-        device=str(device),
-    )
-    trainer = Trainer(model, tcfg)
-
+    sampler = MixtureSampler(quota=quota, seed=cfg.seed)
     t0 = time.time()
     history = trainer.train(
-        packed_stream(pools, sampler, tok, cfg, mcfg.block_size, device),
-        eval_batches=eval_batches,
+        item_stream(pools, sampler, tok, mcfg, cfg, random.Random(cfg.seed + 7)),
+        eval_items,
+        on_step,
+        verbose,
     )
-    elapsed = time.time() - t0
-    for rec in history:
-        if verbose and cfg.log_every and rec["step"] % cfg.log_every == 0:
-            ev = f" eval_nll={rec.get('eval_nll', float('nan')):.4f}" if eval_batches else ""
-            print(
-                f"[run] step {rec['step']}/{cfg.steps} loss={rec['loss']:.4f} "
-                f"lr={rec['lr']:.2e} gn={rec['grad_norm']:.2f} {elapsed:.0f}s{ev}",
-                flush=True,
-            )
-
-    temps = {}
-    eval_metrics = {}
-    if eval_batches:
-        eval_metrics = trainer.evaluate(eval_batches)
-        if verbose:
-            print(f"[eval] {eval_metrics}", flush=True)
-
-    # save before calibration so a late failure can't lose the run;
-    # calibration mutates only the temperature buffer, saved again after
-    ckpt = os.path.join(art, "checkpoint_final.pt")
-    torch.save(trainer.state_dict(), ckpt)
-    if cfg.calibrate:
-        temps = _calibrate(model, eval_samples, tok, cfg, mcfg.block_size, device)
-        torch.save(trainer.state_dict(), ckpt)
-        if verbose:
-            print(f"[calibrate] temperatures: {temps}", flush=True)
+    train_sec = time.time() - t0
     with open(os.path.join(art, "history.json"), "w") as f:
         json.dump(history, f)
-    with open(os.path.join(art, "pretrain_history.json"), "w") as f:
-        json.dump(pretrain_hist, f)
-    with open(os.path.join(art, "run_config.json"), "w") as f:
-        json.dump(asdict(cfg), f, indent=2)
-    return {
-        "checkpoint": ckpt,
-        "artifacts": art,
-        "params": n_params,
-        "steps": trainer.step_i,
-        "elapsed_sec": elapsed,
-        "final_loss": history[-1]["loss"] if history else None,
-        "eval_metrics": eval_metrics,
-        "temperatures": temps,
-        "manifests": len(manifests),
-        "tokenizer": tok_path if os.path.exists(tok_path) else "hash",
-    }
+    meta = {"steps": trainer.step_i, "train_sec": train_sec, "run": asdict(cfg)}
+    save_checkpoint(model, ckpt_dir, meta)  # before calibration: a late failure can't lose the run
+
+    report: dict = {"train_sec": train_sec, "steps": trainer.step_i}
+    if cfg.calibrate:
+        if _is_synthetic(pools):
+            cal = eval_items
+        else:
+            cal = items_from_spec(
+                "jev_distill_calibration", cfg.calibration_questions, tok, mcfg, cfg.seed, decon
+            )
+        _, logits = trainer.predict(cal, apply_temperature=False, return_logits=True)
+        temps = fit_temperatures(logits, [it.target for it in cal], [it.type for it in cal])
+        apply_temperatures(model, temps)
+        report["temperatures"] = temps
+        if verbose:
+            print(f"[calibrate] {temps} on {len(cal)} questions", flush=True)
+    if eval_items:
+        report["heldout"] = trainer.evaluate(eval_items)
+        if verbose:
+            print(f"[eval] held-out {_fmt(report['heldout'])}", flush=True)
+    if cfg.fidelity_questions and not _is_synthetic(pools):
+        fid = items_from_spec(
+            "jev_distill_test30k", cfg.fidelity_questions, tok, mcfg, cfg.seed, decon
+        )
+        report["jev_fidelity"] = trainer.evaluate(fid)
+        if verbose:
+            print(f"[eval] Jev fidelity (test_set_30k) {_fmt(report['jev_fidelity'])}", flush=True)
+    meta.update(report)
+    save_checkpoint(model, ckpt_dir, meta)
+    if cfg.jevbench:
+        from ..eval.jevbench import run_jevbench
+
+        report["jevbench"] = run_jevbench(
+            model, tok, out_path=os.path.join(art, "jevbench_report.json"), verbose=verbose
+        )["summary"]
+    with open(os.path.join(art, "report.json"), "w") as f:
+        json.dump(report, f, indent=2)
+    return {"checkpoint": ckpt_dir, "artifacts": art, **report}
+
+
+def _is_synthetic(pools) -> bool:
+    return all(s.metadata.get("source") is None for cell in pools.values() for s in cell[:1])
+
+
+def _fmt(m: dict) -> str:
+    keys = ("n", "accuracy", "nll", "kl", "brier", "ece")
+    return " ".join(
+        f"{k}={m[k]:.4f}" if isinstance(m.get(k), float) else f"{k}={m.get(k)}"
+        for k in keys
+        if k in m
+    )

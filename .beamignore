@@ -34,3 +34,5 @@ artifacts/
 *.egg-info
 uv.lock
 nul
+
+install.cmd

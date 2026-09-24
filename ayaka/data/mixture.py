@@ -10,16 +10,19 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 
-# FINAL mix, docs.md section 41 table
+# Family quotas. Jev-distilled decisions are the primary signal on a
+# pretrained backbone (docs.md section 41 had 0.30 for a from-scratch
+# encoder that also needed broad NLU data); the rest keeps multilingual
+# coverage (ko/ja), high-cardinality choice and human soft labels.
 TASK_FAMILY_QUOTA: dict[str, float] = {
-    "direct_jev": 0.30,
-    "choice": 0.18,
-    "nli": 0.10,
-    "noul": 0.10,
-    "score": 0.08,
-    "human_soft_label": 0.08,
-    "hard_adversarial": 0.10,
-    "long_context": 0.06,
+    "direct_jev": 0.52,
+    "choice": 0.10,
+    "nli": 0.07,
+    "noul": 0.07,
+    "score": 0.06,
+    "human_soft_label": 0.05,
+    "hard_adversarial": 0.07,
+    "long_context": 0.06,  # QuALITY articles (~2.8K tokens) vs jev-distill ~190
 }
 
 # Within the NLI family, source balance (sec 43.1)

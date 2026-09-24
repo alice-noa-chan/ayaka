@@ -5,24 +5,30 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ayaka"
 version = "0.1.0"
-description = "Electra: a non-autoregressive decision foundation model (shared evidence encoder + isolated decision branches + permutation-equivariant candidate set reasoning + pointer distribution head)"
+description = "Electra: a non-autoregressive decision model family on Gemma 4 (shared state prefix + isolated question branches + permutation-equivariant candidate sets + pointer/label distribution readout + per-primitive calibration)"
 requires-python = ">=3.10"
 dependencies = [
-    "torch>=2.2",
+    "torch>=2.6",
+    "transformers>=5.6",
+    "peft>=0.19",
+    "huggingface_hub>=0.30",
+    "safetensors",
 ]
 
 [project.optional-dependencies]
-tokenizer = ["tokenizers>=0.19"]
-data = ["datasets>=2.18"]
+data = ["datasets>=3.0"]
 beam = ["beam-client>=0.2.200"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
-    "tokenizers>=0.19",
+    "datasets>=3.0",
 ]
 
 [tool.setuptools.packages.find]
 include = ["ayaka*"]
+
+[tool.setuptools.package-data]
+"ayaka.eval" = ["data/*.json", "data/jevbench_public/*"]
 
 [tool.ruff]
 target-version = "py310"

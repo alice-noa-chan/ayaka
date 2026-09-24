@@ -9,6 +9,7 @@ record is emitted per loaded spec (sec 37).
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Iterable
 
 from .dedup import dedup_samples
@@ -35,7 +36,39 @@ from .transforms import TRANSFORMS
 # auto-converted parquet branch via a data_files glob (datasets 5.x
 # removed loading-script support).
 
+JEV_DISTILL_REPO = "SargeDev/jev-distill-corpus-v3"
+
 DATASET_SPECS: dict[str, dict] = {
+    # Jev 1.13-distilled typed decisions (sec 29.1) — the primary signal.
+    # hf_jsonl specs download one file and sample rows uniformly (the
+    # corpus is ordered by stream, so a head slice would be biased).
+    "jev_distill": {
+        "hf_jsonl": (JEV_DISTILL_REPO, "train.jsonl"),
+        "transform": "jev_distill",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "Apache-2.0 (openjev_v2 stream CC0)",
+        "label_schema": "Jev 1.13 / 32B-teacher distributions over typed options",
+    },
+    "jev_distill_calibration": {
+        "hf_jsonl": (JEV_DISTILL_REPO, "calibration.jsonl"),
+        "transform": "jev_distill",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "Apache-2.0",
+        "label_schema": "held-out split reserved for temperature fitting",
+    },
+    "jev_distill_test30k": {
+        "hf_jsonl": (JEV_DISTILL_REPO, "test_set_30k.jsonl"),
+        "transform": "jev_distill",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "Apache-2.0",
+        "label_schema": "held-out Jev-fidelity evaluation split",
+    },
     "snli": {
         "hf": ("stanfordnlp/snli", None, "train"),
         "transform": "nli",
@@ -236,6 +269,40 @@ DATASET_SPECS: dict[str, dict] = {
         "license": "see JGLUE repo (pin revision)",
         "label_schema": "5 options",
     },
+    # Long-document reading (docs.md sec 19): JevBench hard states average
+    # ~1.2K tokens while jev-distill averages ~190, so long evidence needs
+    # its own source. Gemma 4 averages ~4.6 chars/token on these articles,
+    # so 17K chars keeps a state under ~3.7K tokens (max_seq_len 4096).
+    "quality": {
+        "hf": ("emozilla/quality", None, "train"),
+        "transform": "reading_mc",
+        "kwargs": {
+            "article_key": "article",
+            "question_key": "question",
+            "options_key": "options",
+            "label_key": "answer",
+            "max_chars": 17_000,
+        },
+        "family": "long_context",
+        "lang": "en",
+        "license": "CC BY 4.0 (QuALITY)",
+        "label_schema": "4 options, gold index",
+    },
+    "quality_dev": {
+        "hf": ("emozilla/quality", None, "validation"),
+        "transform": "reading_mc",
+        "kwargs": {
+            "article_key": "article",
+            "question_key": "question",
+            "options_key": "options",
+            "label_key": "answer",
+            "max_chars": 17_000,
+        },
+        "family": "long_context",
+        "lang": "en",
+        "license": "CC BY 4.0 (QuALITY)",
+        "label_schema": "4 options, gold index",
+    },
     "go_emotions": {
         "hf": ("google-research-datasets/go_emotions", "simplified", "train"),
         "transform": "multilabel",
@@ -321,6 +388,7 @@ def load_spec_samples(
     spec_name: str,
     limit: int | None = None,
     dedup: bool = True,
+    seed: int = 0,
 ) -> tuple[list[Sample], DatasetManifest]:
     """Load one spec into canonical Samples + its manifest record."""
     spec = DATASET_SPECS[spec_name]
@@ -337,6 +405,20 @@ def load_spec_samples(
         source = spec["jsonl"]
         revision = spec.get("revision", "local")
         config, split = "", ""
+    elif "hf_jsonl" in spec:
+        from huggingface_hub import hf_hub_download
+
+        repo, filename = spec["hf_jsonl"]
+        path = hf_hub_download(repo, filename, repo_type="dataset")
+        with open(path, encoding="utf-8") as f:
+            lines = [line for line in f if line.strip()]
+        if limit is not None and limit < len(lines):
+            lines = random.Random(seed).sample(lines, limit)
+        rows = [json.loads(line) for line in lines]
+        ds = None
+        source = f"hf://datasets/{repo}/{filename}"
+        revision = "main"
+        config, split = "", filename.removesuffix(".jsonl")
     else:
         from datasets import load_dataset  # optional dep (remote image)
 
@@ -406,13 +488,23 @@ def load_pools(
     spec_names: list[str],
     limit_per_spec: int | None = None,
     dedup: bool = True,
+    limits: dict[str, int] | None = None,
+    seed: int = 0,
+    decontaminator=None,
 ) -> tuple[dict[tuple[str, str], list[Sample]], list[DatasetManifest]]:
-    """Load specs into (family, language) pools for the MixtureSampler."""
+    """Load specs into (family, language) pools for the MixtureSampler.
+
+    ``limits`` overrides ``limit_per_spec`` per spec name; a
+    ``decontaminator`` drops samples overlapping evaluation items."""
     pools: dict[tuple[str, str], list[Sample]] = {}
     manifests: list[DatasetManifest] = []
     for name in spec_names:
+        limit = (limits or {}).get(name, limit_per_spec)
         try:
-            samples, manifest = load_spec_samples(name, limit_per_spec, dedup)
+            samples, manifest = load_spec_samples(name, limit, dedup, seed)
+            if decontaminator is not None:
+                samples, dropped = decontaminator.filter(samples)
+                manifest.notes = (manifest.notes + f" decontam_dropped={dropped}").strip()
         except Exception as e:  # a broken spec must not kill the run
             print(f"[loaders] spec {name!r} failed, skipping: {e}")
             manifests.append(

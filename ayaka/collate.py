@@ -1,8 +1,12 @@
-"""Ragged batch construction for decision inputs (addendum A6).
+"""Rendered questions -> DecisionBatch tensors.
 
-One sample = one state + questions[]. Many samples pack into one
-padding-free batch: every axis is a flat token buffer plus cu_seqlens
-and integer index maps — the BatchDescriptor contract of section 46.
+Two layouts share one batch type:
+
+- ``full_rows``: every question is its own row ``prefix + suffix``
+  (training, calibration, teacher labeling — simple and exact).
+- ``suffix_rows``: suffixes only, attending to a prefix KV cache that
+  was encoded once and repeated per question (serving path). Isolation
+  is identical: a suffix sees the prefix and itself, never a sibling.
 """
 
 from __future__ import annotations
@@ -11,82 +15,99 @@ from dataclasses import dataclass
 
 import torch
 
-from .model.model import CHOICE, NOUL, SCORE
-from .serialization import serialize_state
-from .tokenizer import Tokenizer
-
-_PRIMITIVE_INDEX = {"noul": NOUL, "choice": CHOICE, "score": SCORE}
+from .model.electra import PRIMITIVE_INDEX, DecisionBatch
+from .prompt import QuestionView, RenderedQuestion, render_prefix, render_question
+from .tokenization import Tokenizer
 
 
 @dataclass
-class DecisionInputs:
-    state_ids: torch.Tensor
-    state_cu: torch.Tensor
-    question_ids: torch.Tensor
-    question_cu: torch.Tensor
-    question_state_index: torch.Tensor
-    candidate_ids: torch.Tensor
-    candidate_cu: torch.Tensor
-    candidate_question_index: torch.Tensor
-    primitive_index: torch.Tensor  # [n_q]
+class EncodedQuestion:
+    prefix_ids: list[int]
+    rendered: RenderedQuestion
+    primitive: int
 
 
-def encode_state(state, tokenizer: Tokenizer) -> list[int]:
-    return tokenizer.encode(serialize_state(state))
+def encode_decision(
+    state,
+    questions: list[QuestionView],
+    tok: Tokenizer,
+    max_seq_len: int,
+    max_label_candidates: int = 26,
+) -> tuple[list[int], list[EncodedQuestion]]:
+    """Render one state + its questions; the state is truncated so the
+    longest question still fits in ``max_seq_len``."""
+    rendered = [render_question(q, tok, max_label_candidates) for q in questions]
+    longest = max(len(r.suffix_ids) for r in rendered)
+    overhead = len(render_prefix("", tok))
+    budget = max(64, max_seq_len - longest - overhead)
+    prefix = render_prefix(state, tok, max_state_tokens=budget)
+    enc = [
+        EncodedQuestion(prefix, r, PRIMITIVE_INDEX[q.type])
+        for q, r in zip(questions, rendered, strict=True)
+    ]
+    return prefix, enc
 
 
-def encode_question(instruction: str, tokenizer: Tokenizer) -> list[int]:
-    return tokenizer.encode(f"<q> <instruction> {instruction} </instruction> </q>")
+def _cand_fields(items: list[EncodedQuestion], offsets: list[int]):
+    cu, cq, spans, labels, has_label = [0], [], [], [], []
+    for qi, (it, off) in enumerate(zip(items, offsets, strict=True)):
+        r = it.rendered
+        n = len(r.option_spans)
+        cu.append(cu[-1] + n)
+        cq.extend([qi] * n)
+        spans.extend([(s + off, e + off) for s, e in r.option_spans])
+        labels.extend(r.label_ids if r.label_ids is not None else [0] * n)
+        has_label.append(r.label_ids is not None)
+    return (
+        torch.tensor(cu, dtype=torch.long),
+        torch.tensor(cq, dtype=torch.long),
+        torch.tensor(spans, dtype=torch.long).view(-1, 2),
+        torch.tensor(labels, dtype=torch.long),
+        torch.tensor(has_label, dtype=torch.bool),
+    )
 
 
-def encode_candidate(description: str, tokenizer: Tokenizer) -> list[int]:
-    return tokenizer.encode(f"<candidate> {description} </candidate>")
+def full_rows(items: list[EncodedQuestion], pad_id: int) -> DecisionBatch:
+    rows = [it.prefix_ids + it.rendered.suffix_ids for it in items]
+    length = max(len(r) for r in rows)
+    ids = torch.full((len(rows), length), pad_id, dtype=torch.long)
+    mask = torch.zeros((len(rows), length), dtype=torch.long)
+    for i, r in enumerate(rows):
+        ids[i, : len(r)] = torch.tensor(r)
+        mask[i, : len(r)] = 1
+    cu, cq, spans, labels, has_label = _cand_fields(items, [len(it.prefix_ids) for it in items])
+    return DecisionBatch(
+        input_ids=ids,
+        attention_mask=mask,
+        answer_pos=torch.tensor([len(r) - 1 for r in rows], dtype=torch.long),
+        cand_cu=cu,
+        cand_question=cq,
+        cand_spans=spans,
+        label_ids=labels,
+        has_label=has_label,
+        primitive=torch.tensor([it.primitive for it in items], dtype=torch.long),
+    )
 
 
-def build_decision_inputs(
-    samples: list[dict],
-    tokenizer: Tokenizer,
-    device: torch.device | str = "cpu",
-) -> DecisionInputs:
-    """samples: [{"state": ..., "questions": [{"type":..., "instruction":...,
-    "candidates":[...], "ordinals":[...]?}, ...]}]
-    """
-    state_ids: list[int] = []
-    state_cu = [0]
-    question_ids: list[int] = []
-    question_cu = [0]
-    question_state_index: list[int] = []
-    candidate_ids: list[int] = []
-    candidate_cu = [0]
-    candidate_question_index: list[int] = []
-    primitive_index: list[int] = []
-
-    q_global = 0
-    for state_idx, sample in enumerate(samples):
-        state_ids += encode_state(sample["state"], tokenizer)
-        state_cu.append(len(state_ids))
-        for q in sample["questions"]:
-            question_ids += encode_question(q["instruction"], tokenizer)
-            question_cu.append(len(question_ids))
-            question_state_index.append(state_idx)
-            primitive_index.append(_PRIMITIVE_INDEX[q["type"]])
-            for cand in q["candidates"]:
-                candidate_ids += encode_candidate(cand, tokenizer)
-                candidate_cu.append(len(candidate_ids))
-                candidate_question_index.append(q_global)
-            q_global += 1
-
-    def t(x):
-        return torch.tensor(x, dtype=torch.long, device=device)
-
-    return DecisionInputs(
-        state_ids=t(state_ids),
-        state_cu=t(state_cu),
-        question_ids=t(question_ids),
-        question_cu=t(question_cu),
-        question_state_index=t(question_state_index),
-        candidate_ids=t(candidate_ids),
-        candidate_cu=t(candidate_cu),
-        candidate_question_index=t(candidate_question_index),
-        primitive_index=t(primitive_index),
+def suffix_rows(items: list[EncodedQuestion], prefix_len: int, pad_id: int) -> DecisionBatch:
+    sufs = [it.rendered.suffix_ids for it in items]
+    length = max(len(s) for s in sufs)
+    ids = torch.full((len(sufs), length), pad_id, dtype=torch.long)
+    mask = torch.zeros((len(sufs), prefix_len + length), dtype=torch.long)
+    mask[:, :prefix_len] = 1
+    for i, s in enumerate(sufs):
+        ids[i, : len(s)] = torch.tensor(s)
+        mask[i, prefix_len : prefix_len + len(s)] = 1
+    cu, cq, spans, labels, has_label = _cand_fields(items, [0] * len(items))
+    return DecisionBatch(
+        input_ids=ids,
+        attention_mask=mask,
+        answer_pos=torch.tensor([len(s) - 1 for s in sufs], dtype=torch.long),
+        cand_cu=cu,
+        cand_question=cq,
+        cand_spans=spans,
+        label_ids=labels,
+        has_label=has_label,
+        primitive=torch.tensor([it.primitive for it in items], dtype=torch.long),
+        position_ids=(prefix_len + torch.arange(length)).unsqueeze(0).expand(len(sufs), -1),
     )

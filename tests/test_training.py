@@ -1,175 +1,170 @@
+"""Training / calibration / checkpoint / distillation on the tiny backbone."""
+
+import json
+from pathlib import Path
+
 import pytest
 import torch
 
+from ayaka.checkpoint import apply_lora, load_checkpoint, save_checkpoint
 from ayaka.config import tiny_config
-from ayaka.data.schema import Candidate, Question, Sample
-from ayaka.model.model import ElectraDecisionModel
-from ayaka.tokenizer import HashTokenizer
-from ayaka.training.batch import build_train_batch
-from ayaka.training.calibrate import apply_temperatures, fit_temperatures
-from ayaka.training.pretrain import (
-    RTDHead,
-    SpanRelationHead,
-    multilingual_alignment_loss,
-    rtd_corrupt,
-    rtd_loss,
-    span_relation_loss,
-    structured_corrupt,
-)
-from ayaka.training.schedule import build_optimizer, cosine_warmup_schedule
+from ayaka.model.electra import ElectraDecisionModel
+from ayaka.primitives import Decision, QuestionSpec
+from ayaka.tokenization import ToyTokenizer
+from ayaka.training.batching import budget_batches, collate_items, sample_to_items
+from ayaka.training.calibrate import fit_temperature
+from ayaka.training.run import RunConfig, run_training, synthetic_pools
 from ayaka.training.trainer import TrainConfig, Trainer
 
-
-def _samples(n=4, seed=0):
-    out = []
-    for i in range(n):
-        cands = [Candidate(f"c{j}", f"opt{j}") for j in range(3)]
-        q = Question(f"q{i}", "choice", "pick?", cands, {"c0": 1.0, "c1": 0.0, "c2": 0.0})
-        out.append(Sample(state=f"state {i} text", questions=[q], metadata={"language": "en"}))
-    return out
+TOK = ToyTokenizer()
 
 
-def test_build_train_batch_layout():
-    tok = HashTokenizer(512)
-    cfg = tiny_config()
-    samples = _samples(2)
-    batch = build_train_batch(samples, tok, cfg.block_size)
-    assert batch.targets.shape == (6,)  # 2 questions x 3 candidates
-    assert batch.inputs["state_cu"].tolist() == [
-        0,
-        batch.inputs["state_cu"][1],
-        batch.inputs["state_cu"][2],
+def _model():
+    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    for p in m.backbone.parameters():
+        p.requires_grad_(False)
+    return apply_lora(m)
+
+
+def test_items_and_budget_batches():
+    pools = synthetic_pools(4)
+    items = [
+        it for cell in pools.values() for s in cell for it in sample_to_items(s, TOK, tiny_config())
     ]
-    assert batch.score_question_mask.tolist() == [False, False]
-    assert batch.cand_ordinals.tolist() == [-1] * 6
-    assert not batch.missing_mask.any()
-    # targets sum to 1 per question
-    assert batch.targets[:3].sum() == pytest.approx(1.0)
+    assert len(items) == 16
+    batches = budget_batches(items, max_tokens=2000, shuffle_seed=None)
+    assert sum(len(b) for b in batches) == 16
+    for b in batches:
+        assert max(it.length for it in b) * len(b) <= 2000 or len(b) == 1
+    t = collate_items(batches[0], TOK.pad_id)
+    assert t.targets.numel() == t.batch.cand_cu[-1]
+    assert t.teacher is None
 
 
-def test_build_train_batch_score_and_missing():
-    tok = HashTokenizer(512)
-    cfg = tiny_config()
-    cands = [Candidate(f"l{i}", f"lv{i}", ordinal=i) for i in range(3)]
-    q = Question("q", "score", "sev?", cands, {"l0": 0.0, "l1": 0.6, "l2": 0.4})
-    s = Sample(state="s", questions=[q], metadata={"evidence_state": "deleted"})
-    batch = build_train_batch([s], tok, cfg.block_size)
-    assert batch.score_question_mask.tolist() == [True]
-    assert batch.missing_mask.tolist() == [True]
-    assert batch.cand_ordinals.tolist() == [0, 1, 2]
+def test_lora_only_trains_adapters_and_head():
+    m = _model()
+    trainable = {n for n, p in m.named_parameters() if p.requires_grad}
+    assert trainable
+    assert all("lora_" in n or n.startswith(("head.", "gate")) for n in trainable)
 
 
-def test_build_train_batch_router_supervision():
-    tok = HashTokenizer(512)
-    cfg = tiny_config()
-    s = Sample(
-        state="x " * 200,  # ~200 tokens -> 4 blocks of 64
-        questions=[_choice_q()],
-        metadata={"evidence_blocks": [0, 2]},
+def test_training_reduces_loss_on_fixed_batch():
+    m = _model()
+    tr = Trainer(
+        m,
+        TOK,
+        TrainConfig(
+            steps=40,
+            questions_per_step=8,
+            lr=3e-3,
+            head_lr=3e-3,
+            grad_checkpointing=False,
+            log_every=0,
+        ),
+        "cpu",
     )
-    batch = build_train_batch([s], tok, cfg.block_size)
-    assert batch.block_target is not None and batch.block_mask is not None
-    n_c = batch.targets.shape[0]
-    assert batch.block_target.shape[0] == n_c
-    assert batch.block_target[0, 0] == 1.0 and batch.block_target[0, 2] == 1.0
-    assert batch.block_mask[0].sum() > 0
+    pools = synthetic_pools(2)
+    items = [it for cell in pools.values() for s in cell for it in sample_to_items(s, TOK, m.cfg)]
+    first = tr.train_step(items)["total"]
+    for _ in range(25):
+        last = tr.train_step(items)["total"]
+    assert last < first * 0.7
 
 
-def _choice_q():
-    cands = [Candidate(f"c{j}", f"o{j}") for j in range(2)]
-    return Question("q", "choice", "p?", cands, {"c0": 1.0, "c1": 0.0})
-
-
-def test_optimizer_param_groups():
-    model = ElectraDecisionModel(tiny_config())
-    opt = build_optimizer(model, lr=1e-3, fused=False)
-    assert len(opt.param_groups) == 2
-    assert opt.param_groups[0]["weight_decay"] == 0.1
-    assert opt.param_groups[1]["weight_decay"] == 0.0
-
-
-def test_lr_schedule_warmup_floor():
-    model = torch.nn.Linear(4, 4)
-    opt = torch.optim.AdamW(model.parameters(), lr=1.0)
-    sched = cosine_warmup_schedule(opt, total_steps=100, warmup_frac=0.1, min_lr_frac=0.1)
-    lrs = [opt.param_groups[0]["lr"]]
-    for _ in range(99):
-        opt.step()
-        sched.step()
-        lrs.append(opt.param_groups[0]["lr"])
-    assert lrs[9] == pytest.approx(1.0, abs=0.15)  # end of warmup
-    assert lrs[-1] == pytest.approx(0.1, abs=1e-3)  # floor
-    assert max(lrs) <= 1.0 + 1e-6
-
-
-def test_rtd_corruption_and_loss():
+def test_fit_temperature_recovers_scale():
     torch.manual_seed(0)
-    cfg = tiny_config()
-    ids = torch.randint(30, 500, (40,))
-    cu = torch.tensor([0, 40])
-    corrupted, labels = rtd_corrupt(
-        ids, cu, 30, 500, rate=0.5, generator=torch.Generator().manual_seed(0)
-    )
-    assert (corrupted != ids).float().mean() > 0.2
-    assert labels.sum() > 0
-    assert (labels[ids < 30] == 0).all()  # special tokens never corrupted
-    model = ElectraDecisionModel(cfg)
-    head = RTDHead(cfg.hidden)
-    loss = rtd_loss(model, head, ids, corrupted, labels, cu)
-    assert loss > 0
+    logits, targets = [], []
+    for _ in range(400):
+        z = torch.randn(3) * 2
+        p = torch.softmax(z, 0)
+        y = int(torch.multinomial(p, 1))
+        logits.append((z * 3).tolist())  # model is 3x overconfident
+        targets.append([float(i == y) for i in range(3)])
+    t = fit_temperature(logits, targets)
+    assert 2.0 < t < 4.5
 
 
-def test_structured_corrupt_swaps_markers():
-    from ayaka.special_tokens import SPECIAL_TOKEN_IDS
-
-    torch.manual_seed(0)
-    num_id = SPECIAL_TOKEN_IDS["<num>"]
-    ids = torch.tensor([num_id, 100, num_id, 200])
-    corrupted, labels = structured_corrupt(
-        ids, rate=1.0, generator=torch.Generator().manual_seed(0)
-    )
-    assert labels[0] == 1 and labels[2] == 1
-    assert corrupted[0] != num_id and corrupted[2] != num_id
-    assert corrupted[1] == 100 and corrupted[3] == 200
-
-
-def test_span_and_alignment_losses():
-    head = SpanRelationHead(16)
-    a, b = torch.randn(4, 16), torch.randn(4, 16)
-    labels = torch.tensor([0, 1, 2, 0])
-    assert span_relation_loss(head, a, b, labels) > 0
-    x = torch.randn(6, 16)
-    same = multilingual_alignment_loss(x, x.clone())
-    diff = multilingual_alignment_loss(x, torch.randn(6, 16))
-    assert same < diff
-
-
-def test_trainer_step_and_fit_temperature():
-    torch.manual_seed(0)
-    cfg = tiny_config()
-    model = ElectraDecisionModel(cfg)
-    tok = HashTokenizer(512)
-    trainer = Trainer(model, TrainConfig(steps=3, lr=1e-3, bf16=False, device="cpu", fused=False))
-    samples = _samples(4)
-    batches = [
-        build_train_batch(samples[:2], tok, cfg.block_size),
-        build_train_batch(samples[2:], tok, cfg.block_size),
-    ]
-    losses = []
-    for _ in range(3):
-        rec = trainer.step(batches[0])
-        losses.append(rec["loss"])
-    assert all(x > 0 for x in losses)
-    assert trainer.step_i == 3
-    # temperature fitting on held-out
+def test_checkpoint_roundtrip(tmp_path):
+    m = _model()
     with torch.no_grad():
-        out = model(**{**batches[0].inputs, "apply_temperature": False})
-    temps = fit_temperatures(
-        {1: out.logits},
-        {1: batches[0].targets},
-        {1: out.cand_cu},
-        iters=10,
+        m.gate.fill_(0.3)
+        m.temperature[1] = 1.7
+        for n, p in m.backbone.named_parameters():
+            if "lora_B" in n:
+                p.normal_(0, 0.02)  # make the adapter non-trivial
+    state = {"light": "red"}
+    q = QuestionSpec("choice", "Which color?", ["red", "green", "blue"])
+    before = Decision(m.eval(), TOK).decide(state, [q])[0].probs
+    save_checkpoint(m, str(tmp_path / "ck"), {"step": 1})
+    loaded = load_checkpoint(str(tmp_path / "ck"), dtype=torch.float32)
+    after = Decision(loaded, TOK).decide(state, [q])[0].probs
+    assert after == pytest.approx(before, abs=1e-4)
+    assert float(loaded.temperature[1]) == pytest.approx(1.7)
+
+
+def test_run_training_synthetic_end_to_end(tmp_path):
+    cfg = RunConfig(
+        model_size="tiny",
+        steps=3,
+        questions_per_step=8,
+        micro_batch_tokens=4096,
+        eval_questions=8,
+        eval_every=0,
+        fidelity_questions=0,
+        jevbench=False,
+        decontaminate=False,
+        artifacts_dir=str(tmp_path),
+        run_name="smoke",
+        log_every=0,
+        bf16=False,
     )
-    assert temps[1] > 0
-    apply_temperatures(model, temps)
-    assert model.temperature[1].item() == pytest.approx(temps[1])
+    res = run_training(cfg, pools=synthetic_pools(8), verbose=False)
+    assert res["steps"] == 3
+    ck = Path(res["checkpoint"])
+    assert (ck / "adapter").is_dir() and (ck / "head.pt").exists()
+    assert "heldout" in res and 0.0 <= res["heldout"]["accuracy"] <= 1.0
+    assert len(json.loads((tmp_path / "smoke" / "history.json").read_text())) == 3
+
+
+def test_distillation_roundtrip(tmp_path):
+    """Teacher labels -> student run trains with KL on teacher questions."""
+    from ayaka.training.distill import label_with_teacher
+
+    teacher = _model()
+    save_checkpoint(teacher, str(tmp_path / "teacher"))
+    res = label_with_teacher(
+        str(tmp_path / "teacher"),
+        str(tmp_path / "t.jsonl"),
+        specs=[],
+        n_samples=12,
+        pools=synthetic_pools(4),
+        verbose=False,
+    )
+    assert res["samples"] == 12
+    rows = [
+        json.loads(line) for line in (tmp_path / "t.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    tp = rows[0]["metadata"]["teacher_probs"]
+    assert sum(next(iter(tp.values()))) == pytest.approx(1.0, abs=1e-4)
+
+    cfg = RunConfig(
+        model_size="tiny",
+        steps=2,
+        questions_per_step=8,
+        micro_batch_tokens=4096,
+        eval_questions=0,
+        calibrate=False,
+        fidelity_questions=0,
+        jevbench=False,
+        decontaminate=False,
+        teacher_labels=str(tmp_path / "t.jsonl"),
+        teacher_quota=0.9,
+        artifacts_dir=str(tmp_path),
+        run_name="student",
+        log_every=0,
+        bf16=False,
+    )
+    out = run_training(cfg, pools=synthetic_pools(4), verbose=False)
+    hist = json.loads((tmp_path / "student" / "history.json").read_text())
+    assert out["steps"] == 2
+    assert any("kl" in h for h in hist)

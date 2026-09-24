@@ -1,207 +1,133 @@
-"""Proper-scoring + distillation losses (docs.md section 16/40, A4/A9).
+"""Proper-scoring + distillation losses (docs.md section 16/40, A4).
 
-All losses are ragged-aware: candidate-level targets are flat [n_c]
-aligned with the batch's candidate order; per-question reduction uses
-cand_cu boundaries. Score questions additionally carry per-candidate
-ordinals (addendum A3).
+Candidate-level targets are flat [n_c], aligned with the batch's
+candidate order; per-question reduction uses ``cand_cu``. Score
+questions carry per-candidate ordinals (addendum A3).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 
-from .model.model import DecisionOutput
-from .model.pointer import ragged_max
+from .model.electra import SCORE, DecisionOutput
+from .model.ragged import per_question_sum, ragged_max
 
 
-def _seg_ids(cu: torch.Tensor) -> torch.Tensor:
-    lens = (cu[1:] - cu[:-1]).long()
-    return torch.repeat_interleave(torch.arange(lens.numel(), device=cu.device), lens)
+def nll_loss(log_probs: torch.Tensor, targets: torch.Tensor, cu: torch.Tensor) -> torch.Tensor:
+    """Cross-entropy to the target distribution (log score)."""
+    return (-per_question_sum(targets * log_probs, cu)).mean()
 
 
-def _per_question_sum(x: torch.Tensor, cu: torch.Tensor) -> torch.Tensor:
-    out = torch.zeros(cu.numel() - 1, dtype=x.dtype, device=x.device)
-    out.index_add_(0, _seg_ids(cu), x)
-    return out
-
-
-def nll_loss(out: DecisionOutput, targets: torch.Tensor) -> torch.Tensor:
-    """L_log = mean_q -Σ_i y_i log p_i (log score / cross-entropy to dist)."""
-    logp = out.log_probs()
-    return (-_per_question_sum(targets * logp, out.cand_cu)).mean()
-
-
-def brier_loss(out: DecisionOutput, targets: torch.Tensor) -> torch.Tensor:
-    """L_brier = mean_q Σ_i (p_i - y_i)^2."""
-    p = out.probs()
-    return _per_question_sum((p - targets) ** 2, out.cand_cu).mean()
+def brier_loss(probs: torch.Tensor, targets: torch.Tensor, cu: torch.Tensor) -> torch.Tensor:
+    return per_question_sum((probs - targets) ** 2, cu).mean()
 
 
 def rps_loss(
-    out: DecisionOutput,
+    probs: torch.Tensor,
     targets: torch.Tensor,
-    cand_ordinals: torch.Tensor,
-    score_question_mask: torch.Tensor,
+    cu: torch.Tensor,
+    ordinals: torch.Tensor,
+    score_mask: torch.Tensor,
 ) -> torch.Tensor:
-    """Ranked Probability Score over Score questions only.
-
-    cand_ordinals: [n_c] ordinal level per candidate (A3).
-    score_question_mask: [n_q] bool — which questions are scored.
-    """
-    p = out.probs()
-    cu = out.cand_cu
+    """Ranked Probability Score over Score questions (ordinal CDFs)."""
     losses = []
-    for qi in torch.nonzero(score_question_mask).squeeze(1).tolist():
-        s, e = int(cu[qi]), int(cu[qi + 1])
+    cul = cu.tolist()
+    for qi in torch.nonzero(score_mask).flatten().tolist():
+        s, e = cul[qi], cul[qi + 1]
         k = e - s
         if k < 2:
             continue
-        order = torch.argsort(cand_ordinals[s:e])
-        cp = p[s:e][order].cumsum(0)[:-1]
+        order = torch.argsort(ordinals[s:e])
+        cp = probs[s:e][order].cumsum(0)[:-1]
         cy = targets[s:e][order].cumsum(0)[:-1]
         losses.append(((cp - cy) ** 2).sum() / (k - 1))
     if not losses:
-        return p.sum() * 0.0
+        return probs.sum() * 0.0
     return torch.stack(losses).mean()
 
 
-def permutation_consistency(
-    log_probs1: torch.Tensor,
-    log_probs2_aligned: torch.Tensor,
-    cand_cu: torch.Tensor,
-) -> torch.Tensor:
-    """Symmetric KL between two aligned runs of the same semantic set.
-
-    log_probs2_aligned must already be reordered into run1's candidate
-    order by the caller (via its permutation map).
-    """
-    p1, p2 = log_probs1.exp(), log_probs2_aligned.exp()
-    kl = _per_question_sum(p1 * (log_probs1 - log_probs2_aligned), cand_cu)
-    kl += _per_question_sum(p2 * (log_probs2_aligned - log_probs1), cand_cu)
-    return (kl * 0.5).mean()
-
-
 def missing_evidence_loss(
-    out: DecisionOutput, flagged_mask: torch.Tensor, tau: float = 0.8
+    log_probs: torch.Tensor, cu: torch.Tensor, flagged: torch.Tensor, tau: float = 0.8
 ) -> torch.Tensor:
-    """Overconfidence penalty on insufficient/conflicting evidence (A4).
-
-    flagged_mask: [n_q] bool for samples with deleted/partial/
-    contradictory evidence. Penalizes relu(p_max - tau)^2.
-    """
-    if not flagged_mask.any():
-        return out.logits.sum() * 0.0
-    p_max = ragged_max(out.log_probs(), out.cand_cu).exp()
-    pen = torch.relu(p_max - tau) ** 2
-    return pen[flagged_mask].mean()
+    """relu(p_max - tau)^2 on insufficient/conflicting-evidence questions (A4)."""
+    if not flagged.any():
+        return log_probs.sum() * 0.0
+    p_max = ragged_max(log_probs, cu).exp()
+    return (torch.relu(p_max - tau) ** 2)[flagged].mean()
 
 
 def kl_distill(
-    teacher_log_probs: torch.Tensor,
-    student_log_probs: torch.Tensor,
-    cand_cu: torch.Tensor,
+    teacher_probs: torch.Tensor, student_log_probs: torch.Tensor, cu: torch.Tensor
 ) -> torch.Tensor:
-    """KL(p_teacher || p_student) per question, aligned flat layout."""
-    t = teacher_log_probs.exp()
-    per_q = _per_question_sum(t * (teacher_log_probs - student_log_probs), cand_cu)
-    return per_q.mean()
+    """KL(p_teacher || p_student) per question."""
+    t = teacher_probs.clamp(min=1e-8)
+    return per_question_sum(t * (t.log() - student_log_probs), cu).mean()
 
 
-def router_bce(
-    route_probs: torch.Tensor,
-    block_target: torch.Tensor,
-    block_mask: torch.Tensor,
-) -> torch.Tensor:
-    """Supervised router loss (A9): BCE on per-candidate block scores.
-
-    route_probs:   [n_c, n_blocks]
-    block_target:  [n_c, n_blocks] float in {0,1} — evidence blocks
-    block_mask:    [n_c, n_blocks] bool — own-state blocks (valid range)
-    """
-    eps = 1e-7
-    p = route_probs.clamp(eps, 1 - eps)
-    bce = -(block_target * p.log() + (1 - block_target) * (1 - p).log())
-    bce = bce * block_mask
-    denom = block_mask.sum().clamp(min=1)
-    return bce.sum() / denom
-
-
-def router_kl(
-    teacher_route_logp: torch.Tensor,
-    student_route_logp: torch.Tensor,
-    block_mask: torch.Tensor,
-) -> torch.Tensor:
-    """Router distillation KL(route_T || route_S) over own-state blocks."""
-    t = teacher_route_logp.exp()
-    kl = (t * (teacher_route_logp - student_route_logp)) * block_mask
-    return kl.sum() / block_mask.sum().clamp(min=1)
-
-
-def state_relation_loss(hs_a: torch.Tensor, hs_b: torch.Tensor) -> torch.Tensor:
-    """Match normalized token-similarity Gram matrices (sec 28.4).
-
-    hs_a, hs_b: [S, D] aligned state memories of teacher/student —
-    widths may differ, token geometry must not.
-    """
-    ga = hs_a / hs_a.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-    gb = hs_b / hs_b.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-    return ((ga @ ga.T) - (gb @ gb.T)).pow(2).mean()
-
-
-def candidate_relation_loss(r_a: torch.Tensor, r_b: torch.Tensor) -> torch.Tensor:
-    """Match candidate-set geometry between teacher and student."""
-    ga = r_a / r_a.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-    gb = r_b / r_b.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-    return ((ga @ ga.T) - (gb @ gb.T)).pow(2).mean()
-
-
-class DecisionLossWeights:
-    """Loss weights from docs.md section 40.2 (Large) — defaults."""
-
-    def __init__(
-        self,
-        nll: float = 1.0,
-        brier: float = 0.5,
-        rps: float = 0.35,
-        consistency: float = 0.15,
-        router: float = 0.25,
-        missing: float = 0.25,
-    ):
-        self.nll = nll
-        self.brier = brier
-        self.rps = rps
-        self.consistency = consistency
-        self.router = router
-        self.missing = missing
+@dataclass
+class LossWeights:
+    nll: float = 1.0
+    brier: float = 0.5
+    rps: float = 0.35
+    missing: float = 0.25
+    pointer_aux: float = 0.3  # pointer-only NLL keeps the pointer usable alone (large sets)
+    distill: float = 1.0  # KL to teacher, when teacher targets exist
 
 
 def decision_loss(
     out: DecisionOutput,
     targets: torch.Tensor,
     *,
-    cand_ordinals: torch.Tensor | None = None,
-    score_question_mask: torch.Tensor | None = None,
+    ordinals: torch.Tensor | None = None,
     missing_mask: torch.Tensor | None = None,
-    block_target: torch.Tensor | None = None,
-    block_mask: torch.Tensor | None = None,
-    weights: DecisionLossWeights | None = None,
+    teacher_probs: torch.Tensor | None = None,
+    teacher_mask: torch.Tensor | None = None,
+    weights: LossWeights | None = None,
     missing_tau: float = 0.8,
 ) -> dict[str, torch.Tensor]:
-    """Composite Large-stage decision loss (sec 40.2)."""
-    w = weights or DecisionLossWeights()
-    total = w.nll * nll_loss(out, targets) + w.brier * brier_loss(out, targets)
-    parts = {"nll": nll_loss(out, targets).detach(), "brier": brier_loss(out, targets).detach()}
-    if cand_ordinals is not None and score_question_mask is not None:
-        rps = rps_loss(out, targets, cand_ordinals, score_question_mask)
-        total = total + w.rps * rps
-        parts["rps"] = rps.detach()
-    if missing_mask is not None:
-        miss = missing_evidence_loss(out, missing_mask, missing_tau)
+    """Composite decision loss. With teacher targets (distillation),
+    questions with teacher_mask use KL to the teacher in place of the
+    gold NLL term; gold Brier/RPS still anchor them."""
+    w = weights or LossWeights()
+    cu = out.cand_cu
+    logp = out.log_probs()
+    p = logp.exp()
+    parts: dict[str, torch.Tensor] = {}
+
+    if teacher_probs is not None and teacher_mask is not None and teacher_mask.any():
+        per_q_gold = -per_question_sum(targets * logp, cu)
+        t = teacher_probs.clamp(min=1e-8)
+        per_q_kl = per_question_sum(t * (t.log() - logp), cu)
+        per_q = torch.where(teacher_mask, w.distill * per_q_kl, w.nll * per_q_gold)
+        main = per_q.mean()
+        parts["kl"] = per_q_kl[teacher_mask].mean().detach()
+    else:
+        main = w.nll * nll_loss(logp, targets, cu)
+    parts["nll"] = nll_loss(logp, targets, cu).detach()
+    total = main
+
+    br = brier_loss(p, targets, cu)
+    total = total + w.brier * br
+    parts["brier"] = br.detach()
+
+    if ordinals is not None:
+        score_mask = out.primitive == SCORE
+        if score_mask.any():
+            rps = rps_loss(p, targets, cu, ordinals, score_mask)
+            total = total + w.rps * rps
+            parts["rps"] = rps.detach()
+
+    if missing_mask is not None and missing_mask.any():
+        miss = missing_evidence_loss(logp, cu, missing_mask, missing_tau)
         total = total + w.missing * miss
         parts["missing"] = miss.detach()
-    if block_target is not None and block_mask is not None:
-        rtr = router_bce(out.route_probs, block_target, block_mask)
-        total = total + w.router * rtr
-        parts["router"] = rtr.detach()
+
+    if w.pointer_aux:
+        aux = nll_loss(out.pointer_log_probs(), targets, cu)
+        total = total + w.pointer_aux * aux
+        parts["pointer_nll"] = aux.detach()
+
     parts["total"] = total
     return parts

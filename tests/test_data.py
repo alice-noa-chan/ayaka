@@ -13,7 +13,6 @@ from ayaka.data.augment import (
 )
 from ayaka.data.dedup import dedup_samples, group_split, sample_dedup_key
 from ayaka.data.mixture import MixtureSampler, language_weights
-from ayaka.data.packing import pack_by_token_budget
 from ayaka.data.schema import Candidate, Question, Sample, uniform
 from ayaka.data.transforms import (
     boolq_noul,
@@ -26,7 +25,6 @@ from ayaka.data.transforms import (
     ordinal_score,
     sts_score,
 )
-from ayaka.tokenizer import HashTokenizer
 
 
 def _choice(qid="q", k=3):
@@ -276,20 +274,134 @@ def test_group_shared_state_merges_questions():
     assert sizes == [1, 2]
 
 
-# ----------------------------------------------------------------- packing
+# ---------------------------------------------------------- jev distill
 
 
-def test_pack_by_token_budget():
-    tok = HashTokenizer(512)
-    samples = [
-        _sample("short " * 20),
-        _sample("long " * 200),
-        _sample("mid " * 60),
-    ]
-    packs = pack_by_token_budget(samples, tok, token_budget=150)
-    assert len(packs) >= 2
-    total_packed = sum(len(p[0]) for p in packs)
-    assert total_packed == 3
-    for _, desc in packs:
-        assert desc.state_bucket in (512, 1024, 2048, 4096, 8192, 16384, 32768, 65536)
-        assert desc.cand_count_bucket[0] <= desc.cand_count_bucket[1]
+def test_jev_distill_transform_kinds():
+    from ayaka.data.transforms import jev_distill
+
+    noul = jev_distill(
+        {
+            "kind": "noul",
+            "options": ["false", "true"],
+            "target": [0.2, 0.8],
+            "state": "s",
+            "question": "q?",
+        }
+    )[0]
+    q = noul.questions[0]
+    assert [c.id for c in q.candidates] == ["false", "true"]
+    assert q.target_distribution["true"] == pytest.approx(0.8)
+    assert noul.metadata["task_family"] == "direct_jev"
+
+    score = jev_distill(
+        {
+            "kind": "score",
+            "options": ["0", "1", "2"],
+            "target": [0.1, 0.1, 0.9],
+            "state": "s",
+            "question": "rate",
+        }
+    )[0]
+    sq = score.questions[0]
+    assert [c.ordinal for c in sq.candidates] == [0, 1, 2]
+    assert sum(sq.target_distribution.values()) == pytest.approx(1.0)  # renormalized
+
+    choice = jev_distill(
+        {
+            "kind": "choice",
+            "options": ["escalate", "wait"],
+            "target": [0.7, 0.3],
+            "state": "s",
+            "question": "next?",
+        }
+    )[0]
+    assert [c.description for c in choice.questions[0].candidates] == ["escalate", "wait"]
+
+
+def test_hf_jsonl_spec_samples_uniformly(tmp_path, monkeypatch):
+    import json
+
+    import huggingface_hub
+
+    from ayaka.data import loaders
+
+    path = tmp_path / "train.jsonl"
+    with open(path, "w") as f:
+        for i in range(100):
+            f.write(
+                json.dumps(
+                    {
+                        "id": f"r{i}",
+                        "kind": "noul",
+                        "options": ["false", "true"],
+                        "target": [0.5, 0.5],
+                        "state": f"state {i}",
+                        "question": "q?",
+                    }
+                )
+                + "\n"
+            )
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda *a, **k: str(path))
+    samples, man = loaders.load_spec_samples("jev_distill", limit=10, dedup=False, seed=3)
+    assert len(samples) == 10
+    ids = [s.metadata["source_example_id"] for s in samples]
+    assert ids != [f"r{i}" for i in range(10)]  # not a head slice
+    again, _ = loaders.load_spec_samples("jev_distill", limit=10, dedup=False, seed=3)
+    assert [s.metadata["source_example_id"] for s in again] == ids  # seeded
+    assert man.split == "train"
+
+
+# ------------------------------------------------------------- decontam
+
+
+def test_decontaminator_drops_overlapping_samples():
+    from ayaka.data.decontam import Decontaminator
+
+    bench = "Policy: refunds require a receipt and purchase within 30 days. A customer bought 12 days ago but has no receipt."
+    d = Decontaminator([bench, "Short exact item text"], n=8)
+    leak = _sample(
+        "Background. refunds require a receipt and purchase within 30 days. A customer asked."
+    )
+    clean = _sample("An unrelated incident report about a failing disk in rack four.")
+    exact = _sample("short   EXACT item text")
+    kept, dropped = d.filter([leak, clean, exact])
+    assert kept == [clean] and dropped == 2
+
+
+def test_decontaminator_loads_vendored_jevbench():
+    import json
+    import os
+
+    from ayaka.data.decontam import Decontaminator, jevbench_public_dir
+
+    d = Decontaminator.from_jevbench()
+    with open(os.path.join(jevbench_public_dir(), "hard.jsonl"), encoding="utf-8") as f:
+        rec = json.loads(f.readline())
+    assert d.text_hit("Preamble. " + rec["state"] + " Trailing words.")
+    assert not d.text_hit(
+        "A completely unrelated sentence about sailing boats and the weather at sea today, nothing else."
+    )
+
+
+def test_reading_mc_skips_long_articles_instead_of_truncating():
+    from ayaka.data.transforms import reading_mc
+
+    row = {
+        "article": "word " * 50,
+        "question": "What?",
+        "options": ["a", "b", "c", "d"],
+        "answer": 2,
+    }
+    kw = {
+        "article_key": "article",
+        "question_key": "question",
+        "options_key": "options",
+        "label_key": "answer",
+    }
+    s = reading_mc(row, **kw, max_chars=1000)[0]
+    q = s.questions[0]
+    assert q.instruction == "What?" and q.target_distribution["c2"] == 1.0
+    assert s.metadata["task_family"] == "long_context"
+    assert reading_mc(row, **kw, max_chars=100) == []
+    assert reading_mc({**row, "options": ["a", "a", "b", "c"]}, **kw) == []

@@ -1,149 +1,213 @@
-"""Token-budget trainer (docs.md section 45).
+"""Decision trainer for the LoRA-adapted Gemma 4 backbone.
 
-BF16 compute + FP32 master params/optimizer state, fused AdamW,
-cosine decay to a floor, global-norm clip 1.0, zero_grad(set_to_none),
-optional torch.compile of the inner model, optional FSDP2 wrapping.
-Padding-free batches arrive pre-packed from data.packing.
+Each optimizer step consumes a fixed number of questions, split into
+token-budgeted micro-batches with gradient accumulation (loss weighted
+by questions per micro-batch). BF16 autocast on CUDA, activation
+checkpointing on the backbone, AdamW with separate LR for LoRA weights
+and the freshly initialized decision head.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import torch
 
-from ..losses import DecisionLossWeights, decision_loss
+from ..losses import LossWeights, decision_loss
 from ..metrics import compute_metrics
-from ..model.model import ElectraDecisionModel
-from .schedule import build_optimizer, cosine_warmup_schedule
+from ..model.electra import ElectraDecisionModel
+from ..model.ragged import ragged_log_softmax
+from ..tokenization import Tokenizer
+from .batching import TrainItem, budget_batches, collate_items
+from .schedule import cosine_warmup_schedule
 
 
 @dataclass
 class TrainConfig:
-    lr: float = 3e-5
     steps: int = 1000
-    warmup_frac: float = 0.02
+    questions_per_step: int = 64
+    micro_batch_tokens: int = 8_192  # halves automatically on CUDA OOM
+    lr: float = 1e-4  # LoRA weights
+    head_lr: float = 5e-4  # pointer head + gate
+    warmup_frac: float = 0.03
     min_lr_frac: float = 0.1
-    weight_decay: float = 0.1
-    betas: tuple[float, float] = (0.9, 0.95)
-    eps: float = 1e-8
+    weight_decay: float = 0.01
     grad_clip: float = 1.0
     bf16: bool = True
-    compile: bool = False
-    fused: bool = True
+    grad_checkpointing: bool = False  # off: ~30% faster; OOM backoff turns it on
+    min_micro_batch_tokens: int = 1_024
     missing_tau: float = 0.8
     log_every: int = 20
     eval_every: int = 0
     seed: int = 0
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    loss_weights: DecisionLossWeights = field(default_factory=DecisionLossWeights)
+    loss_weights: LossWeights = field(default_factory=LossWeights)
 
 
 class Trainer:
-    def __init__(self, model: ElectraDecisionModel, cfg: TrainConfig):
+    def __init__(self, model: ElectraDecisionModel, tok: Tokenizer, cfg: TrainConfig, device):
+        self.model = model
+        self.tok = tok
         self.cfg = cfg
+        self.device = torch.device(device)
         torch.manual_seed(cfg.seed)
-        self.device = torch.device(cfg.device)
-        self.model = model.to(self.device)
-        self.opt = build_optimizer(
-            model,
-            lr=cfg.lr,
-            weight_decay=cfg.weight_decay,
-            betas=cfg.betas,
-            eps=cfg.eps,
-            fused=cfg.fused,
+        self.micro_tokens = cfg.micro_batch_tokens
+        self.checkpointing = False
+        if cfg.grad_checkpointing:
+            self._enable_checkpointing()
+        backbone_params = [p for p in model.backbone.parameters() if p.requires_grad]
+        head_params = list(model.head.parameters()) + [model.gate]
+        self.opt = torch.optim.AdamW(
+            [
+                {"params": backbone_params, "lr": cfg.lr, "weight_decay": cfg.weight_decay},
+                {"params": head_params, "lr": cfg.head_lr, "weight_decay": 0.0},
+            ],
+            betas=(0.9, 0.98),
+            fused=self.device.type == "cuda",
         )
         self.sched = cosine_warmup_schedule(self.opt, cfg.steps, cfg.warmup_frac, cfg.min_lr_frac)
-        self._forward = model
-        if cfg.compile:
-            self._forward = torch.compile(model, backend="inductor")
         self.step_i = 0
-        self.history: list[dict] = []
+        self.use_amp = cfg.bf16 and self.device.type == "cuda"
+
+    def n_trainable(self) -> int:
+        return sum(p.numel() for g in self.opt.param_groups for p in g["params"])
 
     def _autocast(self):
-        if self.cfg.bf16 and self.device.type == "cuda":
-            return torch.autocast("cuda", dtype=torch.bfloat16)
-        return torch.autocast(self.device.type, enabled=False)
+        return torch.autocast("cuda", dtype=torch.bfloat16, enabled=self.use_amp)
 
-    def step(self, batch) -> dict[str, float]:
-        cfg = self.cfg
+    def _enable_checkpointing(self) -> None:
+        if hasattr(self.model.backbone, "gradient_checkpointing_enable"):
+            self.model.backbone.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False}
+            )
+            self.checkpointing = True
+
+    def train_step(self, items: list[TrainItem]) -> dict:
+        """One optimizer step. On CUDA OOM the step is retried with half
+        the micro-batch; below the floor, activation checkpointing is
+        switched on — so one config fits any GPU size."""
+        while True:
+            try:
+                return self._train_step(items)
+            except torch.cuda.OutOfMemoryError:
+                self.opt.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                if self.micro_tokens // 2 >= self.cfg.min_micro_batch_tokens:
+                    self.micro_tokens //= 2
+                elif not self.checkpointing:
+                    self._enable_checkpointing()
+                    self.micro_tokens = self.cfg.micro_batch_tokens
+                else:
+                    raise
+                print(
+                    f"[train] CUDA OOM -> micro_batch_tokens={self.micro_tokens} "
+                    f"checkpointing={self.checkpointing}",
+                    flush=True,
+                )
+
+    def _train_step(self, items: list[TrainItem]) -> dict:
         self.model.train()
-        self.opt.zero_grad(set_to_none=True)
-        with self._autocast():
-            out = self._forward(**batch.inputs)
+        n_q = len(items)
+        agg: dict[str, float] = {}
+        for mb in budget_batches(items, self.micro_tokens, shuffle_seed=None):
+            t = collate_items(mb, self.tok.pad_id).to(self.device)
+            with self._autocast():
+                out = self.model(t.batch)
             parts = decision_loss(
                 out,
-                batch.targets.float(),
-                cand_ordinals=batch.cand_ordinals,
-                score_question_mask=batch.score_question_mask,
-                missing_mask=batch.missing_mask,
-                block_target=batch.block_target,
-                block_mask=batch.block_mask,
-                weights=cfg.loss_weights,
-                missing_tau=cfg.missing_tau,
+                t.targets,
+                ordinals=t.ordinals,
+                missing_mask=t.flagged,
+                teacher_probs=t.teacher,
+                teacher_mask=t.teacher_mask,
+                weights=self.cfg.loss_weights,
+                missing_tau=self.cfg.missing_tau,
             )
-        parts["total"].backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), cfg.grad_clip)
+            frac = len(mb) / n_q
+            (parts["total"] * frac).backward()
+            for k, v in parts.items():
+                agg[k] = agg.get(k, 0.0) + float(v.detach()) * frac
+        params = [p for g in self.opt.param_groups for p in g["params"]]
+        gn = torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip)
         self.opt.step()
         self.sched.step()
+        self.opt.zero_grad(set_to_none=True)
         self.step_i += 1
-        rec = {
-            "step": self.step_i,
-            "loss": float(parts["total"].detach()),
-            "grad_norm": float(grad_norm),
-            "lr": self.sched.get_last_lr()[0],
-        }
-        for k, v in parts.items():
-            if k != "total":
-                rec[f"loss_{k}"] = float(v)
-        self.history.append(rec)
-        return rec
+        agg.update(
+            step=self.step_i,
+            grad_norm=float(gn),
+            lr=self.sched.get_last_lr()[0],
+            gate=self.model.gate.detach().tolist(),
+            micro_tokens=self.micro_tokens,
+        )
+        return agg
+
+    def train(
+        self,
+        stream: Iterator[list[TrainItem]],
+        eval_items: list[TrainItem] | None = None,
+        on_step=None,
+        verbose: bool = True,
+    ) -> list[dict]:
+        history = []
+        t0 = time.time()
+        while self.step_i < self.cfg.steps:
+            rec = self.train_step(next(stream))
+            rec["elapsed"] = time.time() - t0
+            if eval_items and self.cfg.eval_every and self.step_i % self.cfg.eval_every == 0:
+                rec.update({f"eval_{k}": v for k, v in self.evaluate(eval_items).items()})
+            history.append(rec)
+            if (
+                verbose
+                and self.cfg.log_every
+                and (self.step_i % self.cfg.log_every == 0 or self.step_i == 1)
+            ):
+                ev = " ".join(
+                    f"{k}={v:.4f}"
+                    for k, v in rec.items()
+                    if k.startswith("eval_") and isinstance(v, float)
+                )
+                print(
+                    f"[train] step {self.step_i}/{self.cfg.steps} loss={rec['total']:.4f} nll={rec['nll']:.4f} "
+                    f"brier={rec['brier']:.4f} gn={rec['grad_norm']:.2f} lr={rec['lr']:.2e} "
+                    f"gate={[round(g, 3) for g in rec['gate']]} {rec['elapsed']:.0f}s {ev}",
+                    flush=True,
+                )
+            if on_step is not None:
+                on_step(self.step_i, rec)
+        return history
 
     @torch.no_grad()
-    def evaluate(self, batches) -> dict[str, float]:
+    def predict(
+        self, items: list[TrainItem], apply_temperature: bool = True, return_logits: bool = False
+    ):
+        """Per-question probability vectors (input candidate order)."""
         self.model.eval()
-        agg: dict[str, list[float]] = {}
-        n = 0
-        for batch in batches:
-            out = self._forward(**batch.inputs)
-            m = compute_metrics(out, batch.targets.float(), batch.missing_mask)
-            for k, v in m.items():
-                agg.setdefault(k, []).append(v * batch.n_questions)
-            n += batch.n_questions
-        return {k: sum(v) / max(n, 1) for k, v in agg.items()}
+        probs: list[list[float] | None] = [None] * len(items)
+        logits: list[list[float] | None] = [None] * len(items)
+        index = {id(it): i for i, it in enumerate(items)}
+        for mb in budget_batches(items, self.cfg.micro_batch_tokens, shuffle_seed=None):
+            t = collate_items(mb, self.tok.pad_id).to(self.device)
+            with self._autocast():
+                out = self.model(t.batch, apply_temperature=apply_temperature)
+            lp = ragged_log_softmax(out.logits.float(), out.cand_cu).exp().tolist()
+            lg = out.logits.float().tolist()
+            cu = out.cand_cu.tolist()
+            for j, it in enumerate(mb):
+                probs[index[id(it)]] = lp[cu[j] : cu[j + 1]]
+                logits[index[id(it)]] = lg[cu[j] : cu[j + 1]]
+        return (probs, logits) if return_logits else probs
 
-    def train(self, train_batches, eval_batches=None) -> list[dict]:
-        """train_batches: iterable (re-iterable) of packed TrainBatch —
-        sampled fresh per step for infinite-stream semantics."""
-        it = iter(train_batches)
-        while self.step_i < self.cfg.steps:
-            try:
-                batch = next(it)
-            except StopIteration:
-                it = iter(train_batches)
-                break
-            t0 = time.time()
-            rec = self.step(batch)
-            rec["sec"] = time.time() - t0
-            if self.cfg.log_every and self.step_i % self.cfg.log_every == 0:
-                pass  # caller reads history; no printing inside trainer
-            if eval_batches and self.cfg.eval_every and self.step_i % self.cfg.eval_every == 0:
-                rec.update({f"eval_{k}": v for k, v in self.evaluate(eval_batches).items()})
-        return self.history
-
-    def state_dict(self) -> dict:
-        return {
-            "model": self.model.state_dict(),
-            "optimizer": self.opt.state_dict(),
-            "scheduler": self.sched.state_dict(),
-            "step": self.step_i,
-            "config": self.cfg,
-            "temperature": self.model.temperature.tolist(),
-        }
-
-    def load_state_dict(self, sd: dict) -> None:
-        self.model.load_state_dict(sd["model"])
-        self.opt.load_state_dict(sd["optimizer"])
-        self.sched.load_state_dict(sd["scheduler"])
-        self.step_i = sd["step"]
+    def evaluate(self, items: list[TrainItem]) -> dict:
+        p = self.predict(items)
+        y = [it.target for it in items]
+        # RPS needs ordinal order
+        p_o, y_o = [], []
+        for pi, yi, it in zip(p, y, items, strict=True):
+            order = sorted(range(len(it.ordinals)), key=lambda k: it.ordinals[k])
+            p_o.append([pi[k] for k in order])
+            y_o.append([yi[k] for k in order])
+        return compute_metrics(
+            p_o, y_o, types=[it.type for it in items], flagged=[it.flagged for it in items]
+        )

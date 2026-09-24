@@ -21,7 +21,6 @@ from ayaka.data.loaders import (
     load_spec_samples,
 )
 from ayaka.data.manifest import DatasetManifest, write_manifest
-from ayaka.tokenizer import SPECIAL_TOKEN_IDS, load_bpe, train_bpe
 
 # ------------------------------------------------------------- fake HF ds
 
@@ -261,66 +260,6 @@ def test_manifest_roundtrip(tmp_path):
     assert loaded["dedup_version"]
 
 
-# ---------------------------------------------------------------- run driver
-
-
-def test_run_training_synthetic(tmp_path):
-    from ayaka.training.run import RunConfig, run_training, synthetic_pools
-
-    cfg = RunConfig(
-        model_size="tiny",
-        steps=2,
-        samples_per_step=8,
-        token_budget=2048,
-        artifacts_dir=str(tmp_path),
-        run_name="smoke",
-        log_every=0,
-        bf16=False,
-    )
-    result = run_training(cfg, pools=synthetic_pools(4), verbose=False)
-    assert result["steps"] == 2
-    assert Path(result["checkpoint"]).exists()
-    assert (tmp_path / "smoke" / "history.json").exists()
-    assert len(json.loads((tmp_path / "smoke" / "history.json").read_text())) == 2
-
-
-def test_packed_stream_deterministic_seed():
-    import torch
-
-    from ayaka.data.mixture import MixtureSampler
-    from ayaka.data.packing import pack_by_token_budget
-    from ayaka.tokenizer import HashTokenizer
-    from ayaka.training.batch import build_train_batch
-    from ayaka.training.run import synthetic_pools
-
-    pools = synthetic_pools(4)
-    tok = HashTokenizer(512)
-    s1, s2 = MixtureSampler(seed=7), MixtureSampler(seed=7)
-    b1 = s1.sample(pools, 8)
-    b2 = s2.sample(pools, 8)
-    assert [(s.state, s.questions[0].instruction) for s in b1] == [
-        (s.state, s.questions[0].instruction) for s in b2
-    ]
-    packs = pack_by_token_budget(b1, tok, 2048)
-    batch = build_train_batch(packs[0][0], tok, 64, torch.device("cpu"))
-    assert batch.targets.ndim == 1
-
-
-# ------------------------------------------------------------- tokenizer
-
-
-def test_train_bpe_roundtrip(tmp_path):
-    texts = ["the cat sat", "고양이가 앉았다", "猫が座った", "hello world"] * 4
-    tok = train_bpe(texts, vocab_size=300, save_path=str(tmp_path / "tok.json"))
-    assert tok.vocab_size <= 300
-    ids = tok.encode("hello world")
-    assert ids and tok.decode(ids)
-    for name in ("<pad>", "<state>", "<q>"):
-        assert tok.token_id(name) == SPECIAL_TOKEN_IDS[name]
-    loaded = load_bpe(str(tmp_path / "tok.json"))
-    assert loaded.encode("hello") == tok.encode("hello")
-
-
 # ---------------------------------------------------------------- beam app
 
 
@@ -332,3 +271,19 @@ def test_beam_app_importable():
         import beam_train  # noqa: F401
     finally:
         sys.path.pop(0)
+
+
+def test_pipeline_set_parsing():
+    from ayaka.pipeline import parse_sets
+
+    got = parse_sets(
+        ["steps=20", "liger=true", "specs=jev_distill,quality", 'spec_limits={"jev_distill":10}']
+    )
+    assert got == {
+        "steps": 20,
+        "liger": True,
+        "specs": ["jev_distill", "quality"],
+        "spec_limits": {"jev_distill": 10},
+    }
+    with pytest.raises(SystemExit):
+        parse_sets(["not_a_field=1"])
