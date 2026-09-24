@@ -74,9 +74,7 @@ class Decision:
         cache = self.model.encode_prefix(torch.tensor([prefix], device=dev))
         cache.batch_repeat_interleave(len(items))
         batch = suffix_rows(items, len(prefix), self.tok.pad_id).to(dev)
-        out = self.model.decide(
-            self.model.encode(batch, past_key_values=cache), batch, apply_temperature=True
-        )
+        out = self.model(batch, apply_temperature=True, past_key_values=cache)
         p = ragged_softmax(out.logits, out.cand_cu).tolist()
         cu = out.cand_cu.tolist()
         return [p[cu[i] : cu[i + 1]] for i in range(len(items))]

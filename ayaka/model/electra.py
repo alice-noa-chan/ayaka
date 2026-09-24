@@ -16,13 +16,14 @@ the pointer helps. Per-primitive temperatures are fitted post-hoc.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 import torch
 import torch.nn as nn
 
 from ..backbone import embedding_rows, label_logits, load_text_backbone
 from ..config import ElectraConfig
+from .fastpath import forward_kept, kv_shared_start, prefix_cache
 from .heads import PointerHead
 from .ragged import ragged_log_softmax
 
@@ -93,6 +94,11 @@ class ElectraDecisionModel(nn.Module):
         )
         self.gate = nn.Parameter(torch.zeros(3))
         self.register_buffer("temperature", torch.ones(3))
+        # exact speed-up on KV-shared backbones (E2B/E4B); see model/fastpath.py
+        # option spans are read below the KV-shared layers (all of them on
+        # backbones without KV sharing); the answer position from the top
+        self.span_layer = kv_shared_start(text_config)
+        self.prune_shared_positions = self.span_layer is not None
 
     @classmethod
     def from_config(
@@ -119,28 +125,57 @@ class ElectraDecisionModel(nn.Module):
     def label_rows(self, ids: torch.Tensor) -> torch.Tensor:
         return embedding_rows(self.text_model().embed_tokens, ids)
 
-    def encode(self, batch: DecisionBatch, past_key_values=None) -> torch.Tensor:
+    def encode(
+        self, batch: DecisionBatch, past_key_values=None
+    ) -> tuple[torch.Tensor, torch.Tensor, DecisionBatch]:
+        """-> (answer states, span states, batch indexed into them).
+
+        On KV-shared backbones (E2B/E4B) only the answer positions run
+        through the shared layers and the returned batch points answer_pos
+        into that compact [B, 1, D] view; option spans index the states
+        below the shared layers. Both paths give identical results
+        (tests/test_model.py).
+        """
+        common = {
+            "attention_mask": batch.attention_mask,
+            "position_ids": batch.position_ids,
+            "past_key_values": past_key_values,
+        }
+        if self.prune_shared_positions:
+            keep = batch.answer_pos.unsqueeze(1)
+            top, spans_h = forward_kept(self.text_model(), batch.input_ids, keep, **common)
+            return top, spans_h, replace(batch, answer_pos=torch.zeros_like(batch.answer_pos))
         out = self.backbone(
             input_ids=batch.input_ids,
-            attention_mask=batch.attention_mask,
-            position_ids=batch.position_ids,
-            past_key_values=past_key_values,
             use_cache=past_key_values is not None,
+            output_hidden_states=self.span_layer is not None,
+            **common,
         )
-        return out.last_hidden_state
+        top = out.last_hidden_state
+        if self.span_layer is None:
+            return top, top, batch
+        return top, self.text_model().norm(out.hidden_states[self.span_layer]), batch
 
     def encode_prefix(self, prefix_ids: torch.Tensor):
-        """Run the shared prefix once; returns its KV cache."""
+        """Run the shared prefix once; returns its KV cache (on KV-shared
+        backbones the shared layers are skipped for the prefix)."""
+        if self.prune_shared_positions:
+            return prefix_cache(self.text_model(), prefix_ids)
         out = self.backbone(input_ids=prefix_ids, use_cache=True)
         return out.past_key_values
 
     # ---------------------------------------------------------------- head
     def decide(
-        self, hidden: torch.Tensor, batch: DecisionBatch, apply_temperature: bool = False
+        self,
+        hidden: torch.Tensor,
+        batch: DecisionBatch,
+        apply_temperature: bool = False,
+        span_hidden: torch.Tensor | None = None,
     ) -> DecisionOutput:
         n_q = batch.answer_pos.numel()
         q = hidden[torch.arange(n_q, device=hidden.device), batch.answer_pos].float()
-        r = span_means(hidden, batch.cand_question, batch.cand_spans)
+        spans_h = hidden if span_hidden is None else span_hidden
+        r = span_means(spans_h, batch.cand_question, batch.cand_spans)
         cq = batch.cand_question
         has_label_c = batch.has_label[cq]
         lab = label_logits(q[cq], self.label_rows(batch.label_ids), self.softcap)
@@ -152,8 +187,11 @@ class ElectraDecisionModel(nn.Module):
             logits = logits / self.temperature[prim_c]
         return DecisionOutput(logits, lab, ptr, batch.cand_cu, cq, batch.primitive)
 
-    def forward(self, batch: DecisionBatch, apply_temperature: bool = False) -> DecisionOutput:
-        return self.decide(self.encode(batch), batch, apply_temperature)
+    def forward(
+        self, batch: DecisionBatch, apply_temperature: bool = False, past_key_values=None
+    ) -> DecisionOutput:
+        top, spans_h, view = self.encode(batch, past_key_values)
+        return self.decide(top, view, apply_temperature, span_hidden=spans_h)
 
     # ------------------------------------------------------- checkpointing
     def head_state_dict(self) -> dict:

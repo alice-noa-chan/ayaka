@@ -37,6 +37,14 @@ Guarantees, each covered by `tests/test_model.py`:
 - **Zero-shot preservation.** With `g = 0` the output is exactly the backbone's
   restricted LM-head readout of the label tokens. Training only moves away from
   that as far as it helps.
+- **Exact compute skipping on E2B/E4B.** The last 20 (E2B) / 18 (E4B) Gemma 4
+  layers are KV-shared: they read the K/V of earlier layers and never produce
+  their own. Electra therefore runs only the answer position through them,
+  reads option spans just below them, and encodes a shared prefix only up to
+  them. Outputs and gradients are unchanged (tests), and on E2B CPU p50 went
+  from 2.4 s to 0.99 s (easy) and from 42 s to 14 s (hard). This is 2.5–3.0×,
+  matching the ~70% of per-token FLOPs in E2B's double-wide shared layers.
+  12B has no KV sharing, so this does not apply to it.
 - **Only the text stack is loaded.** Vision and audio towers never reach memory,
   and the 262K-vocab LM head is never materialized.
 
@@ -113,7 +121,9 @@ the TypeSafe `/v1/systemone` protocol JevBench already uses. All questions in
 a request share one state encoding.
 
 The int8 runtime modes were measured on Gemma 4 E2B zero-shot, JevBench
-public tiers, 8-core x86 CPU:
+public tiers, 8-core x86 CPU. The latencies below were taken before the
+KV-shared compute skipping. With it, int8 `auto` measures easy 97.9% /
+original 88.9% at p50 0.97 s.
 
 | `--linear-mode` | easy | original | p50 | RAM |
 |---|---|---|---|---|

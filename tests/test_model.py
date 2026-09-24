@@ -110,7 +110,8 @@ def test_zero_gate_reproduces_backbone_readout(model):
     assert torch.allclose(out.logits, out.label_logits)
     # and those are the tied-embedding LM-head logits of the label tokens
     with torch.no_grad():
-        h = model.encode(batch)[0, batch.answer_pos[0]]
+        full_h = model.backbone(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
+        h = full_h.last_hidden_state[0, batch.answer_pos[0]]
         full = torch.tanh((model.embed_weight() @ h) / model.softcap) * model.softcap
     assert torch.allclose(out.label_logits, full[batch.label_ids], atol=1e-5)
 
@@ -136,3 +137,60 @@ def test_temperature_applies_per_primitive(model):
             model.temperature.fill_(1.0)
     assert max(p4) - min(p4) < max(p1) - min(p1)  # flatter
     assert max(range(3), key=p4.__getitem__) == max(range(3), key=p1.__getitem__)
+
+
+def _both_paths(model, fn):
+    """Run fn with KV-shared position pruning on and off."""
+    saved = model.prune_shared_positions
+    try:
+        model.prune_shared_positions = True
+        on = fn()
+        model.prune_shared_positions = False
+        off = fn()
+    finally:
+        model.prune_shared_positions = saved
+    return on, off
+
+
+def test_shared_layer_pruning_is_exact_full_rows(model):
+    """Dropping unread positions in KV-shared layers changes nothing."""
+    from ayaka.model.fastpath import kv_shared_start
+
+    assert kv_shared_start(model.text_config) is not None  # tiny config shares KV
+    views = [
+        QuestionView("choice", "Which carrier?", ["DHL", "UPS", "FedEx"]),
+        QuestionView("noul", "Shipped?", ["no", "yes"]),
+        QuestionView("score", "Urgency?", ["low", "mid", "high"], ordinals=[0, 1, 2]),
+    ]
+    _, items = encode_decision(STATE, views, TOK, max_seq_len=512)
+    batch = full_rows(items, TOK.pad_id)
+    with torch.no_grad():
+        on, off = _both_paths(model, lambda: model(batch))
+    assert torch.allclose(on.logits, off.logits, atol=1e-5)
+    assert torch.allclose(on.pointer_logits, off.pointer_logits, atol=1e-5)
+
+
+def test_shared_layer_pruning_is_exact_cache_path(model):
+    d = Decision(model, TOK)
+    qs = [
+        QuestionSpec("choice", "What does the user want?", ["track order", "refund", "cancel"]),
+        QuestionSpec("noul", "Has the order shipped?", ["not shipped", "shipped"]),
+    ]
+    on, off = _both_paths(model, lambda: d.decide(STATE, qs))
+    for a, b in zip(on, off, strict=True):
+        assert a.probs == pytest.approx(b.probs, abs=1e-5)
+
+
+def test_shared_layer_pruning_same_gradients():
+    """Training through the pruned path yields the same gradients."""
+    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    views = [QuestionView("choice", "Which carrier?", ["DHL", "UPS", "FedEx"])]
+    _, items = encode_decision(STATE, views, TOK, max_seq_len=512)
+    batch = full_rows(items, TOK.pad_id)
+    grads = []
+    for flag in (True, False):
+        m.zero_grad()
+        m.prune_shared_positions = flag
+        m(batch).logits.logsumexp(0).backward()
+        grads.append(m.text_model().layers[0].mlp.down_proj.weight.grad.clone())
+    assert torch.allclose(grads[0], grads[1], atol=1e-6)
