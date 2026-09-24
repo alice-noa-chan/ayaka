@@ -181,6 +181,13 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--threads", type=int, default=0, help="torch CPU threads (0 = default)")
     ap.add_argument(
+        "--dtype",
+        default="bfloat16",
+        choices=["bfloat16", "float32"],
+        help="float32 tracks the reference probabilities more closely (bf16 moved some "
+        "near-tie noul answers by up to 0.2 on E2B) at ~1.3-1.5x CPU latency",
+    )
+    ap.add_argument(
         "--linear-mode",
         default="auto",
         choices=["auto", "dequant", "mixed", "dynamic"],
@@ -189,7 +196,12 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     if args.threads:
         torch.set_num_threads(args.threads)
-    model, tok = load_exported(args.model, device=args.device, linear_mode=args.linear_mode)
+    model, tok = load_exported(
+        args.model,
+        device=args.device,
+        dtype=getattr(torch, args.dtype),
+        linear_mode=args.linear_mode,
+    )
     name = os.path.basename(os.path.normpath(args.model))
     decision = Decision(model, tok)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])

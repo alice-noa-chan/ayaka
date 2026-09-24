@@ -66,9 +66,14 @@ def render_state(state) -> str:
     return json.dumps(state, ensure_ascii=False, sort_keys=True)
 
 
+def prefix_head(tok: Tokenizer) -> list[int]:
+    """The constant start of every prefix ([bos] + instructions + <state>).
+    Its KV cache does not depend on what follows, so servers encode it once."""
+    return [tok.bos_id] + tok.encode(USER_OPEN + SYSTEM + "\n\n<state>\n")
+
+
 def render_prefix(state, tok: Tokenizer, max_state_tokens: int | None = None) -> list[int]:
     """[bos] user-turn open + system text + state block."""
-    head = tok.encode(USER_OPEN + SYSTEM + "\n\n<state>\n")
     body = tok.encode(render_state(state))
     if max_state_tokens is not None and len(body) > max_state_tokens:
         # keep both ends: headers and the latest facts are the usual evidence
@@ -76,7 +81,7 @@ def render_prefix(state, tok: Tokenizer, max_state_tokens: int | None = None) ->
         keep_tail = max_state_tokens - keep_head
         body = body[:keep_head] + tok.encode("\n[...]\n") + body[len(body) - keep_tail :]
     tail = tok.encode("\n</state>\n\n")
-    return [tok.bos_id] + head + body + tail
+    return prefix_head(tok) + body + tail
 
 
 def _canon(text: str) -> str:

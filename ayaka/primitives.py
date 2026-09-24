@@ -16,6 +16,7 @@ pointer shortlist, then label readout inside the shortlist.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 
 import torch
@@ -23,7 +24,7 @@ import torch
 from .collate import EncodedQuestion, encode_decision, suffix_rows
 from .model.electra import ElectraDecisionModel
 from .model.ragged import ragged_softmax
-from .prompt import QuestionView
+from .prompt import QuestionView, prefix_head
 from .tokenization import Tokenizer
 
 
@@ -57,6 +58,8 @@ class Decision:
         self.tok = tok
         self.max_seq_len = max_seq_len or model.cfg.max_seq_len
         self.max_labels = model.cfg.max_label_candidates
+        self.reuse_head = True  # encode the constant prompt head once
+        self._head: tuple[list[int], object, torch.device] | None = None
 
     def _device(self, device):
         return device or next(self.model.parameters()).device
@@ -71,13 +74,26 @@ class Decision:
         self, prefix: list[int], items: list[EncodedQuestion], device
     ) -> list[list[float]]:
         dev = self._device(device)
-        cache = self.model.encode_prefix(torch.tensor([prefix], device=dev))
+        cache = self._prefix_cache(prefix, torch.device(dev))
         cache.batch_repeat_interleave(len(items))
         batch = suffix_rows(items, len(prefix), self.tok.pad_id).to(dev)
         out = self.model(batch, apply_temperature=True, past_key_values=cache)
         p = ragged_softmax(out.logits, out.cand_cu).tolist()
         cu = out.cand_cu.tolist()
         return [p[cu[i] : cu[i + 1]] for i in range(len(items))]
+
+    def _prefix_cache(self, prefix: list[int], dev: torch.device):
+        """KV cache for ``prefix``. The constant head is encoded once per
+        Decision and deep-copied, so a request only encodes its own state."""
+        if self.reuse_head:
+            if self._head is None or self._head[2] != dev:
+                head = prefix_head(self.tok)
+                self._head = (head, self.model.encode_prefix(torch.tensor([head], device=dev)), dev)
+            head, head_cache, _ = self._head
+            if len(prefix) > len(head) and prefix[: len(head)] == head:
+                rest = torch.tensor([prefix[len(head) :]], device=dev)
+                return self.model.encode_prefix(rest, cache=copy.deepcopy(head_cache))
+        return self.model.encode_prefix(torch.tensor([prefix], device=dev))
 
     @torch.no_grad()
     def decide(self, state, questions: list[QuestionSpec], device=None) -> list[DecisionResult]:

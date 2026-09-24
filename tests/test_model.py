@@ -194,3 +194,21 @@ def test_shared_layer_pruning_same_gradients():
         m(batch).logits.logsumexp(0).backward()
         grads.append(m.text_model().layers[0].mlp.down_proj.weight.grad.clone())
     assert torch.allclose(grads[0], grads[1], atol=1e-6)
+
+
+def test_head_cache_reuse_is_exact(model):
+    """Encoding the constant prompt head once and reusing it is exact,
+    including across requests with different states."""
+    d = Decision(model, TOK)
+    qs = [
+        QuestionSpec("choice", "Which carrier?", ["DHL", "UPS", "FedEx"]),
+        QuestionSpec("noul", "Shipped?", ["no", "yes"]),
+    ]
+    other = {"order": {"id": 9, "status": "pending"}, "message": "cancel it please " * 20}
+    for state in (STATE, other, STATE):
+        d.reuse_head = True
+        a = d.decide(state, qs)
+        d.reuse_head = False
+        b = d.decide(state, qs)
+        for ra, rb in zip(a, b, strict=True):
+            assert ra.probs == pytest.approx(rb.probs, abs=1e-5)

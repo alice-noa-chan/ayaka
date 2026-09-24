@@ -156,12 +156,13 @@ class ElectraDecisionModel(nn.Module):
             return top, top, batch
         return top, self.text_model().norm(out.hidden_states[self.span_layer]), batch
 
-    def encode_prefix(self, prefix_ids: torch.Tensor):
+    def encode_prefix(self, prefix_ids: torch.Tensor, cache=None):
         """Run the shared prefix once; returns its KV cache (on KV-shared
-        backbones the shared layers are skipped for the prefix)."""
+        backbones the shared layers are skipped for the prefix). ``cache``
+        continues an already-encoded head."""
         if self.prune_shared_positions:
-            return prefix_cache(self.text_model(), prefix_ids)
-        out = self.backbone(input_ids=prefix_ids, use_cache=True)
+            return prefix_cache(self.text_model(), prefix_ids, cache)
+        out = self.backbone(input_ids=prefix_ids, past_key_values=cache, use_cache=True)
         return out.past_key_values
 
     # ---------------------------------------------------------------- head

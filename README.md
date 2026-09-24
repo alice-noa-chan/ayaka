@@ -45,6 +45,16 @@ Guarantees, each covered by `tests/test_model.py`:
   from 2.4 s to 0.99 s (easy) and from 42 s to 14 s (hard). This is 2.5–3.0×,
   matching the ~70% of per-token FLOPs in E2B's double-wide shared layers.
   12B has no KV sharing, so this does not apply to it.
+- **Constant prompt head encoded once.** The instructions before `<state>` are
+  identical in every request, and in a causal model their KV does not depend
+  on what follows. The server therefore encodes them once and copies the
+  cache. SDPA also takes its `is_causal` fast path (flash on GPU) whenever
+  no mask is needed. Together on E2B CPU p50: easy 0.99 → 0.69 s, hard
+  14.0 → 12.7 s. The result is exact: in fp32 the difference is ≤ 1e-5.
+- **bf16 vs fp32.** On CPU, bf16 activations moved a few near-tie answers by
+  up to 0.2 probability relative to fp32. `ayaka.serve --dtype float32`
+  follows the reference probabilities more closely at about 1.3–1.5× CPU
+  latency. bf16 stays the default, and training uses bf16 too.
 - **Only the text stack is loaded.** Vision and audio towers never reach memory,
   and the 262K-vocab LM head is never materialized.
 
