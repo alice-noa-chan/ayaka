@@ -327,7 +327,7 @@ def main(argv: list[str] | None = None) -> dict:
 
             tok = HFTokenizer.from_pretrained(source_backbone)
             items = items_from_spec(
-                "jev_distill_test30k",
+                "jev_open_test",
                 args.parity,
                 tok,
                 model.cfg,
