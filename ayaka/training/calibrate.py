@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import torch
 
-from ..model.electra import PRIMITIVE_INDEX, ElectraDecisionModel
+from ..model.electra import LENGTH_BUCKETS, PRIMITIVE_INDEX, ElectraDecisionModel
 
 
 def fit_temperature(
@@ -42,18 +42,39 @@ def fit_temperature(
     return min(max(t, 0.05), 20.0)
 
 
+MIN_QUESTIONS = 20  # fewer -> fall back to the coarser temperature
+
+
 def fit_temperatures(
-    logits: list[list[float]], targets: list[list[float]], types: list[str]
+    logits: list[list[float]],
+    targets: list[list[float]],
+    types: list[str],
+    lengths: list[int] | None = None,
+    long_threshold: int = 1024,
 ) -> dict[str, float]:
-    temps = {}
+    """Scalar T per primitive ("choice") and, when ``lengths`` are given, per
+    primitive and prompt-length bucket ("choice@long"). A bucket with too
+    few questions keeps its primitive's temperature."""
+    temps: dict[str, float] = {}
     for prim in PRIMITIVE_INDEX:
         idx = [i for i, t in enumerate(types) if t == prim]
-        if len(idx) >= 20:  # too few questions -> keep T = 1
-            temps[prim] = fit_temperature([logits[i] for i in idx], [targets[i] for i in idx])
+        if len(idx) < MIN_QUESTIONS:
+            continue
+        temps[prim] = fit_temperature([logits[i] for i in idx], [targets[i] for i in idx])
+        if lengths is None:
+            continue
+        for b, name in enumerate(LENGTH_BUCKETS):
+            sub = [i for i in idx if (lengths[i] >= long_threshold) == bool(b)]
+            if len(sub) >= MIN_QUESTIONS:
+                temps[f"{prim}@{name}"] = fit_temperature(
+                    [logits[i] for i in sub], [targets[i] for i in sub]
+                )
     return temps
 
 
 def apply_temperatures(model: ElectraDecisionModel, temps: dict[str, float]) -> None:
     with torch.no_grad():
-        for prim, t in temps.items():
-            model.temperature[PRIMITIVE_INDEX[prim]] = t
+        for prim, p_idx in PRIMITIVE_INDEX.items():
+            base = temps.get(prim, 1.0)
+            for b, name in enumerate(LENGTH_BUCKETS):
+                model.temperature[p_idx, b] = temps.get(f"{prim}@{name}", base)

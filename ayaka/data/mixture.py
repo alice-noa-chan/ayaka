@@ -17,17 +17,18 @@ from collections import defaultdict
 # info"), long documents, and multilingual NLU. Quotas renormalize over the
 # families actually present.
 TASK_FAMILY_QUOTA: dict[str, float] = {
-    "direct_jev": 0.30,
-    "policy": 0.06,  # LegalBench rule application ~ JevBench long_policy / policy
+    "direct_jev": 0.27,
+    "policy": 0.08,  # LegalBench + generated long policies (JevBench long_policy)
+    "temporal_numeric": 0.07,  # generated dates/amounts (JevBench temporal_numeric)
     "judge": 0.10,
-    "reasoning": 0.10,
+    "reasoning": 0.09,
     "fact_check": 0.06,
-    "choice": 0.06,
-    "nli": 0.06,
-    "noul": 0.08,
-    "score": 0.05,
+    "choice": 0.05,
+    "nli": 0.05,
+    "noul": 0.07,
+    "score": 0.04,
     "human_soft_label": 0.04,
-    "hard_adversarial": 0.04,
+    "hard_adversarial": 0.03,
     "long_context": 0.05,
 }
 

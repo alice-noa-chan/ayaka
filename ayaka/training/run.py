@@ -50,6 +50,9 @@ DEFAULT_SPECS = [
     "arc_challenge",
     "commonsense_qa",
     "legalbench",
+    "synth_temporal",
+    "synth_numeric",
+    "synth_policy",
     "snli",
     "multi_nli",
     "boolq",
@@ -93,6 +96,9 @@ class RunConfig:
             "aegis_safety": 30_000,
             "aqua_rat": 30_000,
             "squad_v2_answerable": 30_000,
+            "synth_temporal": 20_000,
+            "synth_numeric": 20_000,
+            "synth_policy": 15_000,
             "jev_distill": 200_000,
         }
     )
@@ -343,7 +349,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     held = split_eval(pools, cfg.eval_questions, cfg.seed) if cfg.eval_questions else []
     # separate from `held`: tops up primitives the calibration spec lacks
     # (Open-Jev has no score questions) without touching evaluation data
-    cal_reserve = split_eval(pools, 600, cfg.seed + 11) if cfg.calibrate else []
+    cal_reserve = split_eval(pools, 1500, cfg.seed + 11) if cfg.calibrate else []
     eval_items = [it for s in held for it in sample_to_items(s, tok, mcfg)]
     if verbose:
         sizes = {f"{f}/{lang}": len(v) for (f, lang), v in pools.items()}
@@ -396,11 +402,24 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             cal = items_from_spec(
                 cfg.calibration_spec, cfg.calibration_questions, tok, mcfg, cfg.seed, decon
             )
-            have = {t: sum(it.type == t for it in cal) for t in ("noul", "choice", "score")}
             extra = [it for s in cal_reserve for it in sample_to_items(s, tok, mcfg)]
-            cal += [it for it in extra if have[it.type] < 200]
+            long_n = mcfg.long_prompt_tokens
+            have = {
+                (t, b): sum(it.type == t and (it.length >= long_n) == b for it in cal)
+                for t in ("noul", "choice", "score")
+                for b in (False, True)
+            }
+            # top up every (primitive, length bucket) the calibration split lacks,
+            # long prompts especially: they were overconfident with one scalar
+            cal += [it for it in extra if have[(it.type, it.length >= long_n)] < 200]
         _, logits = trainer.predict(cal, apply_temperature=False, return_logits=True)
-        temps = fit_temperatures(logits, [it.target for it in cal], [it.type for it in cal])
+        temps = fit_temperatures(
+            logits,
+            [it.target for it in cal],
+            [it.type for it in cal],
+            [it.length for it in cal],
+            mcfg.long_prompt_tokens,
+        )
         apply_temperatures(model, temps)
         report["temperatures"] = temps
         if verbose:

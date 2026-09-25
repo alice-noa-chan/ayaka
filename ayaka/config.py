@@ -31,6 +31,7 @@ class ElectraConfig:
     lora_alpha: int
     max_seq_len: int = 4096  # prompt tokens per question (state + question + options)
     max_label_candidates: int = 26  # A..Z single-token readout; larger sets use the pointer
+    long_prompt_tokens: int = 1024  # prompts at least this long use the "long" temperatures
     lora_dropout: float = 0.05
     lora_targets: tuple[str, ...] = (
         "q_proj",

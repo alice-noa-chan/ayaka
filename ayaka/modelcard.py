@@ -215,8 +215,10 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         f"| `{fid_spec}` " + _metrics_row(fid) if fid else f"| `{fid_spec}` | — | — | — | — | — |",
         "| Held-out mix " + _metrics_row(held) if held else "| Held-out mix | — | — | — | — | — |",
         "",
-        f"Per-primitive temperatures (fitted on `{run.get('calibration_spec', 'jev_open_calibration')}`, "
-        f"topped up from a reserved training slice for primitives it lacks): `{json.dumps(temps)}`",
+        f"Temperatures per primitive and prompt-length bucket (`prim@long` = at least "
+        f"{run.get('long_prompt_tokens', 1024)} prompt tokens; fitted on "
+        f"`{run.get('calibration_spec', 'jev_open_calibration')}`, topped up from a reserved "
+        f"training slice for buckets it lacks): `{json.dumps(temps)}`",
         "",
     ]
     if quantized:

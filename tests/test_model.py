@@ -4,6 +4,7 @@ Runs a random tiny Gemma 4 text stack on CPU in fp32.
 """
 
 import random
+from dataclasses import replace
 
 import pytest
 import torch
@@ -137,6 +138,36 @@ def test_temperature_applies_per_primitive(model):
             model.temperature.fill_(1.0)
     assert max(p4) - min(p4) < max(p1) - min(p1)  # flatter
     assert max(range(3), key=p4.__getitem__) == max(range(3), key=p1.__getitem__)
+
+
+def test_temperature_uses_prompt_length_bucket(model):
+    d = Decision(model, TOK)
+    q = QuestionSpec("choice", "Which carrier?", ["DHL", "UPS", "FedEx"])
+    saved = model.cfg
+    try:
+        plain = d.decide(STATE, [q])[0].probs
+        with torch.no_grad():
+            model.temperature[1, 1] = 4.0  # choice, long prompts only
+        model.cfg = replace(saved, long_prompt_tokens=10**6)
+        short = d.decide(STATE, [q])[0].probs
+        model.cfg = replace(saved, long_prompt_tokens=1)
+        long = d.decide(STATE, [q])[0].probs
+    finally:
+        model.cfg = saved
+        with torch.no_grad():
+            model.temperature.fill_(1.0)
+    assert short == pytest.approx(plain, abs=1e-6)
+    assert max(long) - min(long) < max(short) - min(short)
+
+
+def test_old_per_primitive_temperatures_load(model):
+    saved = model.head_state_dict()
+    sd = {**saved, "temperature": torch.tensor([1.5, 2.0, 3.0])}
+    try:
+        model.load_head_state_dict(sd)
+        assert model.temperature.tolist() == [[1.5, 1.5], [2.0, 2.0], [3.0, 3.0]]
+    finally:
+        model.load_head_state_dict(saved)
 
 
 def _both_paths(model, fn):

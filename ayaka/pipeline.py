@@ -122,7 +122,11 @@ def cmd_eval(args) -> dict:
         cal = items_from_spec(args.calibration_spec, 3000, tok, model.cfg, 0, decon)
         _, logits = tr.predict(cal, apply_temperature=False, return_logits=True)
         report["temperatures"] = fit_temperatures(
-            logits, [it.target for it in cal], [it.type for it in cal]
+            logits,
+            [it.target for it in cal],
+            [it.type for it in cal],
+            [it.length for it in cal],
+            model.cfg.long_prompt_tokens,
         )
         apply_temperatures(model, report["temperatures"])
     if args.fidelity:

@@ -29,6 +29,16 @@ from .heads import PointerHead
 from .ragged import ragged_log_softmax
 
 NOUL, CHOICE, SCORE = 0, 1, 2
+LENGTH_BUCKETS = ("short", "long")
+
+
+def length_bucket(seq_len, threshold: int, n: int, device) -> torch.Tensor:
+    """0 = short, 1 = long prompt; unknown lengths count as short."""
+    if seq_len is None:
+        return torch.zeros(n, dtype=torch.long, device=device)
+    return (seq_len.to(device) >= threshold).long()
+
+
 PRIMITIVE_INDEX = {"noul": NOUL, "choice": CHOICE, "score": SCORE}
 
 
@@ -47,6 +57,7 @@ class DecisionBatch:
     has_label: torch.Tensor  # [B] bool
     primitive: torch.Tensor  # [B]
     position_ids: torch.Tensor | None = None  # set on the cache path
+    seq_len: torch.Tensor | None = None  # [B] full prompt length (prefix + suffix)
 
     def to(self, device) -> DecisionBatch:
         kw = {}
@@ -101,7 +112,9 @@ class ElectraDecisionModel(nn.Module):
             text_config.hidden_size, cfg.pointer_dim, cfg.set_mixer_layers, cfg.set_mixer_heads
         )
         self.gate = nn.Parameter(torch.zeros(3))
-        self.register_buffer("temperature", torch.ones(3))
+        # scalar temperature per (primitive, prompt-length bucket): long prompts
+        # were measurably overconfident with a single per-primitive scalar
+        self.register_buffer("temperature", torch.ones(3, len(LENGTH_BUCKETS)))
         # exact speed-up on KV-shared backbones (E2B/E4B); see model/fastpath.py
         # option spans are read below the KV-shared layers (all of them on
         # backbones without KV sharing); the answer position from the top
@@ -193,7 +206,8 @@ class ElectraDecisionModel(nn.Module):
         prim_c = batch.primitive[cq]
         logits = torch.where(has_label_c, lab + self.gate[prim_c] * ptr, ptr)
         if apply_temperature:
-            logits = logits / self.temperature[prim_c]
+            bucket = length_bucket(batch.seq_len, self.cfg.long_prompt_tokens, n_q, logits.device)
+            logits = logits / self.temperature[prim_c, bucket[cq]]
         return DecisionOutput(logits, lab, ptr, batch.cand_cu, cq, batch.primitive)
 
     def forward(
@@ -216,4 +230,7 @@ class ElectraDecisionModel(nn.Module):
         self.head.load_state_dict(sd["head"])
         with torch.no_grad():
             self.gate.copy_(sd["gate"])
-            self.temperature.copy_(sd["temperature"])
+            t = sd["temperature"]
+            if t.dim() == 1:  # checkpoints from before length buckets
+                t = t.unsqueeze(1).expand_as(self.temperature)
+            self.temperature.copy_(t)

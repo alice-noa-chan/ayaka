@@ -86,6 +86,7 @@ def full_rows(items: list[EncodedQuestion], pad_id: int) -> DecisionBatch:
         label_ids=labels,
         has_label=has_label,
         primitive=torch.tensor([it.primitive for it in items], dtype=torch.long),
+        seq_len=torch.tensor([len(r) for r in rows], dtype=torch.long),
     )
 
 
@@ -110,4 +111,5 @@ def suffix_rows(items: list[EncodedQuestion], prefix_len: int, pad_id: int) -> D
         has_label=has_label,
         primitive=torch.tensor([it.primitive for it in items], dtype=torch.long),
         position_ids=(prefix_len + torch.arange(length)).unsqueeze(0).expand(len(sufs), -1),
+        seq_len=torch.tensor([prefix_len + len(x) for x in sufs], dtype=torch.long),
     )

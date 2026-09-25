@@ -99,7 +99,7 @@ def test_checkpoint_roundtrip(tmp_path):
     loaded = load_checkpoint(str(tmp_path / "ck"), dtype=torch.float32)
     after = Decision(loaded, TOK).decide(state, [q])[0].probs
     assert after == pytest.approx(before, abs=1e-4)
-    assert float(loaded.temperature[1]) == pytest.approx(1.7)
+    assert loaded.temperature[1].tolist() == pytest.approx([1.7, 1.7])
 
 
 def test_run_training_synthetic_end_to_end(tmp_path):

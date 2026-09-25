@@ -80,10 +80,11 @@ run manifest and in the model card.
 
 | Family (quota) | Sources (license) | ≈ questions available |
 |---|---|---|
-| Typed decisions (30%) | Open-Jev `openjev_v2` via jev-distill (CC0); Open-Jev `browser-drone-expansion-v1-redistributable` (CC0, ~15 questions per state) | 75K + 109K |
+| Typed decisions (27%) | Open-Jev `openjev_v2` via jev-distill (CC0); Open-Jev `browser-drone-expansion-v1-redistributable` (CC0, ~15 questions per state) | 75K + 109K |
 | Judge (10%) | HelpSteer2 (CC BY 4.0, five 0–4 human ratings); hh-rlhf (MIT, human preference); Aegis 2.0 (CC BY 4.0, human safety labels only) | 100K + 30K + 33K |
-| Reasoning (10%) | AQuA-RAT (Apache-2.0); HotpotQA yes/no + comparisons over 10 paragraphs (CC BY-SA 4.0); StrategyQA (MIT); ARC-Challenge (CC BY-SA 4.0); CommonsenseQA (MIT) | 30K + 12K + 2K + 1K + 10K |
-| Policy / rules (6%) | LegalBench: 118 tasks whose README states CC BY 4.0 or MIT (list vendored in `ayaka/data/legalbench_tasks.json`) | ≤ 47K |
+| Reasoning (9%) | AQuA-RAT (Apache-2.0); HotpotQA yes/no + comparisons over 10 paragraphs (CC BY-SA 4.0); StrategyQA (MIT); ARC-Challenge (CC BY-SA 4.0); CommonsenseQA (MIT) | 30K + 12K + 2K + 1K + 10K |
+| Policy / rules (8%) | LegalBench: 118 tasks whose README states CC BY 4.0 or MIT (list vendored in `ayaka/data/legalbench_tasks.json`); generated long reimbursement policies (`synth_policy`, see below) | ≤ 47K + 15K |
+| Temporal / numeric (7%) | Generated order records and invoices (`synth_temporal`, `synth_numeric`, see below) | 20K + 20K |
 | Fact check (6%) | VitaminC train split (CC BY-SA 3.0; supports / refutes / not enough info) | 40K |
 | Abstention (in noul) | SQuAD 2.0 answerability (CC BY-SA 4.0) | 30K |
 | NLU, multilingual, intent, soft labels, long docs | SNLI, MultiNLI, BoolQ, Banking77, CLINC150, KLUE, KorNLI, MASSIVE ko/ja, JGLUE, GoEmotions, QuALITY | ~250K |
@@ -108,9 +109,37 @@ Excluded outright:
 - **BIG-bench.** Its canary string asks to keep it out of training corpora.
 - **30 LegalBench tasks** licensed CC BY-NC.
 
+**Generated data** (`ayaka/data/synthetic.py`). The trained Small scored
+0–7% on JevBench's temporal/numeric items and 26–32% on long policies.
+Openly licensed human data for these is scarce, so this repository
+generates it. Every label is computed, and `tests/test_synthetic.py`
+recomputes them independently.
+
+- `temporal`: order records mixing three date formats and relative dates.
+  Questions cover shipping promises, return windows (the delivery day is
+  day 0), elapsed days, weekdays, lateness buckets and event order.
+- `numeric`: invoices with a discount, tax after the discount, untaxed
+  shipping and a budget. Distractor totals come from the usual mistakes
+  (forgetting the discount, taxing shipping, and so on).
+- `policy`: 11–30 section reimbursement policies. The relevant clauses are
+  shuffled in among unrelated ones, alongside an exemption and clauses that
+  bind only one category. Each policy comes with a claim whose record may
+  leave facts out; a missing fact counts as not established. Questions ask
+  whether the claim is permitted, which requirement fails first in section
+  order, and whether single requirements are met.
+
 Calibration and evaluation use the `openjev_v2` rows of jev-distill's
 calibration and `test_set_30k` splits. Primitives those splits lack (score)
-are topped up from a reserved training slice.
+are topped up from a reserved training slice, which also guarantees at
+least 200 questions per (primitive, prompt length) bucket.
+
+Temperatures are fitted per primitive **and** per prompt-length bucket:
+short prompts are under `long_prompt_tokens` (1024 by default), long
+prompts are at or above it. The single per-primitive scalar left long, hard
+prompts overconfident (JevBench hard ECE 0.26). A bucket with fewer than 20
+calibration questions keeps its primitive's temperature. Checkpoints saved
+with the old `[3]` temperatures still load, with each value applied to both
+buckets.
 
 Every training sample that shares a 13-gram with a JevBench public item is
 dropped (`ayaka/data/decontam.py`).
