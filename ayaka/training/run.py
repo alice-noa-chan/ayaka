@@ -58,6 +58,14 @@ DEFAULT_SPECS = [
 
 SMOKE_SPECS = ["jev_distill", "boolq", "banking77"]
 
+# Specs whose licenses allow a public model release. Dropped from the
+# default mix: anli_r1 (CC BY-NC), super_glue_multirc (unclear terms),
+# amazon_reviews (Amazon's original terms restrict use; mirrors relicense).
+# jev_distill stays: Apache-2.0 as published, but its labels are Jev API
+# outputs — check TypeSafe's terms before publishing (see model card).
+RELEASE_EXCLUDED = {"anli_r1", "super_glue_multirc", "amazon_reviews"}
+RELEASE_SPECS = [s for s in DEFAULT_SPECS if s not in RELEASE_EXCLUDED]
+
 
 @dataclass
 class RunConfig:
@@ -81,6 +89,7 @@ class RunConfig:
     teacher_quota: float = 0.6
     evidence_aug_p: float = 0.0
     decontaminate: bool = True
+    release: bool = False  # restrict data to RELEASE_SPECS (public-release licensing)
     artifacts_dir: str = "artifacts"
     run_name: str = "run"
     seed: int = 0
@@ -259,6 +268,11 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     art = os.path.join(cfg.artifacts_dir, cfg.run_name)
     os.makedirs(art, exist_ok=True)
+    if cfg.release:
+        dropped = [s for s in cfg.specs if s not in RELEASE_SPECS]
+        cfg.specs = [s for s in cfg.specs if s in RELEASE_SPECS]
+        if verbose and dropped:
+            print(f"[run] release mode: dropped non-release specs {dropped}", flush=True)
     with open(os.path.join(art, "run_config.json"), "w") as f:
         json.dump(asdict(cfg), f, indent=2)
     model = build_model(cfg, device)

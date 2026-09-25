@@ -299,6 +299,9 @@ def main(argv: list[str] | None = None) -> dict:
         "--parity", type=int, default=128, help="jev test items for the int8 parity check (0=skip)"
     )
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument(
+        "--code-url", default="<code-url>", help="git URL for pip install in the model card"
+    )
     args = ap.parse_args(argv)
 
     dev = torch.device(args.device)
@@ -339,6 +342,11 @@ def main(argv: list[str] | None = None) -> dict:
             meta["parity_vs_bf16"] = report["int8_parity"]
             with open(meta_path, "w") as f:
                 json.dump(meta, f, indent=2)
+    from .modelcard import write_card
+
+    for d in (report["full"], report.get("int8")):
+        if d:
+            write_card(d, args.code_url)
     print(json.dumps(report, indent=2), flush=True)
     return report
 

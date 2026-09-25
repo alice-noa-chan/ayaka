@@ -56,9 +56,12 @@ def cmd_train(args) -> dict:
 
 def cmd_teacher(args) -> dict:
     from .training.distill import label_with_teacher
-    from .training.run import DEFAULT_SPECS
+    from .training.run import DEFAULT_SPECS, RELEASE_SPECS
 
-    specs = [s for s in args.specs.split(",") if s] if args.specs else DEFAULT_SPECS
+    base = RELEASE_SPECS if args.release else DEFAULT_SPECS
+    specs = [s for s in args.specs.split(",") if s] if args.specs else base
+    if args.release:
+        specs = [s for s in specs if s in RELEASE_SPECS]
     return label_with_teacher(
         args.ckpt,
         args.out,
@@ -82,7 +85,7 @@ def cmd_export(args) -> dict:
     ]
     if args.no_int8:
         argv.append("--no-int8")
-    argv += ["--parity", str(args.parity)]
+    argv += ["--parity", str(args.parity), "--code-url", args.code_url]
     return export_main(argv)
 
 
@@ -156,6 +159,7 @@ def main(argv: list[str] | None = None) -> dict:
     te.add_argument("--n-samples", type=int, default=120_000)
     te.add_argument("--specs", default="")
     te.add_argument("--seed", type=int, default=1)
+    te.add_argument("--release", action="store_true", help="label only release-licensed data")
     te.set_defaults(fn=cmd_teacher)
 
     ex = sub.add_parser("export", help="write bf16 + int8 model folders")
@@ -164,6 +168,9 @@ def main(argv: list[str] | None = None) -> dict:
     ex.add_argument("--out", default="")
     ex.add_argument("--no-int8", action="store_true")
     ex.add_argument("--parity", type=int, default=256)
+    ex.add_argument(
+        "--code-url", default="<code-url>", help="git URL for pip install in the model card"
+    )
     ex.set_defaults(fn=cmd_export)
 
     ev = sub.add_parser("eval", help="JevBench public tiers + Jev fidelity")

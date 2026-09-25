@@ -234,7 +234,7 @@ DATASET_SPECS: dict[str, dict] = {
         },
         "family": "nli",
         "lang": "ja",
-        "license": "see JGLUE repo (pin revision)",
+        "license": "CC BY-SA 4.0 (JGLUE)",
         "label_schema": "entailment/neutral/contradiction",
         "source_family": "jnli",
     },
@@ -250,7 +250,7 @@ DATASET_SPECS: dict[str, dict] = {
         },
         "family": "score",
         "lang": "ja",
-        "license": "see JGLUE repo (pin revision)",
+        "license": "CC BY-SA 4.0 (JGLUE)",
         "label_schema": "0..5 real",
     },
     "jglue_commonsense": {
@@ -266,7 +266,7 @@ DATASET_SPECS: dict[str, dict] = {
         },
         "family": "choice",
         "lang": "ja",
-        "license": "see JGLUE repo (pin revision)",
+        "license": "CC BY-SA 4.0 (JGLUE)",
         "label_schema": "5 options",
     },
     # Long-document reading (docs.md sec 19): JevBench hard states average

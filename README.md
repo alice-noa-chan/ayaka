@@ -154,6 +154,28 @@ activation outliers dominate that scale. That is why the default keeps
 GEMMs in bf16. Per-token int8 GEMM (`torch._int_mm`) was about 100× slower
 than bf16 on this CPU.
 
+## Public release (Hugging Face)
+
+```bash
+RELEASE=1 STAGES="small large teacher distill" bash scripts/run_plan.sh   # release-licensed data only
+CODE_URL=https://github.com/<you>/ayaka STAGES="export" bash scripts/run_plan.sh
+python -m ayaka.publish --export runs/exports/electra-small --repo <you>/electra-small --with-code   # dry-run
+python -m ayaka.publish --export runs/exports/electra-small --repo <you>/electra-small --with-code     --confirm-data-terms --yes                                                                     # private upload
+```
+
+- `RELEASE=1` (`--set release=true`) drops ANLI (CC BY-NC), MultiRC (unclear
+  terms) and Amazon reviews (Amazon's original terms) from training and
+  teacher labeling.
+- Every export gets a generated `README.md` model card with front matter,
+  JevBench public-tier results beside the reference systems, Jev fidelity,
+  int8 parity, the per-source data and license table, and limitations.
+- `ayaka.publish` is a dry-run unless `--yes` is given, and it creates private
+  repos unless `--public` is given. It refuses to upload while the card still
+  has the `<code-url>` placeholder. A model trained on jev-distill needs
+  `--confirm-data-terms`: its labels come from TypeSafe's Jev API, so check
+  their terms before redistributing. `--with-code` bundles the source as
+  `ayaka_src/` for an offline `pip install ./ayaka_src`.
+
 ## Running locally
 
 ```bash

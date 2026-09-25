@@ -6,6 +6,7 @@
 #   STAGES="large teacher distill export" bash scripts/run_plan.sh
 #
 # Knobs (env): SMALL_STEPS LARGE_STEPS BASE_STEPS TEACHER_N WITH_BASE=1 AUTO_STOP=1
+#              RELEASE=1  -> train/label only on release-licensed data (for public upload)
 # AUTO_STOP=1 stops the RunPod pod / vast.ai instance at the end so an idle
 # GPU does not keep billing.
 set -euo pipefail
@@ -18,8 +19,11 @@ BASE_STEPS=${BASE_STEPS:-2000}
 LARGE_STEPS=${LARGE_STEPS:-3000}
 TEACHER_N=${TEACHER_N:-120000}
 WITH_BASE=${WITH_BASE:-0}
+CODE_URL=${CODE_URL:-<code-url>}  # git URL of this repo, written into the model cards
 R=$AYAKA_ARTIFACTS
 P="python -m ayaka.pipeline"
+REL=(); TREL=()
+if [ "${RELEASE:-0}" = 1 ]; then REL=(--set release=true); TREL=(--release); fi
 
 stop_instance() {
   if [ "${AUTO_STOP:-0}" != 1 ]; then return; fi
@@ -48,24 +52,24 @@ for stage in $STAGES; do
     zeroshot-large)
       $P eval --model electra-large --zero-shot ;;
     small)
-      $P train --model electra-small --run small-v1 --set steps="$SMALL_STEPS" ;;
+      $P train --model electra-small --run small-v1 --set steps="$SMALL_STEPS" "${REL[@]}" ;;
     base)
-      $P train --model electra-base --run base-v1 --set steps="$BASE_STEPS" ;;
+      $P train --model electra-base --run base-v1 --set steps="$BASE_STEPS" "${REL[@]}" ;;
     large)
-      $P train --model electra-large --run large-v1 --set steps="$LARGE_STEPS" ;;
+      $P train --model electra-large --run large-v1 --set steps="$LARGE_STEPS" "${REL[@]}" ;;
     teacher)
-      $P teacher --ckpt "$R/large-v1/checkpoint" --out "$R/large-v1/teacher.jsonl" --n-samples "$TEACHER_N" ;;
+      $P teacher --ckpt "$R/large-v1/checkpoint" --out "$R/large-v1/teacher.jsonl" --n-samples "$TEACHER_N" "${TREL[@]}" ;;
     distill)
       $P train --model electra-small --run small-distill --set steps="$SMALL_STEPS" \
-        --set teacher_labels="$R/large-v1/teacher.jsonl"
+        --set teacher_labels="$R/large-v1/teacher.jsonl" "${REL[@]}"
       if [ "$WITH_BASE" = 1 ]; then
         $P train --model electra-base --run base-distill --set steps="$BASE_STEPS" \
-          --set teacher_labels="$R/large-v1/teacher.jsonl"
+          --set teacher_labels="$R/large-v1/teacher.jsonl" "${REL[@]}"
       fi ;;
     export)
-      [ -d "$R/large-v1/checkpoint" ] && $P export --ckpt "$R/large-v1/checkpoint" --name electra-large
-      [ -d "$R/small-distill/checkpoint" ] && $P export --ckpt "$R/small-distill/checkpoint" --name electra-small
-      [ -d "$R/base-distill/checkpoint" ] && $P export --ckpt "$R/base-distill/checkpoint" --name electra-base
+      [ -d "$R/large-v1/checkpoint" ] && $P export --ckpt "$R/large-v1/checkpoint" --name electra-large --code-url "$CODE_URL"
+      [ -d "$R/small-distill/checkpoint" ] && $P export --ckpt "$R/small-distill/checkpoint" --name electra-small --code-url "$CODE_URL"
+      [ -d "$R/base-distill/checkpoint" ] && $P export --ckpt "$R/base-distill/checkpoint" --name electra-base --code-url "$CODE_URL"
       true ;;
     *)
       echo "unknown stage: $stage" >&2; exit 2 ;;
