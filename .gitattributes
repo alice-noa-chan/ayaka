@@ -1,0 +1,4 @@
+# keep Unix line endings in everything that runs on Linux GPU boxes
+*.sh text eol=lf
+*.py text eol=lf
+*.toml text eol=lf

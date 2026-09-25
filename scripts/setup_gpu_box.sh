@@ -8,6 +8,9 @@
 set -euo pipefail
 
 WORK=${WORK:-/workspace}
+# Ubuntu 24.04 images (e.g. runpod/pytorch torch 2.8) mark the system Python
+# as externally managed; torch already lives there and the box is disposable.
+export PIP_BREAK_SYSTEM_PACKAGES=1
 export HF_HOME=${HF_HOME:-$WORK/hf-cache}
 export AYAKA_ARTIFACTS=${AYAKA_ARTIFACTS:-$WORK/runs}
 mkdir -p "$HF_HOME" "$AYAKA_ARTIFACTS"
