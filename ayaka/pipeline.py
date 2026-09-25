@@ -56,7 +56,7 @@ def cmd_train(args) -> dict:
 
 def cmd_teacher(args) -> dict:
     from .training.distill import label_with_teacher
-    from .training.run import DEFAULT_SPECS, RELEASE_EXCLUDED
+    from .training.run import DEFAULT_SPECS, RELEASE_EXCLUDED, RunConfig
 
     specs = [s for s in args.specs.split(",") if s] if args.specs else list(DEFAULT_SPECS)
     if not args.allow_restricted:
@@ -66,7 +66,7 @@ def cmd_teacher(args) -> dict:
         args.out,
         specs,
         args.n_samples,
-        spec_limits={"jev_open": 100_000, "jev_distill": 200_000},
+        spec_limits=RunConfig().spec_limits,
         seed=args.seed,
     )
 

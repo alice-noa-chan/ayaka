@@ -10,19 +10,25 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 
-# Family quotas. Jev-distilled decisions are the primary signal on a
-# pretrained backbone (docs.md section 41 had 0.30 for a from-scratch
-# encoder that also needed broad NLU data); the rest keeps multilingual
-# coverage (ko/ja), high-cardinality choice and human soft labels.
+# Family quotas. Typed decisions (Open-Jev streams) lead; the rest cover
+# JevBench's skill families with license-clean human/procedural labels:
+# judge (answer adequacy, preference, safety), reasoning (multi-hop,
+# numeric, commonsense), fact_check (claim vs evidence incl. "not enough
+# info"), long documents, and multilingual NLU. Quotas renormalize over the
+# families actually present.
 TASK_FAMILY_QUOTA: dict[str, float] = {
-    "direct_jev": 0.52,
-    "choice": 0.10,
-    "nli": 0.07,
-    "noul": 0.07,
-    "score": 0.06,
-    "human_soft_label": 0.05,
-    "hard_adversarial": 0.07,
-    "long_context": 0.06,  # QuALITY articles (~2.8K tokens) vs jev-distill ~190
+    "direct_jev": 0.30,
+    "policy": 0.06,  # LegalBench rule application ~ JevBench long_policy / policy
+    "judge": 0.10,
+    "reasoning": 0.10,
+    "fact_check": 0.06,
+    "choice": 0.06,
+    "nli": 0.06,
+    "noul": 0.08,
+    "score": 0.05,
+    "human_soft_label": 0.04,
+    "hard_adversarial": 0.04,
+    "long_context": 0.05,
 }
 
 # Within the NLI family, source balance (sec 43.1)

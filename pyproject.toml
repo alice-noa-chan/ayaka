@@ -29,6 +29,7 @@ include = ["ayaka*"]
 
 [tool.setuptools.package-data]
 "ayaka.eval" = ["data/*.json", "data/jevbench_public/*"]
+"ayaka.data" = ["legalbench_tasks.json"]
 
 [tool.ruff]
 target-version = "py310"

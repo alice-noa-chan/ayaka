@@ -343,6 +343,120 @@ DATASET_SPECS: dict[str, dict] = {
         "license": "CC BY 4.0 (QuALITY)",
         "label_schema": "4 options, gold index",
     },
+    # ---- license-clean decision data (labels by people or documented
+    # procedures, never commercial-LLM outputs). Families map onto the
+    # mixture quotas in data/mixture.py.
+    "open_jev_bde": {
+        "hf": ("ZefanCai/Open-Jev", "browser-drone-expansion-v1-redistributable", "train"),
+        "group_by": "group_id",
+        "transform": "open_jev",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "CC0-1.0 (Open-Jev redistributable config)",
+        "label_schema": "typed noul/choice/score, several questions per state",
+    },
+    "vitaminc": {
+        "hf": ("tals/vitaminc", None, "train"),
+        "transform": "vitaminc",
+        "kwargs": {},
+        "family": "fact_check",
+        "lang": "en",
+        "license": "CC BY-SA 3.0",
+        "label_schema": "supports / refutes / not enough info (train split only)",
+    },
+    "helpsteer2": {
+        "hf": ("nvidia/HelpSteer2", None, "train"),
+        "transform": "helpsteer2",
+        "kwargs": {},
+        "family": "judge",
+        "lang": "en",
+        "license": "CC BY 4.0",
+        "label_schema": "five human 0-4 ratings per response",
+    },
+    "hh_rlhf": {
+        "hf": ("Anthropic/hh-rlhf", None, "train"),
+        "transform": "hh_rlhf",
+        "kwargs": {},
+        "family": "judge",
+        "lang": "en",
+        "license": "MIT",
+        "label_schema": "human preference between two replies",
+    },
+    "aegis_safety": {
+        "hf": ("nvidia/Aegis-AI-Content-Safety-Dataset-2.0", None, "train"),
+        "transform": "aegis",
+        "kwargs": {},
+        "oversample": 2,
+        "family": "judge",
+        "lang": "en",
+        "license": "CC BY 4.0",
+        "label_schema": "human safe/unsafe for prompt and response",
+    },
+    "aqua_rat": {
+        "hf": ("deepmind/aqua_rat", "raw", "train"),
+        "transform": "aqua_rat",
+        "kwargs": {},
+        "family": "reasoning",
+        "lang": "en",
+        "license": "Apache-2.0",
+        "label_schema": "5-option algebra word problems",
+    },
+    "hotpot_decisions": {
+        "hf": ("hotpotqa/hotpot_qa", "distractor", "train"),
+        "transform": "hotpot",
+        "kwargs": {},
+        "oversample": 6,
+        "family": "reasoning",
+        "lang": "en",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "multi-hop yes/no and two-entity comparisons over 10 paragraphs",
+    },
+    "squad_v2_answerable": {
+        "hf": ("rajpurkar/squad_v2", None, "train"),
+        "transform": "squad_v2",
+        "kwargs": {},
+        "family": "noul",
+        "lang": "en",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "passage answers the question or not",
+    },
+    "strategyqa": {
+        "hf": ("ChilleD/StrategyQA", None, "train"),
+        "transform": "strategyqa",
+        "kwargs": {},
+        "family": "reasoning",
+        "lang": "en",
+        "license": "MIT",
+        "label_schema": "implicit multi-step yes/no",
+    },
+    "arc_challenge": {
+        "hf": ("allenai/ai2_arc", "ARC-Challenge", "train"),
+        "transform": "labelled_mc",
+        "kwargs": {},
+        "family": "reasoning",
+        "lang": "en",
+        "license": "CC BY-SA 4.0",
+        "label_schema": "4-option science questions",
+    },
+    "commonsense_qa": {
+        "hf": ("tau/commonsense_qa", None, "train"),
+        "transform": "labelled_mc",
+        "kwargs": {},
+        "family": "reasoning",
+        "lang": "en",
+        "license": "MIT",
+        "label_schema": "5-option commonsense questions",
+    },
+    "legalbench": {
+        "custom": "legalbench",
+        "transform": "legalbench",
+        "kwargs": {},
+        "family": "policy",
+        "lang": "en",
+        "license": "CC BY 4.0 (only tasks whose README states CC BY 4.0)",
+        "label_schema": "rule/policy application: Yes/No -> noul, else choice over task labels",
+    },
     "go_emotions": {
         "hf": ("google-research-datasets/go_emotions", "simplified", "train"),
         "transform": "multilabel",
@@ -438,6 +552,27 @@ def load_spec_samples(
         "task_family": spec["family"],
         "evidence_state": "intact",
     }
+    if spec.get("custom") == "legalbench":
+        from .legalbench import REPO, allowed_tasks, load_legalbench
+
+        samples = load_legalbench(limit, seed, metadata)
+        if dedup:
+            samples = dedup_samples(samples)
+        tasks = allowed_tasks()
+        manifest = DatasetManifest(
+            dataset_id=spec_name,
+            source_url=f"hf://datasets/{REPO}",
+            revision="main",
+            config=f"{len(tasks)} CC BY 4.0 tasks",
+            split="train+test",
+            license=spec["license"],
+            language=spec["lang"],
+            task_family=spec["family"],
+            primitive_mapping=spec["transform"],
+            original_label_schema=spec["label_schema"],
+            notes=f"tasks: {', '.join(sorted(tasks))}",
+        )
+        return samples, manifest
     if "jsonl" in spec:
         ds = None
         with open(spec["jsonl"], encoding="utf-8") as f:
@@ -480,14 +615,21 @@ def load_spec_samples(
             ds = load_dataset("parquet", data_files=url, split="train")
         else:
             ds = load_dataset(path, config, split=split)
-        rows = ds.select(range(min(limit or len(ds), len(ds))))
+        if spec.get("group_by"):
+            rows = ds  # whole groups only: limit applies to grouped samples below
+        else:
+            # shuffle before slicing: many sources are ordered (by label, topic,
+            # stream), so a head slice would be biased. `oversample` scans
+            # more rows for transforms that keep only some of them.
+            n = len(ds) if limit is None else min(len(ds), limit * spec.get("oversample", 1))
+            rows = ds.shuffle(seed=seed).select(range(n)) if n < len(ds) else ds
         source = f"hf://{path}/{config}/{split}"
         revision = (
             "refs/convert/parquet"
             if spec.get("parquet")
             else str(getattr(getattr(ds, "info", None), "version", "") or "")
         )
-    samples = _rows_to_samples(spec, rows, ds, metadata, limit)
+    samples = _rows_to_samples(spec, rows, ds, metadata, limit, seed)
     if dedup:
         samples = dedup_samples(samples)
     manifest = DatasetManifest(
@@ -506,12 +648,26 @@ def load_spec_samples(
     return samples, manifest
 
 
-def _rows_to_samples(spec, rows, ds, metadata, limit) -> list[Sample]:
+def _group_rows(rows, key: str, limit: int | None, seed: int) -> list[dict]:
+    """Rows sharing ``key`` -> [{"rows": [...], key: value}], a seeded sample
+    of ``limit`` whole groups when limited."""
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(r[key], []).append(dict(r))
+    keys = sorted(groups)
+    if limit is not None and limit < len(keys):
+        keys = random.Random(seed).sample(keys, limit)
+    return [{"rows": groups[k], key: k} for k in keys]
+
+
+def _rows_to_samples(spec, rows, ds, metadata, limit, seed: int = 0) -> list[Sample]:
     transform = spec["transform"]
     kwargs = dict(spec["kwargs"])
     if transform == "multirc_grouped":
         transform = "multirc"
         rows = _group_multirc(rows)
+    if spec.get("group_by"):
+        rows = _group_rows(rows, spec["group_by"], limit, seed)
     if "ontology_from_column" in kwargs:
         # build {label_id: humanized description} from row pairs
         col = kwargs.pop("ontology_from_column")

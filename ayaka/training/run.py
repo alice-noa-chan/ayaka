@@ -38,6 +38,18 @@ from .trainer import TrainConfig, Trainer
 # data/loaders.py). jev_open is the CC0 Open-Jev stream of jev-distill.
 DEFAULT_SPECS = [
     "jev_open",
+    "open_jev_bde",
+    "vitaminc",
+    "helpsteer2",
+    "hh_rlhf",
+    "aegis_safety",
+    "aqua_rat",
+    "hotpot_decisions",
+    "squad_v2_answerable",
+    "strategyqa",
+    "arc_challenge",
+    "commonsense_qa",
+    "legalbench",
     "snli",
     "multi_nli",
     "boolq",
@@ -71,7 +83,19 @@ class RunConfig:
     model_size: str = "electra-small"
     specs: list[str] = field(default_factory=lambda: list(DEFAULT_SPECS))
     limit_per_spec: int | None = 20_000
-    spec_limits: dict = field(default_factory=lambda: {"jev_open": 100_000, "jev_distill": 200_000})
+    spec_limits: dict = field(
+        default_factory=lambda: {
+            "jev_open": 100_000,
+            "open_jev_bde": 60_000,  # groups (several questions each)
+            "vitaminc": 40_000,
+            "hh_rlhf": 30_000,
+            "helpsteer2": 21_000,
+            "aegis_safety": 30_000,
+            "aqua_rat": 30_000,
+            "squad_v2_answerable": 30_000,
+            "jev_distill": 200_000,
+        }
+    )
     steps: int = 2000
     questions_per_step: int = 64
     micro_batch_tokens: int = 8_192  # auto-halved on CUDA OOM
