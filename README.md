@@ -83,7 +83,7 @@ run manifest and in the model card.
 | Typed decisions (30%) | Open-Jev `openjev_v2` via jev-distill (CC0); Open-Jev `browser-drone-expansion-v1-redistributable` (CC0, ~15 questions per state) | 75K + 109K |
 | Judge (10%) | HelpSteer2 (CC BY 4.0, five 0–4 human ratings); hh-rlhf (MIT, human preference); Aegis 2.0 (CC BY 4.0, human safety labels only) | 100K + 30K + 33K |
 | Reasoning (10%) | AQuA-RAT (Apache-2.0); HotpotQA yes/no + comparisons over 10 paragraphs (CC BY-SA 4.0); StrategyQA (MIT); ARC-Challenge (CC BY-SA 4.0); CommonsenseQA (MIT) | 30K + 12K + 2K + 1K + 10K |
-| Policy / rules (6%) | LegalBench: 111 tasks whose README states CC BY 4.0 or MIT (list vendored in `ayaka/data/legalbench_tasks.json`) | ≤ 44K |
+| Policy / rules (6%) | LegalBench: 118 tasks whose README states CC BY 4.0 or MIT (list vendored in `ayaka/data/legalbench_tasks.json`) | ≤ 47K |
 | Fact check (6%) | VitaminC train split (CC BY-SA 3.0; supports / refutes / not enough info) | 40K |
 | Abstention (in noul) | SQuAD 2.0 answerability (CC BY-SA 4.0) | 30K |
 | NLU, multilingual, intent, soft labels, long docs | SNLI, MultiNLI, BoolQ, Banking77, CLINC150, KLUE, KorNLI, MASSIVE ko/ja, JGLUE, GoEmotions, QuALITY | ~250K |

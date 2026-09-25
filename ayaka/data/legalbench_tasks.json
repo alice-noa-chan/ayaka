@@ -71,6 +71,14 @@
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "You are a lobbyist analyzing Congressional bills for their impacts on companies. \nGiven the title and summary of the bill, plus information on the company from its 10K SEC filing, it is your job to determine if a bill is at least somewhat relevant to a company in terms of whether it could impact the company's bottom-line if it was enacted (by saying YES or NO; note the all-caps). \nOfficial title of bill: {{bill_title}}\nOfficial summary of bill: {{bill_summary}}\nCompany name: {{company_name}}\nCompany business description: {{company_description}}\nIs this bill potentially relevant to the company? FINAL ANSWER:"
  },
+ "cuad_affiliate_license-licensee": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause describe a license grant to a licensee (incl. sublicensor) and the affiliates of such licensee/sublicensor?"
+ },
+ "cuad_affiliate_license-licensor": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause describe a license grant by affiliates of the licensor or that includes intellectual property of affiliates of the licensor?"
+ },
  "cuad_anti-assignment": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause require consent or notice of a party if the contract is assigned to a third party?"
@@ -119,9 +127,17 @@
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does intellectual property created by one party become the property of the counterparty, either per the terms of the contract or upon the occurrence of certain events?"
  },
+ "cuad_irrevocable_or_perpetual_license": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause specify a license grant that is irrevocable or perpetual?"
+ },
  "cuad_joint_ip_ownership": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause provide for joint or shared ownership of intellectual property between the parties to the contract?"
+ },
+ "cuad_license_grant": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause contain a license granted by one party to its counterparty?"
  },
  "cuad_liquidated_damages": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
@@ -151,6 +167,10 @@
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause require a party not to disparage the counterparty?"
  },
+ "cuad_non-transferable_license": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause limit the ability of a party to transfer the license being granted to a third party?"
+ },
  "cuad_notice_period_to_terminate_renewal": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause specify a notice period required to terminate renewal?"
@@ -171,6 +191,10 @@
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause require a party to share revenue or profit with the counterparty for any technology, goods, or services?"
  },
+ "cuad_rofr-rofo-rofn": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause grant one party a right of first refusal, right of first offer or right of first negotiation to purchase, license, market, or distribute equity interest, technology, assets, products or services?"
+ },
  "cuad_source_code_escrow": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause require one party to deposit its source code into escrow with a third party, which can be released to the counterparty upon the occurrence of certain events (bankruptcy, insolvency, etc.)?"
@@ -186,6 +210,10 @@
  "cuad_uncapped_liability": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
   "instruction": "Does the clause specify that a party’s liability is uncapped upon the breach of its obligation in the contract? This also includes uncap liability for a particular type of breach such as IP infringement or breach of confidentiality obligation"
+ },
+ "cuad_unlimited-all-you-can-eat-license": {
+  "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
+  "instruction": "Does the clause grant one party an “enterprise,” “all you can eat” or unlimited usage license?"
  },
  "cuad_volume_restriction": {
   "license": "**License**: [CC By 4.0](https://creativecommons.org/licenses/by/4.0/)",
