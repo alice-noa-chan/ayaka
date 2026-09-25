@@ -168,3 +168,77 @@ def test_distillation_roundtrip(tmp_path):
     hist = json.loads((tmp_path / "student" / "history.json").read_text())
     assert out["steps"] == 2
     assert any("kl" in h for h in hist)
+
+
+@pytest.mark.parametrize("prune", [True, False])
+def test_shared_prefix_training_matches_full_rows(prune):
+    """Encoding a multi-question state once (KV cache branched to every
+    question) gives the same loss and gradients as one full row per question."""
+    from ayaka.data.schema import Candidate, Question, Sample
+    from ayaka.losses import decision_loss
+    from ayaka.training.batching import plan_chunks
+
+    torch.manual_seed(0)
+    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float64)
+    m.head.double()
+    m.gate.data = m.gate.data.double().fill_(0.5)
+    m.prune_shared_positions = prune
+    state = {
+        "ticket": "the parcel never arrived and the customer wants a refund " * 4,
+        "tier": "gold",
+    }
+    qs = [
+        Question.noul("q0", "Is a refund requested?", 1.0),
+        Question(
+            "q1",
+            "choice",
+            "Category?",
+            [Candidate("a", "billing"), Candidate("b", "shipping")],
+            {"a": 0.3, "b": 0.7},
+        ),
+        Question(
+            "q2",
+            "score",
+            "Urgency?",
+            [Candidate(f"s{i}", f"level {i}", ordinal=i) for i in range(3)],
+            {"s0": 0.0, "s1": 0.2, "s2": 0.8},
+        ),
+        Question.noul("q3", "Is the customer gold tier?", 1.0),
+    ]
+    items = sample_to_items(Sample(state=state, questions=qs), TOK, m.cfg)
+    tr = Trainer(m, TOK, TrainConfig(steps=1, bf16=False), "cpu")
+
+    def run(share):
+        m.zero_grad()
+        plan = plan_chunks(items, 100_000, share=share)
+        assert {k for k, _ in plan} == ({"shared"} if share else {"rows"})
+        total = 0.0
+        for kind, mb in plan:
+            out, t = tr._forward(kind, mb)
+            loss = (
+                decision_loss(out, t.targets, ordinals=t.ordinals)["total"] * len(mb) / len(items)
+            )
+            loss.backward()
+            total += float(loss.detach())
+        return (
+            total,
+            m.text_model().layers[0].self_attn.q_proj.weight.grad.clone(),
+            m.head.w_q.weight.grad.clone(),
+        )
+
+    a, b = run(True), run(False)
+    assert a[0] == pytest.approx(b[0], abs=1e-10)
+    # Gemma's RMSNorm computes in float32 even in a float64 model, so
+    # reordered work differs at float32 precision (~1e-7 relative)
+    for ga, gb in ((a[1], b[1]), (a[2], b[2])):
+        assert float((ga - gb).norm() / gb.norm()) < 1e-5
+
+
+def test_plan_chunks_shares_only_when_worth_it():
+    from ayaka.training.batching import plan_chunks
+
+    pools = synthetic_pools(3)
+    singles = [
+        it for cell in pools.values() for s in cell for it in sample_to_items(s, TOK, tiny_config())
+    ]
+    assert {k for k, _ in plan_chunks(singles, 4096)} == {"rows"}  # one question per sample

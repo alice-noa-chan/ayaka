@@ -20,7 +20,7 @@ from ..metrics import compute_metrics
 from ..model.electra import ElectraDecisionModel
 from ..model.ragged import ragged_log_softmax
 from ..tokenization import Tokenizer
-from .batching import TrainItem, budget_batches, collate_items
+from .batching import TrainItem, collate_items, plan_chunks
 from .schedule import cosine_warmup_schedule
 
 
@@ -106,14 +106,30 @@ class Trainer:
                     flush=True,
                 )
 
+    def _forward(self, kind: str, mb: list[TrainItem], apply_temperature: bool = False):
+        """One planned chunk -> (DecisionOutput, TrainTensors)."""
+        if kind == "shared":
+            prefix = mb[0].enc.prefix_ids
+            t = collate_items(mb, self.tok.pad_id, prefix_len=len(prefix)).to(self.device)
+            with self._autocast():
+                cache = self.model.encode_prefix(torch.tensor([prefix], device=self.device))
+                cache.batch_repeat_interleave(len(mb))
+                out = self.model(
+                    t.batch, apply_temperature=apply_temperature, past_key_values=cache
+                )
+            return out, t
+        t = collate_items(mb, self.tok.pad_id).to(self.device)
+        with self._autocast():
+            out = self.model(t.batch, apply_temperature=apply_temperature)
+        return out, t
+
     def _train_step(self, items: list[TrainItem]) -> dict:
         self.model.train()
         n_q = len(items)
         agg: dict[str, float] = {}
-        for mb in budget_batches(items, self.micro_tokens, shuffle_seed=None):
-            t = collate_items(mb, self.tok.pad_id).to(self.device)
-            with self._autocast():
-                out = self.model(t.batch)
+        # activation checkpointing drops KV caches inside HF layers: no sharing then
+        for kind, mb in plan_chunks(items, self.micro_tokens, share=not self.checkpointing):
+            out, t = self._forward(kind, mb)
             parts = decision_loss(
                 out,
                 t.targets,
@@ -187,10 +203,8 @@ class Trainer:
         probs: list[list[float] | None] = [None] * len(items)
         logits: list[list[float] | None] = [None] * len(items)
         index = {id(it): i for i, it in enumerate(items)}
-        for mb in budget_batches(items, self.cfg.micro_batch_tokens, shuffle_seed=None):
-            t = collate_items(mb, self.tok.pad_id).to(self.device)
-            with self._autocast():
-                out = self.model(t.batch, apply_temperature=apply_temperature)
+        for kind, mb in plan_chunks(items, self.cfg.micro_batch_tokens):
+            out, _ = self._forward(kind, mb, apply_temperature=apply_temperature)
             lp = ragged_log_softmax(out.logits.float(), out.cand_cu).exp().tolist()
             lg = out.logits.float().tolist()
             cu = out.cand_cu.tolist()

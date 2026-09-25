@@ -148,6 +148,14 @@ modal run modal_app.py --cmd "train --model electra-small --run small-v1"       
 modal run modal_app.py --cmd "train --model electra-large --run large-v1" --gpu h100  # Modal H100
 ```
 
+Multi-question states are encoded once in training too. Open-Jev states
+carry about 15 questions each and HelpSteer2 has 5 ratings per response. Their
+questions branch off one prefix KV cache instead of repeating the state per
+question. Loss and gradients match full rows (tests), and on the real mixture
+this saves 75% / 70% of the compute tokens for those sources and 17.5% overall.
+Sharing turns off automatically if activation checkpointing is enabled,
+because HF layers drop KV caches under checkpointing.
+
 Speed defaults: activation checkpointing is off, because it recomputes every
 layer and costs about 30%. On a CUDA OOM the step is retried with half the
 micro-batch, and checkpointing only turns on if that is not enough, so one

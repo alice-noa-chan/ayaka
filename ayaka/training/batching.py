@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import torch
 
-from ..collate import EncodedQuestion, encode_decision, full_rows
+from ..collate import EncodedQuestion, encode_decision, full_rows, suffix_rows
 from ..config import ElectraConfig
 from ..data.schema import Question, Sample
 from ..model.electra import DecisionBatch
@@ -102,6 +102,43 @@ def budget_batches(
     return batches
 
 
+MIN_SHARED_SAVING = 256  # tokens; smaller savings are not worth an extra forward
+
+
+def plan_chunks(
+    items: list[TrainItem], max_tokens: int, share: bool = True
+) -> list[tuple[str, list[TrainItem]]]:
+    """Split items into forward passes.
+
+    Questions of one sample share the same prefix object. When sharing pays
+    off, those run as ("shared", items): the prefix is encoded once and its
+    KV cache branches to every question (exact; see tests). Everything else
+    runs as ("rows", items) full-row batches under the token budget.
+    """
+    groups: dict[int, list[TrainItem]] = {}
+    for it in items:
+        groups.setdefault(id(it.enc.prefix_ids), []).append(it)
+    chunks: list[tuple[str, list[TrainItem]]] = []
+    singles: list[TrainItem] = []
+    for grp in groups.values():
+        p = len(grp[0].enc.prefix_ids)
+        if not share or len(grp) < 2 or (len(grp) - 1) * p < MIN_SHARED_SAVING:
+            singles.extend(grp)
+            continue
+        cur: list[TrainItem] = []
+        longest = 0
+        for it in sorted(grp, key=lambda x: len(x.enc.rendered.suffix_ids)):
+            s = len(it.enc.rendered.suffix_ids)
+            if cur and p + max(longest, s) * (len(cur) + 1) > max_tokens:
+                chunks.append(("shared", cur))
+                cur, longest = [], 0
+            cur.append(it)
+            longest = max(longest, s)
+        chunks.append(("shared", cur))
+    chunks += [("rows", mb) for mb in budget_batches(singles, max_tokens, shuffle_seed=None)]
+    return chunks
+
+
 @dataclass
 class TrainTensors:
     batch: DecisionBatch
@@ -123,8 +160,13 @@ class TrainTensors:
         )
 
 
-def collate_items(items: list[TrainItem], pad_id: int) -> TrainTensors:
-    batch = full_rows([it.enc for it in items], pad_id)
+def collate_items(
+    items: list[TrainItem], pad_id: int, prefix_len: int | None = None
+) -> TrainTensors:
+    """Full rows, or (``prefix_len`` given) suffix rows that branch off a
+    shared prefix KV cache — all items must then share that prefix."""
+    encs = [it.enc for it in items]
+    batch = full_rows(encs, pad_id) if prefix_len is None else suffix_rows(encs, prefix_len, pad_id)
     targets = torch.tensor([p for it in items for p in it.target], dtype=torch.float32)
     ordinals = torch.tensor([o for it in items for o in it.ordinals], dtype=torch.long)
     flagged = torch.tensor([it.flagged for it in items], dtype=torch.bool)
