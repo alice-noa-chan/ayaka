@@ -5,15 +5,12 @@ uploaded. Nothing leaves the machine without ``--yes``.
 
     python -m ayaka.publish --export runs/exports/electra-small --repo <user>/electra-small
     python -m ayaka.publish --export runs/exports/electra-small --repo <user>/electra-small \\
-        --with-code --confirm-data-terms --yes            # private upload
+        --with-code --yes                                 # private upload
     ... --public --yes                                   # public upload
 
 Guards:
 - the folder must contain a loadable export and a model card
   (README.md) whose ``<code-url>`` placeholder has been filled in
-- if the run trained on jev-distill (labels produced with TypeSafe's Jev
-  API), uploading requires ``--confirm-data-terms``: you checked that
-  TypeSafe's terms allow redistributing a model trained on those labels
 - repos are created private unless ``--public`` is given
 - the token comes from ``HF_TOKEN`` / the huggingface-cli login; it is
   never printed or written
@@ -40,24 +37,6 @@ def _size(path: str) -> int:
     for root, _, files in os.walk(path):
         total += sum(os.path.getsize(os.path.join(root, f)) for f in files)
     return total
-
-
-def uses_jev_labels(export_dir: str) -> bool:
-    """True if the source run's manifest lists jev-distill data."""
-    meta_path = os.path.join(export_dir, "export_meta.json")
-    with open(meta_path, encoding="utf-8") as f:
-        src = json.load(f).get("source", "")
-    manifest = (
-        os.path.join(os.path.dirname(os.path.normpath(src)), "dataset_manifest.jsonl")
-        if src
-        else ""
-    )
-    if not manifest or not os.path.exists(manifest):
-        return True  # unknown provenance: assume the strict case
-    with open(manifest, encoding="utf-8") as f:
-        return any(
-            "jev_distill" in json.loads(line).get("dataset_id", "") for line in f if line.strip()
-        )
 
 
 def check_export(export_dir: str) -> list[str]:
@@ -106,7 +85,6 @@ def plan(export_dir: str, repo: str, public: bool) -> dict:
         "files": len(files),
         "total_gb": round(_size(export_dir) / 1e9, 2),
         "largest": sorted(files, key=lambda x: -x[1])[:5],
-        "uses_jev_labels": uses_jev_labels(export_dir),
         "problems": check_export(export_dir),
     }
 
@@ -134,22 +112,12 @@ def main(argv: list[str] | None = None) -> dict:
         "--public", action="store_true", help="create the repo public (default: private)"
     )
     ap.add_argument("--with-code", action="store_true", help="bundle ayaka source as ayaka_src/")
-    ap.add_argument(
-        "--confirm-data-terms",
-        action="store_true",
-        help="you checked TypeSafe's terms for jev-distill labels",
-    )
     ap.add_argument("--yes", action="store_true", help="actually upload (otherwise dry-run)")
     args = ap.parse_args(argv)
 
     if args.with_code:
         bundle_code(args.export)
     report = plan(args.export, args.repo, args.public)
-    if report["uses_jev_labels"] and not args.confirm_data_terms:
-        report["problems"].append(
-            "trained on jev-distill (labels from TypeSafe's Jev API): pass --confirm-data-terms "
-            "after checking TypeSafe's terms allow redistributing a model trained on them"
-        )
     print(json.dumps(report, indent=2), flush=True)
     if report["problems"]:
         raise SystemExit("[publish] blocked: fix the problems above")

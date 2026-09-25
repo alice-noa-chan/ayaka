@@ -12,17 +12,40 @@ from ayaka.model.electra import ElectraDecisionModel
 from ayaka.modelcard import build_card, write_card
 from ayaka.publish import bundle_code, check_export
 from ayaka.publish import main as publish_main
-from ayaka.training.run import DEFAULT_SPECS, RELEASE_EXCLUDED, RELEASE_SPECS
+from ayaka.training.run import (
+    DEFAULT_SPECS,
+    RELEASE_EXCLUDED,
+    RESTRICTED_SPECS,
+    RunConfig,
+    apply_release_policy,
+)
 
 
 def test_release_specs_drop_restricted_licenses():
     from ayaka.data.loaders import DATASET_SPECS
 
-    assert {"anli_r1", "super_glue_multirc", "amazon_reviews"} <= RELEASE_EXCLUDED
-    assert set(RELEASE_SPECS) == set(DEFAULT_SPECS) - RELEASE_EXCLUDED
-    for s in RELEASE_SPECS:
+    assert {"jev_distill", "anli_r1", "super_glue_multirc", "amazon_reviews"} == RELEASE_EXCLUDED
+    assert not set(DEFAULT_SPECS) & RELEASE_EXCLUDED  # default data is license-clean
+    assert "jev_open" in DEFAULT_SPECS and "jev_distill" not in DEFAULT_SPECS
+    for s in DEFAULT_SPECS:
         lic = DATASET_SPECS[s]["license"].lower()
         assert "non-commercial" not in lic and "nc" not in lic.split()
+        assert "jev api" not in lic
+
+
+def test_release_policy_drops_restricted_and_jev_output_splits():
+    cfg = RunConfig(
+        specs=["jev_distill", "snli", "anli_r1"],
+        calibration_spec="jev_distill_calibration",
+        fidelity_spec="jev_distill_test30k",
+    )
+    apply_release_policy(cfg, verbose=False)
+    assert cfg.specs == ["snli"]
+    assert cfg.calibration_spec == "jev_open_calibration"
+    assert cfg.fidelity_spec == "jev_open_test"
+    opt_in = RunConfig(specs=["snli"], include_restricted=True)
+    apply_release_policy(opt_in, verbose=False)
+    assert opt_in.specs == ["snli", *RESTRICTED_SPECS]
 
 
 @pytest.fixture()
@@ -37,10 +60,17 @@ def exported(tmp_path):
             "model_size": "electra-small",
             "questions_per_step": 64,
             "lr": 1e-4,
-            "release": True,
+            "include_restricted": False,
         },
         "temperatures": {"noul": 1.1, "choice": 0.9},
-        "jev_fidelity": {"n": 300, "accuracy": 0.81, "kl": 0.12, "brier": 0.2, "ece": 0.03},
+        "reference_eval": {
+            "spec": "jev_open_test",
+            "n": 300,
+            "accuracy": 0.81,
+            "kl": 0.12,
+            "brier": 0.2,
+            "ece": 0.03,
+        },
         "heldout": {"n": 900, "accuracy": 0.77, "kl": 0.2, "brier": 0.3, "ece": 0.04},
     }
     save_checkpoint(apply_lora(m), str(ck), meta)
@@ -62,7 +92,7 @@ def exported(tmp_path):
     (run / "jevbench_report.json").write_text(json.dumps({"tiers": tiers, "summary": summary}))
     manifest = [
         {
-            "dataset_id": "jev_distill",
+            "dataset_id": "jev_open",
             "source_url": "hf://datasets/SargeDev/jev-distill-corpus-v3/train.jsonl",
             "split": "train",
             "language": "en",
@@ -89,9 +119,9 @@ def test_model_card_reads_run_artifacts(exported):
     assert card.startswith("---\nlicense: apache-2.0\nbase_model: google/gemma-4-E2B-it")
     assert "  - SargeDev/jev-distill-corpus-v3" in card and "  - stanfordnlp/snli" in card
     assert "61.2" in card and "Jev 1.13.0" in card  # our proxy + reference row
-    assert "81.0%" in card  # Jev fidelity accuracy
+    assert "81.0%" in card and "`jev_open_test`" in card  # reference held-out set
     assert "git+https://github.com/example/ayaka" in card
-    assert "TypeSafe" in card  # data-terms notice
+    assert "no commercial-API outputs were used as training labels" in card
 
 
 def test_publish_dry_run_guards(exported, capsys):
@@ -100,12 +130,8 @@ def test_publish_dry_run_guards(exported, capsys):
     assert any("<code-url>" in p for p in check_export(str(exported)))
     write_card(str(exported), "https://github.com/example/ayaka")
     assert check_export(str(exported)) == []
-    # jev-distill provenance requires the explicit terms flag, and no upload without --yes
-    with pytest.raises(SystemExit):
-        publish_main(["--export", str(exported), "--repo", "me/electra-small"])
-    report = publish_main(
-        ["--export", str(exported), "--repo", "me/electra-small", "--confirm-data-terms"]
-    )
+    # no upload without --yes
+    report = publish_main(["--export", str(exported), "--repo", "me/electra-small"])
     assert report["visibility"] == "private" and "url" not in report
     assert "dry-run OK" in capsys.readouterr().out
 

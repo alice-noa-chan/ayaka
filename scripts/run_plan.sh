@@ -6,7 +6,8 @@
 #   STAGES="large teacher distill export" bash scripts/run_plan.sh
 #
 # Knobs (env): SMALL_STEPS LARGE_STEPS BASE_STEPS TEACHER_N WITH_BASE=1 AUTO_STOP=1
-#              RELEASE=1  -> train/label only on release-licensed data (for public upload)
+#              ALLOW_RESTRICTED=1 -> also train/label on restricted data (jev_distill
+#              with Jev API labels, ANLI, MultiRC, Amazon); default data is license-clean
 # AUTO_STOP=1 stops the RunPod pod / vast.ai instance at the end so an idle
 # GPU does not keep billing.
 set -euo pipefail
@@ -23,7 +24,7 @@ CODE_URL=${CODE_URL:-<code-url>}  # git URL of this repo, written into the model
 R=$AYAKA_ARTIFACTS
 P="python -m ayaka.pipeline"
 REL=(); TREL=()
-if [ "${RELEASE:-0}" = 1 ]; then REL=(--set release=true); TREL=(--release); fi
+if [ "${ALLOW_RESTRICTED:-0}" = 1 ]; then REL=(--set include_restricted=true); TREL=(--allow-restricted); fi
 
 stop_instance() {
   if [ "${AUTO_STOP:-0}" != 1 ]; then return; fi
@@ -44,8 +45,8 @@ for stage in $STAGES; do
       # real E2B, 20 LoRA steps on a small slice: verifies the GPU path and
       # prints per-step time -> use it to refine the cost estimate
       $P train --model electra-small --run smoke --set steps=20 --set log_every=1 \
-        --set 'specs=["jev_distill","boolq","quality"]' --set limit_per_spec=300 \
-        --set 'spec_limits={"jev_distill":2000}' --set eval_questions=64 --set eval_every=0 \
+        --set 'specs=["jev_open","boolq","quality"]' --set limit_per_spec=300 \
+        --set 'spec_limits={"jev_open":2000}' --set eval_questions=64 --set eval_every=0 \
         --set calibration_questions=200 --set fidelity_questions=200 ;;
     zeroshot)
       $P eval --model electra-small --zero-shot ;;

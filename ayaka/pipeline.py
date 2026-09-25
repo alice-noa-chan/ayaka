@@ -56,18 +56,17 @@ def cmd_train(args) -> dict:
 
 def cmd_teacher(args) -> dict:
     from .training.distill import label_with_teacher
-    from .training.run import DEFAULT_SPECS, RELEASE_SPECS
+    from .training.run import DEFAULT_SPECS, RELEASE_EXCLUDED
 
-    base = RELEASE_SPECS if args.release else DEFAULT_SPECS
-    specs = [s for s in args.specs.split(",") if s] if args.specs else base
-    if args.release:
-        specs = [s for s in specs if s in RELEASE_SPECS]
+    specs = [s for s in args.specs.split(",") if s] if args.specs else list(DEFAULT_SPECS)
+    if not args.allow_restricted:
+        specs = [s for s in specs if s not in RELEASE_EXCLUDED]
     return label_with_teacher(
         args.ckpt,
         args.out,
         specs,
         args.n_samples,
-        spec_limits={"jev_distill": 200_000},
+        spec_limits={"jev_open": 100_000, "jev_distill": 200_000},
         seed=args.seed,
     )
 
@@ -120,15 +119,15 @@ def cmd_eval(args) -> dict:
     os.makedirs(out_dir, exist_ok=True)
     report: dict = {"model": args.model, "ckpt": args.ckpt, "zero_shot": args.zero_shot}
     if args.zero_shot and args.calibrate:
-        cal = items_from_spec("jev_distill_calibration", 3000, tok, model.cfg, 0, decon)
+        cal = items_from_spec(args.calibration_spec, 3000, tok, model.cfg, 0, decon)
         _, logits = tr.predict(cal, apply_temperature=False, return_logits=True)
         report["temperatures"] = fit_temperatures(
             logits, [it.target for it in cal], [it.type for it in cal]
         )
         apply_temperatures(model, report["temperatures"])
     if args.fidelity:
-        fid = items_from_spec("jev_distill_test30k", args.fidelity, tok, model.cfg, 0, decon)
-        report["jev_fidelity"] = tr.evaluate(fid)
+        fid = items_from_spec(args.fidelity_spec, args.fidelity, tok, model.cfg, 0, decon)
+        report["reference_eval"] = {"spec": args.fidelity_spec, **tr.evaluate(fid)}
     report["jevbench"] = run_jevbench(
         model, tok, out_path=os.path.join(out_dir, f"{name}-jevbench.json")
     )["summary"]
@@ -159,7 +158,11 @@ def main(argv: list[str] | None = None) -> dict:
     te.add_argument("--n-samples", type=int, default=120_000)
     te.add_argument("--specs", default="")
     te.add_argument("--seed", type=int, default=1)
-    te.add_argument("--release", action="store_true", help="label only release-licensed data")
+    te.add_argument(
+        "--allow-restricted",
+        action="store_true",
+        help="also label restricted specs (jev_distill, anli_r1, ...); off by default",
+    )
     te.set_defaults(fn=cmd_teacher)
 
     ex = sub.add_parser("export", help="write bf16 + int8 model folders")
@@ -180,6 +183,8 @@ def main(argv: list[str] | None = None) -> dict:
     g.add_argument("--zero-shot", action="store_true")
     ev.add_argument("--calibrate", action=argparse.BooleanOptionalAction, default=True)
     ev.add_argument("--fidelity", type=int, default=2000)
+    ev.add_argument("--calibration-spec", default="jev_open_calibration")
+    ev.add_argument("--fidelity-spec", default="jev_open_test")
     ev.add_argument("--name", default="")
     ev.set_defaults(fn=cmd_eval)
 

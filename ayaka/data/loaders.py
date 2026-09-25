@@ -39,17 +39,57 @@ from .transforms import TRANSFORMS
 JEV_DISTILL_REPO = "SargeDev/jev-distill-corpus-v3"
 
 DATASET_SPECS: dict[str, dict] = {
-    # Jev 1.13-distilled typed decisions (sec 29.1) — the primary signal.
+    # SargeDev/jev-distill-corpus-v3 mixes three label streams:
+    #   yuri_v3    Jev 1.13 outputs via OpenRouter. TypeSafe's Master
+    #              Customer Agreement s2.3(b) forbids using Output to
+    #              distill / train a model imitating the service, so this
+    #              stream is not used by default.
+    #   yuri_v1    a "32B teacher" of unstated identity/license: not used
+    #              by default.
+    #   openjev_v2 Open-Jev release-v2-redistributable: synthetic labels
+    #              made without any commercial API, CC0-1.0.
+    # The jev_open* specs keep only openjev_v2 ("where" filters rows before
+    # sampling). The full jev_distill* specs stay available opt-in.
     # hf_jsonl specs download one file and sample rows uniformly (the
     # corpus is ordered by stream, so a head slice would be biased).
+    "jev_open": {
+        "hf_jsonl": (JEV_DISTILL_REPO, "train.jsonl"),
+        "where": {"source": ["openjev_v2"]},
+        "transform": "jev_distill",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "CC0-1.0 (Open-Jev release-v2-redistributable stream)",
+        "label_schema": "Open-Jev synthetic reference distributions (noul/choice)",
+    },
+    "jev_open_calibration": {
+        "hf_jsonl": (JEV_DISTILL_REPO, "calibration.jsonl"),
+        "where": {"source": ["openjev_v2"]},
+        "transform": "jev_distill",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "CC0-1.0 (Open-Jev stream)",
+        "label_schema": "held-out split reserved for temperature fitting",
+    },
+    "jev_open_test": {
+        "hf_jsonl": (JEV_DISTILL_REPO, "test_set_30k.jsonl"),
+        "where": {"source": ["openjev_v2"]},
+        "transform": "jev_distill",
+        "kwargs": {},
+        "family": "direct_jev",
+        "lang": "en",
+        "license": "CC0-1.0 (Open-Jev stream)",
+        "label_schema": "held-out evaluation split",
+    },
     "jev_distill": {
         "hf_jsonl": (JEV_DISTILL_REPO, "train.jsonl"),
         "transform": "jev_distill",
         "kwargs": {},
         "family": "direct_jev",
         "lang": "en",
-        "license": "Apache-2.0 (openjev_v2 stream CC0)",
-        "label_schema": "Jev 1.13 / 32B-teacher distributions over typed options",
+        "license": "Apache-2.0 as published; yuri_v3 labels are Jev API Output (TypeSafe MCA s2.3(b))",
+        "label_schema": "Jev 1.13 / 32B-teacher / Open-Jev distributions",
     },
     "jev_distill_calibration": {
         "hf_jsonl": (JEV_DISTILL_REPO, "calibration.jsonl"),
@@ -57,7 +97,7 @@ DATASET_SPECS: dict[str, dict] = {
         "kwargs": {},
         "family": "direct_jev",
         "lang": "en",
-        "license": "Apache-2.0",
+        "license": "Apache-2.0 as published; includes Jev API Output",
         "label_schema": "held-out split reserved for temperature fitting",
     },
     "jev_distill_test30k": {
@@ -66,7 +106,7 @@ DATASET_SPECS: dict[str, dict] = {
         "kwargs": {},
         "family": "direct_jev",
         "lang": "en",
-        "license": "Apache-2.0",
+        "license": "Apache-2.0 as published; includes Jev API Output",
         "label_schema": "held-out Jev-fidelity evaluation split",
     },
     "snli": {
@@ -412,6 +452,13 @@ def load_spec_samples(
         path = hf_hub_download(repo, filename, repo_type="dataset")
         with open(path, encoding="utf-8") as f:
             lines = [line for line in f if line.strip()]
+        where = spec.get("where")
+        if where:
+            lines = [
+                ln
+                for ln in lines
+                if all(json.loads(ln).get(k) in allowed for k, allowed in where.items())
+            ]
         if limit is not None and limit < len(lines):
             lines = random.Random(seed).sample(lines, limit)
         rows = [json.loads(line) for line in lines]

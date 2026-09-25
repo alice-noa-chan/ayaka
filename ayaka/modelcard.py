@@ -2,7 +2,7 @@
 
 All metrics in the card are read from run artifacts: the checkpoint's
 meta.json (steps, run config, held-out metrics,
-Jev fidelity, temperatures), jevbench_report.json (public tiers with
+reference held-out set, temperatures), jevbench_report.json (public tiers with
 item-for-item reference comparisons), dataset_manifest.jsonl (sources,
 licenses, decontamination counts) and export_meta.json (int8 parity). The Speed section states the
 architecture's measured speed-ups, which do not depend on training.
@@ -160,7 +160,10 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         front += [f"  - {d}" for d in datasets]
     front.append("---")
 
-    fid, held = ck.get("jev_fidelity", {}), ck.get("heldout", {})
+    fid = ck.get("reference_eval") or ck.get("jev_fidelity") or {}
+    fid_spec = fid.get("spec", "jev_distill_test30k" if "jev_fidelity" in ck else "—")
+    held = ck.get("heldout", {})
+    uses_jev_output = any(r.get("dataset_id") == "jev_distill" for r in info["manifest"])
     temps = ck.get("temperatures", {})
     parity = meta.get("parity_vs_bf16")
     body = [
@@ -205,14 +208,15 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         "### JevBench (public tiers)",
         "",
         *_jevbench_section(info["jevbench"]),
-        "### Fidelity to Jev 1.13 (held-out `test_set_30k` slice) and held-out training mixture",
+        "### Held-out reference set and held-out training mixture",
         "",
         "| Set | n | Accuracy vs reference argmax | KL(ref ‖ model) | Brier | ECE |",
         "|---|---|---|---|---|---|",
-        "| Jev fidelity " + _metrics_row(fid) if fid else "| Jev fidelity | — | — | — | — | — |",
+        f"| `{fid_spec}` " + _metrics_row(fid) if fid else f"| `{fid_spec}` | — | — | — | — | — |",
         "| Held-out mix " + _metrics_row(held) if held else "| Held-out mix | — | — | — | — | — |",
         "",
-        f"Per-primitive temperatures (fitted on the jev-distill calibration split): `{json.dumps(temps)}`",
+        f"Per-primitive temperatures (fitted on `{run.get('calibration_spec', 'jev_open_calibration')}`, "
+        f"topped up from a reserved training slice for primitives it lacks): `{json.dumps(temps)}`",
         "",
     ]
     if quantized:
@@ -241,7 +245,7 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         "## Training",
         "",
         f"- steps: {ck.get('steps', '—')}, questions/step: {run.get('questions_per_step', '—')}, "
-        f"LoRA lr: {run.get('lr', '—')}, release-licensed data only: {run.get('release', False)}",
+        f"LoRA lr: {run.get('lr', '—')}, restricted data included: {run.get('include_restricted', False)}",
         f"- distilled from a larger Electra teacher: {bool(run.get('teacher_labels'))}",
         "- losses: soft-target NLL (KL to teacher when distilling), Brier, RPS (score), "
         "missing-evidence overconfidence penalty, auxiliary pointer NLL",
@@ -264,9 +268,15 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         f"- Model weights: Apache-2.0, derived from [`{base}`](https://huggingface.co/{base}) (Apache-2.0).",
         "- JevBench public items and per-task reference outcomes (bundled with the code for "
         "evaluation and decontamination): MIT, © Florian Standhartinger and contributors.",
-        "- Training data licenses are listed per source above. `SargeDev/jev-distill-corpus-v3` is "
-        "published under Apache-2.0, but its labels were produced with TypeSafe's Jev API; whoever "
-        "redistributes this model should confirm that TypeSafe's terms permit it.",
+        "- Training data licenses are listed per source above. "
+        + (
+            "This run includes the full `SargeDev/jev-distill-corpus-v3`, whose `yuri_v3` stream "
+            "holds outputs of TypeSafe's Jev API."
+            if uses_jev_output
+            else "From `SargeDev/jev-distill-corpus-v3` only the `openjev_v2` stream is used "
+            "(Open-Jev, CC0-1.0, labels made without any commercial API); no commercial-API "
+            "outputs were used as training labels."
+        ),
         "- Not affiliated with or endorsed by TypeSafe AI or Google.",
         "",
     ]

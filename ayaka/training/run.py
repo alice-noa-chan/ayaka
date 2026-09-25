@@ -33,15 +33,16 @@ from .batching import TrainItem, sample_to_items
 from .calibrate import apply_temperatures, fit_temperatures
 from .trainer import TrainConfig, Trainer
 
+# Default training data: only sources whose licenses/terms allow training
+# a model that may be published (see the provenance notes in
+# data/loaders.py). jev_open is the CC0 Open-Jev stream of jev-distill.
 DEFAULT_SPECS = [
-    "jev_distill",
+    "jev_open",
     "snli",
     "multi_nli",
-    "anli_r1",
     "boolq",
     "banking77",
     "clinc_oos",
-    "super_glue_multirc",
     "klue_nli",
     "klue_ynat",
     "kor_nli_multi",
@@ -51,20 +52,18 @@ DEFAULT_SPECS = [
     "jglue_jsts",
     "jglue_commonsense",
     "go_emotions",
-    "amazon_reviews",
     "quality",
     "quality_dev",
 ]
 
-SMOKE_SPECS = ["jev_distill", "boolq", "banking77"]
+# Opt-in only, each with a restriction: jev_distill (Jev API Output under
+# TypeSafe MCA s2.3(b) + an unidentified 32B teacher), anli_r1 (CC BY-NC),
+# super_glue_multirc (unclear terms), amazon_reviews (Amazon's terms).
+RESTRICTED_SPECS = ["jev_distill", "anli_r1", "super_glue_multirc", "amazon_reviews"]
+RELEASE_EXCLUDED = set(RESTRICTED_SPECS)
+RELEASE_SPECS = list(DEFAULT_SPECS)
 
-# Specs whose licenses allow a public model release. Dropped from the
-# default mix: anli_r1 (CC BY-NC), super_glue_multirc (unclear terms),
-# amazon_reviews (Amazon's original terms restrict use; mirrors relicense).
-# jev_distill stays: Apache-2.0 as published, but its labels are Jev API
-# outputs — check TypeSafe's terms before publishing (see model card).
-RELEASE_EXCLUDED = {"anli_r1", "super_glue_multirc", "amazon_reviews"}
-RELEASE_SPECS = [s for s in DEFAULT_SPECS if s not in RELEASE_EXCLUDED]
+SMOKE_SPECS = ["jev_open", "boolq", "banking77"]
 
 
 @dataclass
@@ -72,7 +71,7 @@ class RunConfig:
     model_size: str = "electra-small"
     specs: list[str] = field(default_factory=lambda: list(DEFAULT_SPECS))
     limit_per_spec: int | None = 20_000
-    spec_limits: dict = field(default_factory=lambda: {"jev_distill": 200_000})
+    spec_limits: dict = field(default_factory=lambda: {"jev_open": 100_000, "jev_distill": 200_000})
     steps: int = 2000
     questions_per_step: int = 64
     micro_batch_tokens: int = 8_192  # auto-halved on CUDA OOM
@@ -83,13 +82,15 @@ class RunConfig:
     eval_every: int = 250
     calibrate: bool = True
     calibration_questions: int = 4000
-    fidelity_questions: int = 3000  # Jev test_set_30k slice
+    calibration_spec: str = "jev_open_calibration"  # held-out split for temperatures
+    fidelity_questions: int = 3000  # reference-labelled held-out evaluation
+    fidelity_spec: str = "jev_open_test"
     jevbench: bool = True
     teacher_labels: str = ""  # jsonl from training.distill -> distillation run
     teacher_quota: float = 0.6
     evidence_aug_p: float = 0.0
     decontaminate: bool = True
-    release: bool = False  # restrict data to RELEASE_SPECS (public-release licensing)
+    include_restricted: bool = False  # add RESTRICTED_SPECS; otherwise they are dropped
     artifacts_dir: str = "artifacts"
     run_name: str = "run"
     seed: int = 0
@@ -99,6 +100,27 @@ class RunConfig:
     compile: bool = False  # torch.compile per decoder layer (experimental)
     log_every: int = 20
     save_every: int = 0
+
+
+def apply_release_policy(cfg: RunConfig, verbose: bool = True) -> None:
+    """Default: drop restricted training specs and keep calibration and
+    evaluation off Jev API Output (the jev_distill_* splits contain it).
+    ``include_restricted`` adds the restricted specs instead."""
+    if cfg.include_restricted:
+        cfg.specs = list(cfg.specs) + [s for s in RESTRICTED_SPECS if s not in cfg.specs]
+        if verbose:
+            print(f"[run] include_restricted: training also on {RESTRICTED_SPECS}", flush=True)
+        return
+    dropped = [s for s in cfg.specs if s in RELEASE_EXCLUDED]
+    cfg.specs = [s for s in cfg.specs if s not in RELEASE_EXCLUDED]
+    if cfg.calibration_spec.startswith("jev_distill"):
+        dropped.append(cfg.calibration_spec)
+        cfg.calibration_spec = "jev_open_calibration"
+    if cfg.fidelity_spec.startswith("jev_distill"):
+        dropped.append(cfg.fidelity_spec)
+        cfg.fidelity_spec = "jev_open_test"
+    if verbose and dropped:
+        print(f"[run] release policy: not using {dropped}", flush=True)
 
 
 def build_tokenizer(backbone: str):
@@ -268,11 +290,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     art = os.path.join(cfg.artifacts_dir, cfg.run_name)
     os.makedirs(art, exist_ok=True)
-    if cfg.release:
-        dropped = [s for s in cfg.specs if s not in RELEASE_SPECS]
-        cfg.specs = [s for s in cfg.specs if s in RELEASE_SPECS]
-        if verbose and dropped:
-            print(f"[run] release mode: dropped non-release specs {dropped}", flush=True)
+    apply_release_policy(cfg, verbose)
     with open(os.path.join(art, "run_config.json"), "w") as f:
         json.dump(asdict(cfg), f, indent=2)
     model = build_model(cfg, device)
@@ -299,6 +317,9 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     if not any(pools.values()):
         raise RuntimeError("no training samples: every dataset spec failed to load")
     held = split_eval(pools, cfg.eval_questions, cfg.seed) if cfg.eval_questions else []
+    # separate from `held`: tops up primitives the calibration spec lacks
+    # (Open-Jev has no score questions) without touching evaluation data
+    cal_reserve = split_eval(pools, 600, cfg.seed + 11) if cfg.calibrate else []
     eval_items = [it for s in held for it in sample_to_items(s, tok, mcfg)]
     if verbose:
         sizes = {f"{f}/{lang}": len(v) for (f, lang), v in pools.items()}
@@ -349,8 +370,11 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             cal = eval_items
         else:
             cal = items_from_spec(
-                "jev_distill_calibration", cfg.calibration_questions, tok, mcfg, cfg.seed, decon
+                cfg.calibration_spec, cfg.calibration_questions, tok, mcfg, cfg.seed, decon
             )
+            have = {t: sum(it.type == t for it in cal) for t in ("noul", "choice", "score")}
+            extra = [it for s in cal_reserve for it in sample_to_items(s, tok, mcfg)]
+            cal += [it for it in extra if have[it.type] < 200]
         _, logits = trainer.predict(cal, apply_temperature=False, return_logits=True)
         temps = fit_temperatures(logits, [it.target for it in cal], [it.type for it in cal])
         apply_temperatures(model, temps)
@@ -362,12 +386,10 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
         if verbose:
             print(f"[eval] held-out {_fmt(report['heldout'])}", flush=True)
     if cfg.fidelity_questions and not _is_synthetic(pools):
-        fid = items_from_spec(
-            "jev_distill_test30k", cfg.fidelity_questions, tok, mcfg, cfg.seed, decon
-        )
-        report["jev_fidelity"] = trainer.evaluate(fid)
+        fid = items_from_spec(cfg.fidelity_spec, cfg.fidelity_questions, tok, mcfg, cfg.seed, decon)
+        report["reference_eval"] = {"spec": cfg.fidelity_spec, **trainer.evaluate(fid)}
         if verbose:
-            print(f"[eval] Jev fidelity (test_set_30k) {_fmt(report['jev_fidelity'])}", flush=True)
+            print(f"[eval] {cfg.fidelity_spec} {_fmt(report['reference_eval'])}", flush=True)
     meta.update(report)
     save_checkpoint(model, ckpt_dir, meta)
     if cfg.jevbench:

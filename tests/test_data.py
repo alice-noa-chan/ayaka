@@ -405,3 +405,36 @@ def test_reading_mc_skips_long_articles_instead_of_truncating():
     assert s.metadata["task_family"] == "long_context"
     assert reading_mc(row, **kw, max_chars=100) == []
     assert reading_mc({**row, "options": ["a", "a", "b", "c"]}, **kw) == []
+
+
+def test_jev_open_keeps_only_the_cc0_stream(tmp_path, monkeypatch):
+    import json
+
+    import huggingface_hub
+
+    from ayaka.data import loaders
+
+    path = tmp_path / "train.jsonl"
+    with open(path, "w") as f:
+        for i in range(60):
+            src = ("yuri_v3", "yuri_v1", "openjev_v2")[i % 3]
+            f.write(
+                json.dumps(
+                    {
+                        "id": f"r{i}",
+                        "source": src,
+                        "kind": "noul",
+                        "options": ["false", "true"],
+                        "target": [0.5, 0.5],
+                        "state": f"s{i}",
+                        "question": "q?",
+                    }
+                )
+                + chr(10)
+            )
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda *a, **k: str(path))
+    samples, _ = loaders.load_spec_samples("jev_open", limit=None, dedup=False)
+    assert len(samples) == 20
+    assert {s.metadata["teacher_stream"] for s in samples} == {"openjev_v2"}
+    few, _ = loaders.load_spec_samples("jev_open", limit=5, dedup=False)
+    assert len(few) == 5 and {s.metadata["teacher_stream"] for s in few} == {"openjev_v2"}

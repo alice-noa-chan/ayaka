@@ -73,12 +73,33 @@ teacher-labeled questions.
 
 ## Data
 
-The primary signal is [`SargeDev/jev-distill-corpus-v3`](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3):
-about 500K decisions labeled with **Jev 1.13's own distributions**, plus
-Open-Jev and 32B-teacher streams (Apache-2.0). It makes up 55% of the mixture.
-The rest keeps multilingual (ko/ja), high-cardinality and human-soft-label
-coverage. Every training sample that shares a 13-gram with a JevBench public
-item is dropped (`ayaka/data/decontam.py`).
+By default only license-clean sources are used (`DEFAULT_SPECS` in
+`ayaka/training/run.py`). Each source's license is recorded in the run manifest
+and in the model card.
+
+- **Typed decisions:** from
+  [`SargeDev/jev-distill-corpus-v3`](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3)
+  only the `openjev_v2` stream (spec `jev_open`) is used: 74.6K train rows
+  (noul/choice), CC0-1.0, whose labels were made without any commercial API.
+  It is 52% of the mixture.
+- **Not used by default** (`include_restricted=true` / `ALLOW_RESTRICTED=1` opts in):
+  - the corpus's `yuri_v3` stream (about 444K rows). Its labels are outputs of
+    TypeSafe's Jev API, and TypeSafe's Master Customer Agreement (updated
+    2026-09-23) §2.3(b) forbids using "any Output to perform model distillation,
+    train a model to imitate the output of the Services, or develop … a similar
+    or competing product". OpenRouter's terms §5.1 pass provider terms through
+    to its users.
+  - `yuri_v1`, labeled by an unidentified "32B teacher".
+  - ANLI (CC BY-NC), MultiRC (unclear terms) and Amazon reviews (Amazon's
+    terms).
+- **Other sources:** multilingual (ko/ja) NLU, high-cardinality intent and
+  human soft-label sets, plus QuALITY for long evidence.
+- **Calibration and evaluation** use the `openjev_v2` rows of the corpus's
+  calibration and `test_set_30k` splits (1,572 / 2,319 rows). Primitives those
+  splits lack (score) are topped up from a reserved training slice.
+
+Every training sample that shares a 13-gram with a JevBench public item is
+dropped (`ayaka/data/decontam.py`).
 
 Measured prompt lengths (Gemma 4 tokenizer): jev-distill mean 191 tokens (p99
 602), JevBench hard mean 1,242 (max 3,892). `max_seq_len` is 4096. To cover
@@ -93,8 +114,8 @@ truncated, because cutting the middle could remove the answer's evidence.
   the published per-task outcomes of Jev 1.13.0 and other systems on the same
   items. It also reports a chance-corrected Intelligence proxy using the
   official tier weights over the public tiers.
-- **Jev fidelity**: accuracy, KL and ECE against Jev's distributions on the
-  held-out `test_set_30k`.
+- **Held-out reference set**: accuracy, KL and ECE against the reference
+  distributions of `jev_open_test` (Open-Jev rows of `test_set_30k`).
 - **Held-out mixture metrics** during training.
 
 ## Training (RunPod / vast.ai / Modal / any CUDA box)
@@ -157,23 +178,19 @@ than bf16 on this CPU.
 ## Public release (Hugging Face)
 
 ```bash
-RELEASE=1 STAGES="small large teacher distill" bash scripts/run_plan.sh   # release-licensed data only
+STAGES="small large teacher distill" bash scripts/run_plan.sh   # license-clean data (default)
 CODE_URL=https://github.com/<you>/ayaka STAGES="export" bash scripts/run_plan.sh
-python -m ayaka.publish --export runs/exports/electra-small --repo <you>/electra-small --with-code   # dry-run
-python -m ayaka.publish --export runs/exports/electra-small --repo <you>/electra-small --with-code     --confirm-data-terms --yes                                                                     # private upload
+python -m ayaka.publish --export runs/exports/electra-small --repo <you>/electra-small --with-code         # dry-run
+python -m ayaka.publish --export runs/exports/electra-small --repo <you>/electra-small --with-code --yes   # private upload
 ```
 
-- `RELEASE=1` (`--set release=true`) drops ANLI (CC BY-NC), MultiRC (unclear
-  terms) and Amazon reviews (Amazon's original terms) from training and
-  teacher labeling.
-- Every export gets a generated `README.md` model card with front matter,
-  JevBench public-tier results beside the reference systems, Jev fidelity,
-  int8 parity, the per-source data and license table, and limitations.
+- Every export gets a generated `README.md` model card. It has front matter,
+  JevBench public-tier results beside the reference systems, held-out
+  reference-set metrics, int8 parity, the per-source data and license table
+  with a provenance statement, and limitations.
 - `ayaka.publish` is a dry-run unless `--yes` is given, and it creates private
   repos unless `--public` is given. It refuses to upload while the card still
-  has the `<code-url>` placeholder. A model trained on jev-distill needs
-  `--confirm-data-terms`: its labels come from TypeSafe's Jev API, so check
-  their terms before redistributing. `--with-code` bundles the source as
+  has the `<code-url>` placeholder. `--with-code` bundles the source as
   `ayaka_src/` for an offline `pip install ./ayaka_src`.
 
 ## Running locally
