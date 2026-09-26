@@ -6,7 +6,7 @@
            └─ option-span states r_i ─┐
                                       Set Mixer (permutation-equivariant)
                                       └─► pointer logits  <W_q h_q, W_k R_i>
-    logit_i = label_i + g[primitive] · pointer_i     (sets with a label alphabet)
+    logit_i = label_i + g[primitive, length] · pointer_i (sets with a label alphabet)
     logit_i = pointer_i                              (larger sets: pointer only)
 
 ``g`` starts at 0, so an untrained head reproduces the backbone's
@@ -71,7 +71,7 @@ class DecisionBatch:
 class DecisionOutput:
     logits: torch.Tensor  # [n_c]
     label_logits: torch.Tensor  # [n_c] (0 where pointer-only)
-    pointer_logits: torch.Tensor  # [n_c]
+    pointer_logits: torch.Tensor  # [n_c]; zero when unused pointer branch is skipped in eval
     cand_cu: torch.Tensor
     cand_question: torch.Tensor
     primitive: torch.Tensor  # [n_q]
@@ -91,12 +91,31 @@ def at_least_fp32(t: torch.Tensor) -> torch.Tensor:
     return t.to(torch.promote_types(t.dtype, torch.float32))
 
 
-def span_means(hidden: torch.Tensor, rows: torch.Tensor, spans: torch.Tensor) -> torch.Tensor:
-    """Mean hidden state over [start, end) per candidate (fp32)."""
-    cs = torch.nn.functional.pad(at_least_fp32(hidden).cumsum(1), (0, 0, 1, 0))  # [B, L+1, D]
-    s, e = spans[:, 0], spans[:, 1]
-    total = cs[rows, e] - cs[rows, s]
-    return total / (e - s).clamp(min=1).unsqueeze(-1).to(total.dtype)
+def span_means(
+    hidden: torch.Tensor, rows: torch.Tensor, spans: torch.Tensor, norm: nn.Module | None = None
+) -> torch.Tensor:
+    """Gather only option tokens, optionally normalize, then mean each span.
+
+    Work scales with option tokens rather than the entire state/padded rows.
+    Local sums also avoid subtracting nearly equal large prefix sums. Empty
+    spans produce zero, and repeated/overlapping spans retain their gradients.
+    """
+    if spans.shape[0] == 0:
+        return at_least_fp32(hidden.new_zeros(0, hidden.shape[-1]))
+    lengths = (spans[:, 1] - spans[:, 0]).clamp(min=0)
+    offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
+    candidates = torch.repeat_interleave(torch.arange(spans.shape[0], device=spans.device), lengths)
+    positions = (
+        spans[candidates, 0]
+        + torch.arange(candidates.numel(), device=spans.device)
+        - offsets[candidates]
+    )
+    selected = hidden[rows[candidates], positions]
+    if norm is not None:
+        selected = norm(selected)
+    selected = at_least_fp32(selected)
+    total = torch.segment_reduce(selected, "sum", lengths=lengths)
+    return total / lengths.clamp(min=1).unsqueeze(-1).to(total.dtype)
 
 
 class ElectraDecisionModel(nn.Module):
@@ -111,7 +130,9 @@ class ElectraDecisionModel(nn.Module):
         self.head = PointerHead(
             text_config.hidden_size, cfg.pointer_dim, cfg.set_mixer_layers, cfg.set_mixer_heads
         )
-        self.gate = nn.Parameter(torch.zeros(3))
+        # Separate short/long mixing strengths so pointer corrections learned
+        # from compositional prompts need not disturb short typed decisions.
+        self.gate = nn.Parameter(torch.zeros(3, len(LENGTH_BUCKETS)))
         # scalar temperature per (primitive, prompt-length bucket): long prompts
         # were measurably overconfident with a single per-primitive scalar
         self.register_buffer("temperature", torch.ones(3, len(LENGTH_BUCKETS)))
@@ -147,7 +168,7 @@ class ElectraDecisionModel(nn.Module):
         return embedding_rows(self.text_model().embed_tokens, ids)
 
     def encode(
-        self, batch: DecisionBatch, past_key_values=None
+        self, batch: DecisionBatch, past_key_values=None, *, sparse_spans: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor, DecisionBatch]:
         """-> (answer states, span states, batch indexed into them).
 
@@ -156,6 +177,8 @@ class ElectraDecisionModel(nn.Module):
         into that compact [B, 1, D] view; option spans index the states
         below the shared layers. Both paths give identical results
         (tests/test_model.py).
+        sparse_spans=True returns raw states below the shared layers;
+        forward normalizes only gathered option tokens in that case.
         """
         common = {
             "attention_mask": batch.attention_mask,
@@ -164,7 +187,9 @@ class ElectraDecisionModel(nn.Module):
         }
         if self.prune_shared_positions:
             keep = batch.answer_pos.unsqueeze(1)
-            top, spans_h = forward_kept(self.text_model(), batch.input_ids, keep, **common)
+            top, spans_h = forward_kept(
+                self.text_model(), batch.input_ids, keep, normalize_spans=not sparse_spans, **common
+            )
             return top, spans_h, replace(batch, answer_pos=torch.zeros_like(batch.answer_pos))
         out = self.backbone(
             input_ids=batch.input_ids,
@@ -175,7 +200,8 @@ class ElectraDecisionModel(nn.Module):
         top = out.last_hidden_state
         if self.span_layer is None:
             return top, top, batch
-        return top, self.text_model().norm(out.hidden_states[self.span_layer]), batch
+        spans_h = out.hidden_states[self.span_layer]
+        return top, spans_h if sparse_spans else self.text_model().norm(spans_h), batch
 
     def encode_prefix(self, prefix_ids: torch.Tensor, cache=None):
         """Run the shared prefix once; returns its KV cache (on KV-shared
@@ -193,28 +219,42 @@ class ElectraDecisionModel(nn.Module):
         batch: DecisionBatch,
         apply_temperature: bool = False,
         span_hidden: torch.Tensor | None = None,
+        span_norm: nn.Module | None = None,
     ) -> DecisionOutput:
         n_q = batch.answer_pos.numel()
         q = at_least_fp32(hidden[torch.arange(n_q, device=hidden.device), batch.answer_pos])
-        spans_h = hidden if span_hidden is None else span_hidden
-        r = span_means(spans_h, batch.cand_question, batch.cand_spans)
         cq = batch.cand_question
         has_label_c = batch.has_label[cq]
+        prim_c = batch.primitive[cq]
+        bucket = length_bucket(batch.seq_len, self.cfg.long_prompt_tokens, n_q, q.device)
+        gate = self.gate[prim_c, bucket[cq]]
         lab = label_logits(q[cq], self.label_rows(batch.label_ids), self.softcap)
         lab = torch.where(has_label_c, lab, torch.zeros_like(lab))
-        ptr = at_least_fp32(self.head(r, q, batch.cand_cu, cq))
-        prim_c = batch.primitive[cq]
-        logits = torch.where(has_label_c, lab + self.gate[prim_c] * ptr, ptr)
+        # Training must retain pointer auxiliary losses and gate gradients,
+        # even at initialization. In no-grad eval, an all-zero active gate
+        # makes this entire branch irrelevant to the returned distribution.
+        skip_pointer = (
+            not self.training
+            and not torch.is_grad_enabled()
+            and bool((has_label_c & (gate == 0)).all())
+        )
+        if skip_pointer:
+            ptr = torch.zeros_like(lab)
+        else:
+            spans_h = hidden if span_hidden is None else span_hidden
+            r = span_means(spans_h, cq, batch.cand_spans, norm=span_norm)
+            ptr = at_least_fp32(self.head(r, q, batch.cand_cu, cq))
+        logits = torch.where(has_label_c, lab + gate * ptr, ptr)
         if apply_temperature:
-            bucket = length_bucket(batch.seq_len, self.cfg.long_prompt_tokens, n_q, logits.device)
             logits = logits / self.temperature[prim_c, bucket[cq]]
         return DecisionOutput(logits, lab, ptr, batch.cand_cu, cq, batch.primitive)
 
     def forward(
         self, batch: DecisionBatch, apply_temperature: bool = False, past_key_values=None
     ) -> DecisionOutput:
-        top, spans_h, view = self.encode(batch, past_key_values)
-        return self.decide(top, view, apply_temperature, span_hidden=spans_h)
+        top, spans_h, view = self.encode(batch, past_key_values, sparse_spans=True)
+        norm = self.text_model().norm if self.span_layer is not None else None
+        return self.decide(top, view, apply_temperature, span_hidden=spans_h, span_norm=norm)
 
     # ------------------------------------------------------- checkpointing
     def head_state_dict(self) -> dict:
@@ -229,7 +269,10 @@ class ElectraDecisionModel(nn.Module):
     def load_head_state_dict(self, sd: dict) -> None:
         self.head.load_state_dict(sd["head"])
         with torch.no_grad():
-            self.gate.copy_(sd["gate"])
+            g = sd["gate"]
+            if g.dim() == 1:  # legacy per-primitive gates preserve both length regimes
+                g = g.unsqueeze(1).expand_as(self.gate)
+            self.gate.copy_(g)
             t = sd["temperature"]
             if t.dim() == 1:  # checkpoints from before length buckets
                 t = t.unsqueeze(1).expand_as(self.temperature)

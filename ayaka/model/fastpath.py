@@ -97,9 +97,14 @@ def forward_kept(
     attention_mask: torch.Tensor | None = None,
     position_ids: torch.Tensor | None = None,
     past_key_values=None,
+    normalize_spans: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """-> (final normed states at ``keep`` [B, K, D],
-           normed states of every position after the last non-shared layer [B, S, D]).
+           states after the last non-shared layer [B, S, D]).
+
+    normalize_spans=False defers normalization to gathered option tokens;
+    the answer states are always normalized. The default keeps the original
+    full normalized span-state API.
 
     keep: [B, K] indices into the current ``input_ids`` rows.
     """
@@ -127,7 +132,7 @@ def forward_kept(
         past_key_values,
         shared_kv,
     )
-    below_shared = text.norm(hidden)
+    below_shared = text.norm(hidden) if normalize_spans else hidden
 
     # ---- shared layers: only the kept query rows
     kept_pli = _rows(per_layer_inputs, keep) if per_layer_inputs is not None else None

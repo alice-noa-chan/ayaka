@@ -191,7 +191,7 @@ class Trainer:
                 print(
                     f"[train] step {self.step_i}/{self.cfg.steps} loss={rec['total']:.4f} nll={rec['nll']:.4f} "
                     f"brier={rec['brier']:.4f} gn={rec['grad_norm']:.2f} lr={rec['lr']:.2e} "
-                    f"gate={[round(g, 3) for g in rec['gate']]} {rec['elapsed']:.0f}s {ev}",
+                    f"gate={[[round(g, 3) for g in row] for row in rec['gate']]} {rec['elapsed']:.0f}s {ev}",
                     flush=True,
                 )
             if on_step is not None:

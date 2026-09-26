@@ -21,9 +21,9 @@ prefix: instructions + <state>…</state>          encoded ONCE per state (KV ca
   └─ suffix_q: question + options + answer cue    one isolated branch per question
        ├─ answer-position state h_q ─► label readout  softcap(h_q · E[label_i])
        └─ option-span states r_i ─► Set Mixer (no positions) ─► pointer <W_q h_q, W_k R_i>
-logit_i = label_i + g[primitive] · pointer_i       (≤ 26 options; g starts at 0)
+logit_i = label_i + g[primitive, length] · pointer_i (≤ 26 options; g starts at 0)
 logit_i = pointer_i → top-26 shortlist → label re-rank   (larger sets)
-p = softmax(logit / T[primitive])                  (T fitted on a held-out split)
+p = softmax(logit / T[primitive, length])          (T fitted on a held-out split)
 ```
 
 Guarantees, each covered by `tests/test_model.py`:
@@ -37,6 +37,19 @@ Guarantees, each covered by `tests/test_model.py`:
 - **Zero-shot preservation.** With `g = 0` the output is exactly the backbone's
   restricted LM-head readout of the label tokens. Training only moves away from
   that as far as it helps.
+- **Length-specific pointer mixing.** Each primitive learns separate short/long
+  gates at the configured 1,024-token boundary. The long compositional data can
+  train a different correction strength from short decisions. Existing
+  three-value gates load into both buckets, preserving their readout behavior;
+  temperatures retain the same migration rule. Accuracy gains require retraining
+  and held-out measurement.
+- **Sparse candidate pooling.** Gather and sum only candidate span tokens,
+  avoiding a full-sequence fp32 cumulative sum and cancellation from subtracting
+  long prefix sums. E2B/E4B also normalize only gathered option states below the
+  shared layers. Outputs and gradients match independent local means. At
+  no-grad evaluation, all-zero active gates with label readouts skip the pointer;
+  training, active gates and pointer-only sets retain the branch. An unused
+  `DecisionOutput.pointer_logits` is zero on this evaluation path.
 - **Exact compute skipping on E2B/E4B.** The last 20 (E2B) / 18 (E4B) Gemma 4
   layers are KV-shared: they read the K/V of earlier layers and never produce
   their own. Electra therefore runs only the answer position through them,
