@@ -18,7 +18,7 @@ from ayaka.model.electra import at_least_fp32, span_means
 
 
 @torch.no_grad()
-def legacy_pool(hidden, rows, spans, norm):
+def legacy_pool(hidden, rows, spans, norm, tokens=None, token_offsets=None):
     cumulative = torch.nn.functional.pad(at_least_fp32(norm(hidden)).cumsum(1), (0, 0, 1, 0))
     starts, ends = spans.unbind(1)
     return (cumulative[rows, ends] - cumulative[rows, starts]) / (ends - starts).clamp(
@@ -27,8 +27,8 @@ def legacy_pool(hidden, rows, spans, norm):
 
 
 @torch.no_grad()
-def sparse_pool(hidden, rows, spans, norm):
-    return span_means(hidden, rows, spans, norm=norm)
+def sparse_pool(hidden, rows, spans, norm, tokens=None, token_offsets=None):
+    return span_means(hidden, rows, spans, norm=norm, tokens=tokens, token_offsets=token_offsets)
 
 
 def main():
@@ -48,21 +48,29 @@ def main():
             rows = torch.arange(4, device=args.device).repeat_interleave(4)
             starts = torch.arange(length - 128, length, 32, device=args.device).repeat(4)
             spans = torch.stack((starts, starts + 32), dim=1)
-            reference = legacy_pool(hidden, rows, spans, norm)
-            actual = sparse_pool(hidden, rows, spans, norm)
+            token_pairs, offsets = [], [0]
+            for row, (start, end) in zip(rows.cpu().tolist(), spans.cpu().tolist(), strict=True):
+                token_pairs.extend((row, position) for position in range(start, end))
+                offsets.append(len(token_pairs))
+            tokens = torch.tensor(token_pairs, dtype=torch.long, device=args.device)
+            token_offsets = torch.tensor(offsets, dtype=torch.long, device=args.device)
+            reference = legacy_pool(hidden, rows, spans, norm, tokens, token_offsets)
+            actual = sparse_pool(hidden, rows, spans, norm, tokens, token_offsets)
             error = float((actual - reference).abs().max())
             if not torch.allclose(actual, reference, atol=1e-4, rtol=1e-4):
                 raise RuntimeError(f"pooling parity failed: max absolute error {error}")
             timings = {}
             for name, operation in (("legacy", legacy_pool), ("sparse", sparse_pool)):
                 timer = Timer(
-                    "operation(hidden, rows, spans, norm)",
+                    "operation(hidden, rows, spans, norm, tokens, token_offsets)",
                     globals={
                         "operation": operation,
                         "hidden": hidden,
                         "rows": rows,
                         "spans": spans,
                         "norm": norm,
+                        "tokens": tokens,
+                        "token_offsets": token_offsets,
                     },
                     num_threads=args.threads,
                 )

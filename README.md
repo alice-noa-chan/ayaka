@@ -50,6 +50,8 @@ Guarantees, each covered by `tests/test_model.py`:
   no-grad evaluation, all-zero active gates with label readouts skip the pointer;
   training, active gates and pointer-only sets retain the branch. An unused
   `DecisionOutput.pointer_logits` is zero on this evaluation path.
+  CPU collation prepares token coordinates and segment offsets before device
+  transfer, avoiding dynamic index construction and synchronization on CUDA.
 - **Exact compute skipping on E2B/E4B.** The last 20 (E2B) / 18 (E4B) Gemma 4
   layers are KV-shared: they read the K/V of earlier layers and never produce
   their own. Electra therefore runs only the answer position through them,

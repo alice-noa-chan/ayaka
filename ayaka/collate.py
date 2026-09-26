@@ -50,12 +50,16 @@ def encode_decision(
 
 def _cand_fields(items: list[EncodedQuestion], offsets: list[int]):
     cu, cq, spans, labels, has_label = [0], [], [], [], []
+    tokens, token_offsets = [], [0]
     for qi, (it, off) in enumerate(zip(items, offsets, strict=True)):
         r = it.rendered
         n = len(r.option_spans)
         cu.append(cu[-1] + n)
         cq.extend([qi] * n)
         spans.extend([(s + off, e + off) for s, e in r.option_spans])
+        for start, end in r.option_spans:
+            tokens.extend((qi, pos + off) for pos in range(start, end))
+            token_offsets.append(len(tokens))
         labels.extend(r.label_ids if r.label_ids is not None else [0] * n)
         has_label.append(r.label_ids is not None)
     return (
@@ -64,6 +68,8 @@ def _cand_fields(items: list[EncodedQuestion], offsets: list[int]):
         torch.tensor(spans, dtype=torch.long).view(-1, 2),
         torch.tensor(labels, dtype=torch.long),
         torch.tensor(has_label, dtype=torch.bool),
+        torch.tensor(tokens, dtype=torch.long).view(-1, 2),
+        torch.tensor(token_offsets, dtype=torch.long),
     )
 
 
@@ -75,7 +81,9 @@ def full_rows(items: list[EncodedQuestion], pad_id: int) -> DecisionBatch:
     for i, r in enumerate(rows):
         ids[i, : len(r)] = torch.tensor(r)
         mask[i, : len(r)] = 1
-    cu, cq, spans, labels, has_label = _cand_fields(items, [len(it.prefix_ids) for it in items])
+    cu, cq, spans, labels, has_label, tokens, token_offsets = _cand_fields(
+        items, [len(it.prefix_ids) for it in items]
+    )
     return DecisionBatch(
         input_ids=ids,
         attention_mask=mask,
@@ -87,6 +95,8 @@ def full_rows(items: list[EncodedQuestion], pad_id: int) -> DecisionBatch:
         has_label=has_label,
         primitive=torch.tensor([it.primitive for it in items], dtype=torch.long),
         seq_len=torch.tensor([len(r) for r in rows], dtype=torch.long),
+        cand_tokens=tokens,
+        cand_token_offsets=token_offsets,
     )
 
 
@@ -99,7 +109,7 @@ def suffix_rows(items: list[EncodedQuestion], prefix_len: int, pad_id: int) -> D
     for i, s in enumerate(sufs):
         ids[i, : len(s)] = torch.tensor(s)
         mask[i, prefix_len : prefix_len + len(s)] = 1
-    cu, cq, spans, labels, has_label = _cand_fields(items, [0] * len(items))
+    cu, cq, spans, labels, has_label, tokens, token_offsets = _cand_fields(items, [0] * len(items))
     return DecisionBatch(
         input_ids=ids,
         attention_mask=mask,
@@ -112,4 +122,6 @@ def suffix_rows(items: list[EncodedQuestion], prefix_len: int, pad_id: int) -> D
         primitive=torch.tensor([it.primitive for it in items], dtype=torch.long),
         position_ids=(prefix_len + torch.arange(length)).unsqueeze(0).expand(len(sufs), -1),
         seq_len=torch.tensor([prefix_len + len(x) for x in sufs], dtype=torch.long),
+        cand_tokens=tokens,
+        cand_token_offsets=token_offsets,
     )

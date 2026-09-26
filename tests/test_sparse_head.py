@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from ayaka.collate import encode_decision, full_rows
+from ayaka.collate import encode_decision, full_rows, suffix_rows
 from ayaka.config import tiny_config
 from ayaka.model.electra import ElectraDecisionModel, span_means
 from ayaka.prompt import QuestionView
@@ -157,3 +157,46 @@ def test_sparse_norm_forward_matches_full_norm_forward_and_gradients():
     reference_grad = torch.autograd.grad(reference.logits.square().sum(), params)
     for actual, expected in zip(got_grad, reference_grad, strict=True):
         assert torch.allclose(actual, expected, atol=2e-5, rtol=2e-5)
+
+
+def test_prepacked_coordinates_match_rendered_option_tokens_in_both_layouts():
+    tok = ToyTokenizer()
+    prefix, encoded = encode_decision(
+        {"message": "look up the invoice"},
+        [
+            QuestionView("choice", "Route?", ["accounts", "sales", "support"]),
+            QuestionView("noul", "Was it paid?", ["unpaid", "paid"]),
+        ],
+        tok,
+        max_seq_len=512,
+    )
+    expected = torch.tensor(
+        [
+            token
+            for item in encoded
+            for start, end in item.rendered.option_spans
+            for token in item.rendered.suffix_ids[start:end]
+        ]
+    )
+    for batch in (full_rows(encoded, tok.pad_id), suffix_rows(encoded, len(prefix), tok.pad_id)):
+        tokens = batch.cand_tokens
+        selected = batch.input_ids[tokens[:, 0], tokens[:, 1]]
+        assert torch.equal(selected, expected)
+        assert batch.cand_token_offsets[-1] == expected.numel()
+        assert torch.equal(
+            batch.cand_token_offsets.diff(), batch.cand_spans[:, 1] - batch.cand_spans[:, 0]
+        )
+
+
+def test_prepacked_pooling_preserves_fallback_logits_and_gradients():
+    model, batch = model_and_batch()
+    model.gate.data.fill_(0.6)
+    model.eval()
+    packed = model(batch)
+    fallback = model(replace(batch, cand_tokens=None, cand_token_offsets=None))
+    assert torch.equal(packed.logits, fallback.logits)
+    params = (model.head.in_r.weight, model.text_model().layers[0].self_attn.q_proj.weight)
+    actual = torch.autograd.grad(packed.logits.square().sum(), params)
+    expected = torch.autograd.grad(fallback.logits.square().sum(), params)
+    for a, b in zip(actual, expected, strict=True):
+        assert torch.equal(a, b)

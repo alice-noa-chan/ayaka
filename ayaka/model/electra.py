@@ -58,6 +58,8 @@ class DecisionBatch:
     primitive: torch.Tensor  # [B]
     position_ids: torch.Tensor | None = None  # set on the cache path
     seq_len: torch.Tensor | None = None  # [B] full prompt length (prefix + suffix)
+    cand_tokens: torch.Tensor | None = None  # [option tokens, 2] (row, position), prepared on CPU
+    cand_token_offsets: torch.Tensor | None = None  # [n_c + 1] offsets into cand_tokens
 
     def to(self, device) -> DecisionBatch:
         kw = {}
@@ -92,29 +94,49 @@ def at_least_fp32(t: torch.Tensor) -> torch.Tensor:
 
 
 def span_means(
-    hidden: torch.Tensor, rows: torch.Tensor, spans: torch.Tensor, norm: nn.Module | None = None
+    hidden: torch.Tensor,
+    rows: torch.Tensor,
+    spans: torch.Tensor,
+    norm: nn.Module | None = None,
+    tokens: torch.Tensor | None = None,
+    token_offsets: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Gather only option tokens, optionally normalize, then mean each span.
 
     Work scales with option tokens rather than the entire state/padded rows.
-    Local sums also avoid subtracting nearly equal large prefix sums. Empty
+    Prepacked CPU collation indices avoid dynamic GPU allocations and the
+    host synchronization required by repeat_interleave. Local sums also avoid
+    subtracting nearly equal large prefix sums. Empty
     spans produce zero, and repeated/overlapping spans retain their gradients.
     """
     if spans.shape[0] == 0:
         return at_least_fp32(hidden.new_zeros(0, hidden.shape[-1]))
+    if (tokens is None) != (token_offsets is None):
+        raise ValueError("tokens and token_offsets must be provided together")
     lengths = (spans[:, 1] - spans[:, 0]).clamp(min=0)
-    offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
-    candidates = torch.repeat_interleave(torch.arange(spans.shape[0], device=spans.device), lengths)
-    positions = (
-        spans[candidates, 0]
-        + torch.arange(candidates.numel(), device=spans.device)
-        - offsets[candidates]
-    )
-    selected = hidden[rows[candidates], positions]
+    if tokens is None:
+        offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
+        candidates = torch.repeat_interleave(
+            torch.arange(spans.shape[0], device=spans.device), lengths
+        )
+        positions = (
+            spans[candidates, 0]
+            + torch.arange(candidates.numel(), device=spans.device)
+            - offsets[candidates]
+        )
+        selected = hidden[rows[candidates], positions]
+    else:
+        selected = hidden[tokens[:, 0], tokens[:, 1]]
     if norm is not None:
         selected = norm(selected)
     selected = at_least_fp32(selected)
-    total = torch.segment_reduce(selected, "sum", lengths=lengths)
+    # Lengths and offsets originate from validated CPU option spans. Unsafe
+    # skips redundant GPU-to-host validation, without altering reduction math.
+    total = (
+        torch.segment_reduce(selected, "sum", lengths=lengths, unsafe=True)
+        if token_offsets is None
+        else torch.segment_reduce(selected, "sum", offsets=token_offsets, unsafe=True)
+    )
     return total / lengths.clamp(min=1).unsqueeze(-1).to(total.dtype)
 
 
@@ -242,7 +264,14 @@ class ElectraDecisionModel(nn.Module):
             ptr = torch.zeros_like(lab)
         else:
             spans_h = hidden if span_hidden is None else span_hidden
-            r = span_means(spans_h, cq, batch.cand_spans, norm=span_norm)
+            r = span_means(
+                spans_h,
+                cq,
+                batch.cand_spans,
+                norm=span_norm,
+                tokens=batch.cand_tokens,
+                token_offsets=batch.cand_token_offsets,
+            )
             ptr = at_least_fp32(self.head(r, q, batch.cand_cu, cq))
         logits = torch.where(has_label_c, lab + gate * ptr, ptr)
         if apply_temperature:

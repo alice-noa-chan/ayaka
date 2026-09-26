@@ -31,8 +31,9 @@ These are forward-only normalization/pooling timings using `torch.nn.RMSNorm`;
 they exclude backbone execution, the Set Mixer, tokenization and backpropagation.
 They are **not whole-model speedups**. Full training rows can contain the entire
 state; cached inference and shared-prefix training pool only the question suffix,
-so the short-row measurement is more relevant there. GPU timing and memory
-usage have not been measured in this CPU environment.
+so the short-row measurement is more relevant there. RunPod GPU checks are
+recorded below; final full-model GPU latency and accuracy still need the trained
+checkpoint evaluation.
 
 ## Quality and compatibility checks
 
@@ -70,3 +71,42 @@ Lengths include the system prompt, state, question, options and answer cue.
 This is a sample across three seeds, not a length guarantee for every tokenizer,
 configuration or generated example. No public benchmark text is used to
 generate these sources. Independent rendered-evidence oracles verify the labels.
+
+## RunPod GPU check, 2026-09-26
+
+A100 SXM 80GB, PyTorch `2.8.0+cu128`, CUDA 12.8. The first GPU probe found
+that dynamic `repeat_interleave` and segment validation cost more than the old
+path on short suffixes (about 0.54–0.57 ms versus 0.22–0.25 ms at 256 tokens).
+CPU collation now supplies packed token coordinates and segment offsets,
+and the pooling kernel uses those already valid offsets without redundant
+host validation. The original API remains available for manually built batches.
+
+With prepared coordinates, the same forward-only pooling benchmark measured:
+
+| Dtype | Tokens per row | Old (ms) | Prepared sparse (ms) | Ratio |
+|---|---:|---:|---:|---:|
+| fp32 | 256 | 0.220 | 0.210 | 1.05x |
+| fp32 | 1,024 | 0.739 | 0.210 | 3.52x |
+| fp32 | 4,096 | 2.819 | 0.210 | 13.45x |
+| bf16 | 256 | 0.249 | 0.242 | 1.03x |
+| bf16 | 1,024 | 0.832 | 0.241 | 3.45x |
+| bf16 | 4,096 | 3.198 | 0.241 | 13.28x |
+
+Coordinate construction and host-to-device transfer are outside these timings;
+the real collator performs that work. The small short-row differences should
+be treated as comparable performance, not a demonstrated end-to-end gain.
+The CPU table above records the earlier implementation; rerun the command to
+measure the current prepared implementation on your machine.
+
+CUDA tiny-backbone validation compared new forward/gradients with the original
+full normalization and prefix-sum readout: fp32 max logit difference `2.09e-7`,
+selected gradient relative errors below `1.7e-6`; bf16 logits identical, largest
+selected gradient relative error `0.00102`. Local full suite after preparing
+coordinates: 170 passed, 1 optional Beam test skipped.
+
+A 20-step real E2B smoke run with typed decisions and the new long-rule,
+calendar and probability sources completed before the index preparation
+change: 124.85 seconds of training, 6.24 seconds per step, peak allocated GPU
+memory 26.09 GiB (reserved 28.50 GiB), 8,192-token microbatch budget. This is
+execution validation on a reduced mixture. It is not a JevBench accuracy
+measurement, a full-mixture throughput result or a convergence claim.
