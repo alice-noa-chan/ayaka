@@ -17,19 +17,21 @@ from dataclasses import replace
 # info"), long documents, and multilingual NLU. Quotas renormalize over the
 # families actually present.
 TASK_FAMILY_QUOTA: dict[str, float] = {
-    "direct_jev": 0.27,
+    "direct_jev": 0.17,
     "policy": 0.08,  # LegalBench + generated long policies (JevBench long_policy)
-    "temporal_numeric": 0.07,  # generated dates/amounts (JevBench temporal_numeric)
+    "temporal_numeric": 0.10,  # generated dates/amounts (JevBench temporal_numeric)
     "judge": 0.10,
-    "reasoning": 0.09,
-    "fact_check": 0.06,
-    "choice": 0.05,
-    "nli": 0.05,
-    "noul": 0.07,
-    "score": 0.04,
-    "human_soft_label": 0.04,
+    "reasoning": 0.10,
+    "fact_check": 0.05,
+    "choice": 0.04,
+    "nli": 0.04,
+    "noul": 0.05,
+    "score": 0.03,
+    "human_soft_label": 0.01,
     "hard_adversarial": 0.03,
     "long_context": 0.05,
+    "compositional": 0.10,  # long policy/alias/ledger/FX chains
+    "probability": 0.05,  # exact conditional and without-replacement targets
 }
 
 # Within the NLI family, source balance (sec 43.1)

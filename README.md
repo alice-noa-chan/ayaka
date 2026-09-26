@@ -80,12 +80,14 @@ run manifest and in the model card.
 
 | Family (quota) | Sources (license) | ≈ questions available |
 |---|---|---|
-| Typed decisions (27%) | Open-Jev `openjev_v2` via jev-distill (CC0); Open-Jev `browser-drone-expansion-v1-redistributable` (CC0, ~15 questions per state) | 75K + 109K |
+| Typed decisions (17%) | Open-Jev `openjev_v2` via jev-distill (CC0); Open-Jev `browser-drone-expansion-v1-redistributable` (CC0, ~15 questions per state) | 75K + 109K |
 | Judge (10%) | HelpSteer2 (CC BY 4.0, five 0–4 human ratings); hh-rlhf (MIT, human preference); Aegis 2.0 (CC BY 4.0, human safety labels only) | 100K + 30K + 33K |
-| Reasoning (9%) | AQuA-RAT (Apache-2.0); HotpotQA yes/no + comparisons over 10 paragraphs (CC BY-SA 4.0); StrategyQA (MIT); ARC-Challenge (CC BY-SA 4.0); CommonsenseQA (MIT) | 30K + 12K + 2K + 1K + 10K |
+| Reasoning (10%) | AQuA-RAT (Apache-2.0); HotpotQA yes/no + comparisons over 10 paragraphs (CC BY-SA 4.0); StrategyQA (MIT); ARC-Challenge (CC BY-SA 4.0); CommonsenseQA (MIT) | 30K + 12K + 2K + 1K + 10K |
 | Policy / rules (8%) | LegalBench: 118 tasks whose README states CC BY 4.0 or MIT (list vendored in `ayaka/data/legalbench_tasks.json`); generated long reimbursement policies (`synth_policy`, see below) | ≤ 47K + 15K |
-| Temporal / numeric (7%) | Generated order records and invoices (`synth_temporal`, `synth_numeric`, see below) | 20K + 20K |
-| Fact check (6%) | VitaminC train split (CC BY-SA 3.0; supports / refutes / not enough info) | 40K |
+| Temporal / numeric (10%) | Generated order records, invoices and month-end / timezone certificates (`synth_temporal`, `synth_numeric`, `synth_calendar`) | 20K + 20K + 60K |
+| Compositional (10%) | Generated long procurement cases (`synth_long_rules`), exact rule / ledger / FX reference labels | 30K |
+| Probability (5%) | Generated conditional and without-replacement probability decisions (`synth_probability`), exact soft labels | 10K |
+| Fact check (5%) | VitaminC train split (CC BY-SA 3.0; supports / refutes / not enough info) | 40K |
 | Abstention (in noul) | SQuAD 2.0 answerability (CC BY-SA 4.0) | 30K |
 | NLU, multilingual, intent, soft labels, long docs | SNLI, MultiNLI, BoolQ, Banking77, CLINC150, KLUE, KorNLI, MASSIVE ko/ja, JGLUE, GoEmotions, QuALITY | ~250K |
 
@@ -109,11 +111,13 @@ Excluded outright:
 - **BIG-bench.** Its canary string asks to keep it out of training corpora.
 - **30 LegalBench tasks** licensed CC BY-NC.
 
-**Generated data** (`ayaka/data/synthetic.py`). The trained Small scored
+**Generated data** (`ayaka/data/synthetic.py`, `ayaka/data/hard_synthetic.py`). The trained Small scored
 0–7% on JevBench's temporal/numeric items and 26–32% on long policies.
 Openly licensed human data for these is scarce, so this repository
 generates it. Every label is computed, and `tests/test_synthetic.py`
-recomputes them independently.
+recomputes them independently. The hard generators have additional independent
+oracles in `tests/test_hard_synthetic.py`. They use procedural rules and sampled
+facts; no public benchmark scenario text or answer rationale enters these sources.
 
 - `temporal`: order records mixing three date formats and relative dates.
   Questions cover shipping promises, return windows (the delivery day is
@@ -127,6 +131,19 @@ recomputes them independently.
   leave facts out; a missing fact counts as not established. Questions ask
   whether the claim is permitted, which requirement fails first in section
   order, and whether single requirements are met.
+- `long_rules`: scattered vendor aliases, bank-country overrides, dated window
+  amendments, per-invoice FX and rounding, same-order ledger aggregation and
+  four-tier routing. Distractor records use near-match entities and orders.
+  The three questions share the prefix. Entire domain/window/scale/risk
+  combinations are held out together rather than splitting their questions.
+- `calendar`: month-end and leap-year expiry, fixed-offset conversion, strict
+  cutoff comparison and lateness levels, including exact cutoff/60-minute/
+  24-hour boundaries. Date distractors vary on both sides of the correct date
+  to avoid a fixed correct position after canonical option sorting.
+- `probability`: exact Bayes posteriors and without-replacement inspection
+  probabilities. Targets remain soft, with balanced most-likely outcomes.
+  This teaches uncertainty from the stated process instead of fabricated
+  one-hot observed events.
 
 Calibration and evaluation use the `openjev_v2` rows of jev-distill's
 calibration and `test_set_30k` splits. Primitives those splits lack (score)

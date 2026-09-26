@@ -57,6 +57,9 @@ DEFAULT_SPECS = [
     "synth_temporal",
     "synth_numeric",
     "synth_policy",
+    "synth_long_rules",
+    "synth_calendar",
+    "synth_probability",
     "snli",
     "multi_nli",
     "boolq",
@@ -103,6 +106,9 @@ class RunConfig:
             "synth_temporal": 20_000,
             "synth_numeric": 20_000,
             "synth_policy": 15_000,
+            "synth_long_rules": 10_000,
+            "synth_calendar": 20_000,
+            "synth_probability": 10_000,
             "jev_distill": 200_000,
         }
     )

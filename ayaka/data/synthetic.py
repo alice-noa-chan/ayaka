@@ -25,6 +25,7 @@ import datetime as dt
 import random
 from decimal import ROUND_HALF_UP, Decimal
 
+from .hard_synthetic import GENERATORS as HARD_GENERATORS
 from .schema import Candidate, Question, Sample, one_hot
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -425,7 +426,12 @@ def policy_sample(rng: random.Random, idx: int) -> Sample:
     )
 
 
-GENERATORS = {"temporal": temporal_sample, "numeric": numeric_sample, "policy": policy_sample}
+GENERATORS = {
+    "temporal": temporal_sample,
+    "numeric": numeric_sample,
+    "policy": policy_sample,
+    **HARD_GENERATORS,
+}
 
 
 def generate(kind: str, n: int, seed: int, metadata: dict) -> list[Sample]:
