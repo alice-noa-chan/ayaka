@@ -8,7 +8,7 @@ row counts never decide batch composition directly.
 from __future__ import annotations
 
 import random
-from collections import defaultdict
+from dataclasses import replace
 
 # Family quotas. Typed decisions (Open-Jev streams) lead; the rest cover
 # JevBench's skill families with license-clean human/procedural labels:
@@ -51,6 +51,8 @@ LANGUAGE_GUARDRAILS: dict[str, tuple[float, float]] = {
 
 
 def _normalize(w: dict[str, float]) -> dict[str, float]:
+    if not w:
+        return {}
     total = sum(w.values())
     if total <= 0:
         n = len(w)
@@ -95,20 +97,57 @@ class MixtureSampler:
         self, pools: dict[tuple[str, str], list], n_samples: int
     ) -> dict[tuple[str, str], int]:
         """Allocate n_samples across (family, language) cells."""
-        families = sorted({f for f, _ in pools})
+        return self._plan({cell: len(rows) for cell, rows in pools.items() if rows}, n_samples)
+
+    def _allocate(self, weights: dict, n: int) -> dict:
+        """Largest remainders, with seeded tie breaking and no lost budget."""
+        if n < 0:
+            raise ValueError("sample budget must be non-negative")
+        raw = {key: weight * n for key, weight in weights.items()}
+        out = {key: int(value) for key, value in raw.items()}
+        order = sorted(raw, key=lambda key: (raw[key] - out[key], self.rng.random()), reverse=True)
+        for key in order[: n - sum(out.values())]:
+            out[key] += 1
+        return out
+
+    def _plan(self, counts: dict[tuple[str, str], int], n: int) -> dict[tuple[str, str], int]:
+        families = sorted({f for f, _ in counts})
         fw = self.family_weights(families)
-        alloc: dict[tuple[str, str], int] = defaultdict(int)
-        langs_by_family: dict[str, list[str]] = defaultdict(list)
-        for f, lang in pools:
-            if pools[(f, lang)]:
-                langs_by_family[f].append(lang)
-        for f, fweight in fw.items():
-            counts = {lang: len(pools[(f, lang)]) for lang in langs_by_family[f]}
-            lw = language_weights(counts, self.temperature)
-            family_n = round(fweight * n_samples)
-            for lang, w in lw.items():
-                alloc[(f, lang)] = round(family_n * w)
-        return dict(alloc)
+        alloc = {}
+        for f, family_n in self._allocate(fw, n).items():
+            langs = {lang: count for (fam, lang), count in counts.items() if fam == f}
+            lw = language_weights(langs, self.temperature)
+            alloc.update({(f, lang): k for lang, k in self._allocate(lw, family_n).items()})
+        return alloc
+
+    def question_batches(self, pools: dict, n_questions: int):
+        """Exact question quotas while retaining multi-question prefix sharing.
+
+        Prepare the static pools once. Select whole states when they fit a cell's
+        budget and a random subset of questions otherwise; a 28-label sample
+        cannot turn a 4% question quota into most of an optimizer step.
+        """
+        if n_questions <= 0:
+            raise ValueError("question budget must be positive")
+        cells = {key: [s for s in rows if s.questions] for key, rows in pools.items()}
+        cells = {key: rows for key, rows in cells.items() if rows}
+        counts = {key: sum(len(s.questions) for s in rows) for key, rows in cells.items()}
+        while True:
+            alloc = self._plan(counts, n_questions)
+            if not alloc:
+                raise RuntimeError("no question pools match the mixture quotas")
+            drawn = []
+            for cell, remaining in alloc.items():
+                while remaining:
+                    sample = self.rng.choice(cells[cell])
+                    take = min(remaining, len(sample.questions))
+                    if take < len(sample.questions):
+                        indices = sorted(self.rng.sample(range(len(sample.questions)), take))
+                        sample = replace(sample, questions=[sample.questions[i] for i in indices])
+                    drawn.append(sample)
+                    remaining -= take
+            self.rng.shuffle(drawn)
+            yield drawn
 
     def sample(self, pools: dict[tuple[str, str], list], n_samples: int) -> list:
         """Draw n_samples rows following the mixture plan."""

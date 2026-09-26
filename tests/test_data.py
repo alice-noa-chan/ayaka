@@ -219,8 +219,35 @@ def test_mixture_plan_family_quota():
     s = MixtureSampler(seed=0)
     alloc = s.plan(pools, 100)
     total = sum(alloc.values())
-    assert 80 <= total <= 120  # rounding slack
+    assert total == 100
     assert alloc[("direct_jev", "en")] > alloc[("nli", "en")]
+
+
+def test_mixture_exact_budget_with_empty_cells_and_small_allocations():
+    sampler = MixtureSampler(quota={"a": 0.5, "b": 0.5}, seed=5)
+    pools = {("a", "en"): [1], ("a", "ko"): [1], ("b", "ja"): [1], ("b", "en"): []}
+    for n in (1, 2, 7, 64, 101):
+        alloc = sampler.plan(pools, n)
+        assert sum(alloc.values()) == n
+        assert ("b", "en") not in alloc
+    assert sampler.plan({}, 64) == {}
+
+
+def test_question_quota_does_not_expand_multilabel_states():
+    many = _sample("many", [Question.noul(f"q{i}", "test?", 0.5) for i in range(28)])
+    single = _sample("single", [Question.noul("one", "test?", 0.5)])
+    pools = {("many", "en"): [many], ("single", "en"): [single]}
+    sampler = MixtureSampler(quota={"many": 0.25, "single": 0.75}, seed=0)
+    stream = sampler.question_batches(pools, 16)
+    seen = set()
+    for _ in range(100):
+        drawn = next(stream)
+        assert sum(len(s.questions) for s in drawn) == 16
+        selected = [q for s in drawn if s.state == "many" for q in s.questions]
+        assert len(selected) == 4
+        seen.update(q.id for q in selected)
+    assert len(many.questions) == 28
+    assert len(seen) == 28  # no permanent bias toward the first labels
 
 
 # ----------------------------------------------------------------- augment

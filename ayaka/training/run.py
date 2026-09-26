@@ -12,10 +12,12 @@ KL-to-teacher instead of the gold NLL term.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
 import time
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 
 import torch
@@ -23,11 +25,13 @@ import torch
 from ..checkpoint import apply_lora, save_checkpoint
 from ..config import model_config
 from ..data.decontam import Decontaminator
+from ..data.dedup import lineage_key
 from ..data.loaders import load_pools, load_spec_samples
 from ..data.manifest import write_manifest
 from ..data.mixture import TASK_FAMILY_QUOTA, MixtureSampler
 from ..data.schema import Candidate, Question, Sample
 from ..model.electra import ElectraDecisionModel
+from ..serialization import canonical_state
 from ..tokenization import HFTokenizer, ToyTokenizer
 from .batching import TrainItem, sample_to_items
 from .calibrate import apply_temperatures, fit_temperatures
@@ -263,39 +267,97 @@ def synthetic_pools(n_per_cell: int = 16, seed: int = 0) -> dict[tuple[str, str]
 
 
 def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: int) -> list[Sample]:
-    """Pop a proportional held-out set out of the pools."""
+    """Hold out whole state/lineage groups, including cross-source duplicates.
+
+    ``n_eval`` is a question budget; an indivisible group may overshoot it.
+    Always leave at least one group in every affected training cell.
+    """
+    if n_eval <= 0:
+        return []
     rng = random.Random(seed + 3)
-    total = sum(len(v) for v in pools.values())
-    held: list[Sample] = []
-    for cell in pools.values():
-        if len(cell) < 2 or not total:
+    parent, entries = {}, []
+
+    def root(key):
+        parent.setdefault(key, key)
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    cell_groups = defaultdict(set)
+    for cell, samples in pools.items():
+        for sample in samples:
+            digest = hashlib.sha256(canonical_state(sample.state).encode()).hexdigest()
+            key = f"state:{digest}"
+            aliases = [key]
+            if lineage := lineage_key(sample):
+                aliases.append(f"lineage:{lineage}")
+            if split_group := sample.metadata.get("split_group"):
+                aliases.append(f"generator:{split_group}")
+            for alias in aliases:
+                parent[root(alias)] = root(key)
+            entries.append((cell, sample, key))
+    groups = defaultdict(list)
+    for cell, sample, key in entries:
+        key = root(key)
+        groups[key].append((cell, sample))
+        cell_groups[cell].add(key)
+    keys = sorted(groups)
+    rng.shuffle(keys)
+    held, n_questions = [], 0
+    for key in keys:
+        affected = {cell for cell, _ in groups[key]}
+        if any(len(cell_groups[cell]) <= 1 for cell in affected):
             continue
-        n = min(max(1, round(n_eval * len(cell) / total)), len(cell) // 10 or 1)
-        idx = set(rng.sample(range(len(cell)), n))
-        held.extend(cell[i] for i in sorted(idx))
-        cell[:] = [s for i, s in enumerate(cell) if i not in idx]
+        for cell in affected:
+            cell_groups[cell].remove(key)
+        held.extend(sample for _, sample in groups[key])
+        n_questions += sum(len(sample.questions) for _, sample in groups[key])
+        if n_questions >= n_eval:
+            break
+    held_ids = {id(sample) for sample in held}
+    for samples in pools.values():
+        samples[:] = [sample for sample in samples if id(sample) not in held_ids]
     return held
+
+
+def pool_summary(pools) -> dict:
+    """Audit the question population without tokenizing the entire corpus."""
+    summary = {}
+    for (family, language), samples in sorted(pools.items()):
+        primitives, sources = Counter(), Counter()
+        true_mass, n_noul = 0.0, 0
+        for sample in samples:
+            sources[sample.metadata.get("source", "synthetic")] += len(sample.questions)
+            for question in sample.questions:
+                primitives[question.type] += 1
+                if question.type == "noul":
+                    n_noul += 1
+                    true_mass += question.target_distribution.get("true", 0.0)
+        summary[f"{family}/{language}"] = {
+            "states": len(samples),
+            "questions": sum(primitives.values()),
+            "primitives": dict(primitives),
+            "source_questions": dict(sources),
+            "noul_true_mass": true_mass / n_noul if n_noul else None,
+        }
+    return summary
 
 
 def item_stream(pools, sampler: MixtureSampler, tok, mcfg, cfg: RunConfig, rng: random.Random):
     from ..data.augment import evidence_deletion_variant
 
-    buf: list[TrainItem] = []
-    while True:
-        while len(buf) < cfg.questions_per_step:
-            drawn = sampler.sample(pools, cfg.questions_per_step)
-            if not drawn:
-                raise RuntimeError("mixture sampler drew nothing: check family quotas vs pools")
-            for s in drawn:
-                if (
-                    cfg.evidence_aug_p
-                    and rng.random() < cfg.evidence_aug_p
-                    and "teacher_probs" not in s.metadata
-                ):
-                    s = evidence_deletion_variant(s, rng, target="uniform")
-                buf.extend(sample_to_items(s, tok, mcfg))
-        yield buf[: cfg.questions_per_step]
-        buf = buf[cfg.questions_per_step :]
+    for drawn in sampler.question_batches(pools, cfg.questions_per_step):
+        items: list[TrainItem] = []
+        for s in drawn:
+            if (
+                cfg.evidence_aug_p
+                and rng.random() < cfg.evidence_aug_p
+                and "teacher_probs" not in s.metadata
+            ):
+                s = evidence_deletion_variant(s, rng, target="uniform")
+            items.extend(sample_to_items(s, tok, mcfg))
+        yield items
 
 
 def load_teacher_samples(path: str) -> list[Sample]:
@@ -317,6 +379,8 @@ def items_from_spec(
 
 
 def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
+    # Seed head and adapter initialization too, not just the later Trainer.
+    torch.manual_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     art = os.path.join(cfg.artifacts_dir, cfg.run_name)
     os.makedirs(art, exist_ok=True)
@@ -350,6 +414,8 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     # separate from `held`: tops up primitives the calibration spec lacks
     # (Open-Jev has no score questions) without touching evaluation data
     cal_reserve = split_eval(pools, 1500, cfg.seed + 11) if cfg.calibrate else []
+    with open(os.path.join(art, "data_summary.json"), "w") as f:
+        json.dump(pool_summary(pools), f, indent=2)
     eval_items = [it for s in held for it in sample_to_items(s, tok, mcfg)]
     if verbose:
         sizes = {f"{f}/{lang}": len(v) for (f, lang), v in pools.items()}
@@ -411,7 +477,15 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             }
             # top up every (primitive, length bucket) the calibration split lacks,
             # long prompts especially: they were overconfident with one scalar
-            cal += [it for it in extra if have[(it.type, it.length >= long_n)] < 200]
+            for it in extra:
+                key = it.type, it.length >= long_n
+                if have[key] < 200:
+                    cal.append(it)
+                    have[key] += 1
+            report["calibration_counts"] = {
+                f"{prim}@{'long' if long else 'short'}": count
+                for (prim, long), count in have.items()
+            }
         _, logits = trainer.predict(cal, apply_temperature=False, return_logits=True)
         temps = fit_temperatures(
             logits,

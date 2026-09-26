@@ -130,8 +130,10 @@ recomputes them independently.
 
 Calibration and evaluation use the `openjev_v2` rows of jev-distill's
 calibration and `test_set_30k` splits. Primitives those splits lack (score)
-are topped up from a reserved training slice, which also guarantees at
-least 200 questions per (primitive, prompt length) bucket.
+are topped up from a reserved training slice, targeting 200 questions per
+(primitive, prompt length) bucket when that slice has enough examples.
+The actual bucket counts are recorded in `report.json`; sparse buckets
+fall back to their primitive's temperature.
 
 Temperatures are fitted per primitive **and** per prompt-length bucket:
 short prompts are under `long_prompt_tokens` (1024 by default), long
@@ -184,6 +186,16 @@ question. Loss and gradients match full rows (tests), and on the real mixture
 this saves 75% / 70% of the compute tokens for those sources and 17.5% overall.
 Sharing turns off automatically if activation checkpointing is enabled,
 because HF layers drop KV caches under checkpointing.
+
+Mixture quotas apply to **questions**, not states. Multi-label sources cannot
+multiply their quota by the number of labels: a state contributes a random
+subset when its questions exceed the remaining cell budget. Each step has
+exactly `questions_per_step` questions, while selected siblings still share
+their prefix. Validation and calibration reserve whole state/lineage groups
+across sources, so another question or translation of a held-out state cannot
+remain in training. `data_summary.json` records population counts and label
+balance; `history.json` records the actual source/family question counts and
+long-question exposure per optimizer step.
 
 Speed defaults: activation checkpointing is off, because it recomputes every
 layer and costs about 30%. On a CUDA OOM the step is retried with half the

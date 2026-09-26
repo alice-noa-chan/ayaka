@@ -41,6 +41,66 @@ def test_items_and_budget_batches():
     assert t.teacher is None
 
 
+def test_heldout_groups_same_state_and_lineage_across_cells():
+    from ayaka.data.schema import Question, Sample
+    from ayaka.training.run import split_eval
+
+    pools = {}
+    for family in ("a", "b"):
+        pools[(family, "en")] = [
+            Sample(
+                state=f"case {i}",
+                questions=[Question.noul("q", "test?", 1.0)],
+                metadata={"source_family": family, "source_example_id": str(i)},
+            )
+            for i in range(20)
+        ]
+    # A translated/derived state must travel with its original lineage too.
+    pools[("a", "en")].append(
+        Sample(
+            state="translation of case 3",
+            questions=[Question.noul("q", "test?", 1.0)],
+            metadata={"source_family": "a", "source_example_id": "3"},
+        )
+    )
+    held = split_eval(pools, 10, 0)
+    train = [s for cell in pools.values() for s in cell]
+    assert {s.state for s in held}.isdisjoint(s.state for s in train)
+
+    def lineage(s):
+        return s.metadata["source_family"], s.metadata["source_example_id"]
+
+    assert {lineage(s) for s in held}.isdisjoint(lineage(s) for s in train)
+    assert all(pools.values())
+
+
+def test_item_stream_exact_questions_retains_shared_prefix():
+    import random
+
+    from ayaka.data.mixture import MixtureSampler
+    from ayaka.data.schema import Question, Sample
+    from ayaka.training.run import item_stream
+
+    sample = Sample(
+        "state",
+        [Question.noul(f"q{i}", "test?", 0.5) for i in range(28)],
+        {"task_family": "many", "source": "multilabel"},
+    )
+    cfg = RunConfig(questions_per_step=8)
+    stream = item_stream(
+        {("many", "en"): [sample]},
+        MixtureSampler({"many": 1.0}),
+        TOK,
+        tiny_config(),
+        cfg,
+        random.Random(0),
+    )
+    items = next(stream)
+    assert len(items) == 8
+    assert len({id(it.enc.prefix_ids) for it in items}) == 1
+    assert all(it.family == "many" and it.source == "multilabel" for it in items)
+
+
 def test_lora_only_trains_adapters_and_head():
     m = _model()
     trainable = {n for n, p in m.named_parameters() if p.requires_grad}

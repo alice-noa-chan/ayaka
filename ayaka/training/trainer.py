@@ -10,6 +10,7 @@ and the freshly initialized decision head.
 from __future__ import annotations
 
 import time
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -156,6 +157,9 @@ class Trainer:
             lr=self.sched.get_last_lr()[0],
             gate=self.model.gate.detach().tolist(),
             micro_tokens=self.micro_tokens,
+            family_questions=dict(Counter(it.family for it in items)),
+            source_questions=dict(Counter(it.source for it in items)),
+            long_questions=sum(it.length >= self.model.cfg.long_prompt_tokens for it in items),
         )
         return agg
 

@@ -55,7 +55,7 @@ def lineage_key(sample: Sample) -> str | None:
     md = sample.metadata
     family = md.get("source_family")
     ex = md.get("source_example_id")
-    if family is None or ex is None:
+    if not family or not ex:
         return None
     root = md.get("translation_of") or md.get("derived_from") or ex
     return f"{family}:{root}"

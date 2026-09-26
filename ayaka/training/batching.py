@@ -32,6 +32,8 @@ class TrainItem:
     flagged: bool
     teacher: list[float] | None
     sample_id: str
+    family: str = "unknown"
+    source: str = "unknown"
 
     @property
     def length(self) -> int:
@@ -77,6 +79,8 @@ def sample_to_items(sample: Sample, tok: Tokenizer, cfg: ElectraConfig) -> list[
                 flagged=flagged,
                 teacher=list(t) if t is not None and len(t) == len(q.candidates) else None,
                 sample_id=sid,
+                family=sample.metadata.get("task_family", "unknown"),
+                source=sample.metadata.get("source", "synthetic"),
             )
         )
     return items
