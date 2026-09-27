@@ -162,10 +162,16 @@ facts; no public benchmark scenario text or answer rationale enters these source
 
 Calibration and evaluation use the `openjev_v2` rows of jev-distill's
 calibration and `test_set_30k` splits. Primitives those splits lack (score)
-are topped up from a reserved training slice, targeting 200 questions per
-(primitive, prompt length) bucket when that slice has enough examples.
-The actual bucket counts are recorded in `report.json`; sparse buckets
-fall back to their primitive's temperature.
+are topped up from reserved training groups, targeting
+`calibration_per_bucket` (200) questions per (primitive, prompt length)
+bucket. Groups are reserved bucket by bucket rather than drawn at random:
+a flat draw once yielded a single long noul question, so long noul prompts
+silently inherited the short temperature (T=0.88, which sharpens) and hard
+prompts were overconfident. Natural sources are scanned before generated
+ones, since the model trains on the generators' own templates and is
+unrealistically accurate on them. The actual bucket counts are recorded in
+`report.json`; buckets that stay sparse fall back to their primitive's
+temperature.
 
 Temperatures are fitted per primitive **and** per prompt-length bucket:
 short prompts are under `long_prompt_tokens` (1024 by default), long

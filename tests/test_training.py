@@ -74,6 +74,37 @@ def test_heldout_groups_same_state_and_lineage_across_cells():
     assert all(pools.values())
 
 
+def test_calibration_reserve_fills_long_buckets_and_prefers_natural_sources():
+    from ayaka.data.schema import Question, Sample
+    from ayaka.training.run import reserve_calibration
+
+    def sample(state, source, i):
+        return Sample(
+            state=state,
+            questions=[Question.noul("q", "holds?", 1.0)],
+            metadata={"source": source, "source_example_id": f"{source}-{i}"},
+        )
+
+    short = [sample(f"short case {i}", "natural", i) for i in range(40)]
+    long_nat = [sample(f"long natural {i} " + "x" * 300, "natural", i + 100) for i in range(6)]
+    long_gen = [sample(f"long generated {i} " + "y" * 300, "synth_rules", i) for i in range(30)]
+    pools = {("nat", "en"): short + long_nat, ("gen", "en"): long_gen}
+    probe = tiny_config()
+    lengths = [sample_to_items(s, TOK, probe)[0].length for s in (short[0], long_nat[0])]
+    mcfg = tiny_config(long_prompt_tokens=sum(lengths) // 2)
+
+    items = reserve_calibration(pools, TOK, mcfg, per_bucket=8, seed=0)
+    long_items = [it for it in items if it.length >= mcfg.long_prompt_tokens]
+    short_items = [it for it in items if it.length < mcfg.long_prompt_tokens]
+    assert len(long_items) == 8 and len(short_items) == 8
+    # every natural long group is used before any generated one
+    assert sum(it.source == "natural" for it in long_items) == 6
+    assert sum(it.source == "synth_rules" for it in long_items) == 2
+    # reserved groups leave training, and no cell is emptied
+    remaining = {s.state for cell in pools.values() for s in cell}
+    assert len(remaining) == 76 - 16 and all(pools.values())
+
+
 def test_item_stream_exact_questions_retains_shared_prefix():
     import random
 

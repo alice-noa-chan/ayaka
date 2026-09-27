@@ -123,6 +123,7 @@ class RunConfig:
     calibrate: bool = True
     calibration_questions: int = 4000
     calibration_spec: str = "jev_open_calibration"  # held-out split for temperatures
+    calibration_per_bucket: int = 200  # reserved top-up per (primitive, length) bucket
     fidelity_questions: int = 3000  # reference-labelled held-out evaluation
     fidelity_spec: str = "jev_open_test"
     jevbench: bool = True
@@ -272,16 +273,13 @@ def synthetic_pools(n_per_cell: int = 16, seed: int = 0) -> dict[tuple[str, str]
     return pools
 
 
-def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: int) -> list[Sample]:
-    """Hold out whole state/lineage groups, including cross-source duplicates.
+def _state_groups(pools: dict[tuple[str, str], list[Sample]]):
+    """Union state, lineage and generator-scenario aliases into indivisible groups.
 
-    ``n_eval`` is a question budget; an indivisible group may overshoot it.
-    Always leave at least one group in every affected training cell.
+    Returns ``(groups, cell_groups)``: group key -> [(cell, sample)], and
+    cell -> set of group keys (so callers never empty a training cell).
     """
-    if n_eval <= 0:
-        return []
-    rng = random.Random(seed + 3)
-    parent, entries = {}, []
+    parent = {}
 
     def root(key):
         parent.setdefault(key, key)
@@ -290,7 +288,7 @@ def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: in
             key = parent[key]
         return key
 
-    cell_groups = defaultdict(set)
+    entries = []
     for cell, samples in pools.items():
         for sample in samples:
             digest = hashlib.sha256(canonical_state(sample.state).encode()).hexdigest()
@@ -304,10 +302,30 @@ def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: in
                 parent[root(alias)] = root(key)
             entries.append((cell, sample, key))
     groups = defaultdict(list)
+    cell_groups = defaultdict(set)
     for cell, sample, key in entries:
         key = root(key)
         groups[key].append((cell, sample))
         cell_groups[cell].add(key)
+    return groups, cell_groups
+
+
+def _remove_held(pools, held) -> None:
+    held_ids = {id(sample) for sample in held}
+    for samples in pools.values():
+        samples[:] = [sample for sample in samples if id(sample) not in held_ids]
+
+
+def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: int) -> list[Sample]:
+    """Hold out whole state/lineage groups, including cross-source duplicates.
+
+    ``n_eval`` is a question budget; an indivisible group may overshoot it.
+    Always leave at least one group in every affected training cell.
+    """
+    if n_eval <= 0:
+        return []
+    rng = random.Random(seed + 3)
+    groups, cell_groups = _state_groups(pools)
     keys = sorted(groups)
     rng.shuffle(keys)
     held, n_questions = [], 0
@@ -321,10 +339,69 @@ def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: in
         n_questions += sum(len(sample.questions) for _, sample in groups[key])
         if n_questions >= n_eval:
             break
-    held_ids = {id(sample) for sample in held}
-    for samples in pools.values():
-        samples[:] = [sample for sample in samples if id(sample) not in held_ids]
+    _remove_held(pools, held)
     return held
+
+
+def is_generated_source(source: str | None) -> bool:
+    return str(source or "").startswith("synth_")
+
+
+def reserve_calibration(
+    pools: dict[tuple[str, str], list[Sample]],
+    tok,
+    mcfg,
+    per_bucket: int = 200,
+    seed: int = 0,
+    max_groups: int = 50_000,
+) -> list[TrainItem]:
+    """Hold out whole groups until every (primitive, length) bucket has
+    ``per_bucket`` calibration questions, and return their items.
+
+    A flat random draw rarely yields long prompts: the 2026-09-26 Small run
+    got 1 long noul and 10 long score questions, so those buckets silently
+    fell back to short-prompt temperatures (noul T=0.88 sharpened long, hard
+    prompts; JevBench hard ECE 0.29). A group is taken only if it adds a
+    question to a bucket that is still short.
+
+    Natural (non-generated) sources are scanned first. The model trains on
+    the procedural generators' own templates, where it is far more accurate
+    than on unseen long documents, so fitting temperatures there would
+    understate uncertainty. Generated groups only fill what remains.
+    """
+    if per_bucket <= 0:
+        return []
+    rng = random.Random(seed + 17)
+    groups, cell_groups = _state_groups(pools)
+    keys = sorted(groups)
+    rng.shuffle(keys)
+    keys.sort(
+        key=lambda k: any(is_generated_source(s.metadata.get("source")) for _, s in groups[k])
+    )
+    long_n = mcfg.long_prompt_tokens
+    need = {(t, b): per_bucket for t in ("noul", "choice", "score") for b in (False, True)}
+    present = {q.type for cell in pools.values() for s in cell for q in s.questions}
+    need = {k: v for k, v in need.items() if k[0] in present}
+    held, items = [], []
+    for key in keys[:max_groups]:
+        if not any(need.values()):
+            break
+        affected = {cell for cell, _ in groups[key]}
+        if any(len(cell_groups[cell]) <= 1 for cell in affected):
+            continue
+        group_items = [it for _, s in groups[key] for it in sample_to_items(s, tok, mcfg)]
+        if not any(need.get((it.type, it.length >= long_n), 0) for it in group_items):
+            continue
+        for cell in affected:
+            cell_groups[cell].remove(key)
+        held.extend(sample for _, sample in groups[key])
+        for it in group_items:
+            bucket = it.type, it.length >= long_n
+            if need.get(bucket, 0):
+                need[bucket] -= 1
+        items.extend(group_items)
+    _remove_held(pools, held)
+    return items
 
 
 def pool_summary(pools) -> dict:
@@ -417,9 +494,14 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     if not any(pools.values()):
         raise RuntimeError("no training samples: every dataset spec failed to load")
     held = split_eval(pools, cfg.eval_questions, cfg.seed) if cfg.eval_questions else []
-    # separate from `held`: tops up primitives the calibration spec lacks
-    # (Open-Jev has no score questions) without touching evaluation data
-    cal_reserve = split_eval(pools, 1500, cfg.seed + 11) if cfg.calibrate else []
+    # separate from `held`: tops up (primitive, length) buckets the calibration
+    # spec lacks (Open-Jev has no score and few long questions) without
+    # touching evaluation data
+    cal_reserve = (
+        reserve_calibration(pools, tok, mcfg, cfg.calibration_per_bucket, cfg.seed + 11)
+        if cfg.calibrate
+        else []
+    )
     with open(os.path.join(art, "data_summary.json"), "w") as f:
         json.dump(pool_summary(pools), f, indent=2)
     eval_items = [it for s in held for it in sample_to_items(s, tok, mcfg)]
@@ -474,7 +556,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             cal = items_from_spec(
                 cfg.calibration_spec, cfg.calibration_questions, tok, mcfg, cfg.seed, decon
             )
-            extra = [it for s in cal_reserve for it in sample_to_items(s, tok, mcfg)]
+            extra = cal_reserve
             long_n = mcfg.long_prompt_tokens
             have = {
                 (t, b): sum(it.type == t and (it.length >= long_n) == b for it in cal)
@@ -485,7 +567,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             # long prompts especially: they were overconfident with one scalar
             for it in extra:
                 key = it.type, it.length >= long_n
-                if have[key] < 200:
+                if have[key] < cfg.calibration_per_bucket:
                     cal.append(it)
                     have[key] += 1
             report["calibration_counts"] = {
