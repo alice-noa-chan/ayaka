@@ -356,3 +356,75 @@ def test_time_budget_stops_training_and_is_reported(tmp_path):
     assert res["steps"] == 1 and res["stopped_early"] is True
     meta = json.loads((Path(res["checkpoint"]) / "meta.json").read_text())
     assert meta["stopped_early"] is True
+
+
+def _mixed_length_items(m):
+    from ayaka.data.schema import Question, Sample
+
+    def sample(text):
+        qs = [Question.noul(f"q{i}", f"Does clause {i} apply?", 1.0) for i in range(3)]
+        return Sample(state={"doc": text}, questions=qs)
+
+    short = sample("refund within 30 days")
+    long = sample("the vendor must deliver the parts before the cutoff " * 6)
+    return [it for s in (short, long) for it in sample_to_items(s, TOK, m.cfg)]
+
+
+def test_selective_checkpointing_matches_plain_gradients_and_splits_by_length():
+    from ayaka.losses import decision_loss
+
+    torch.manual_seed(0)
+    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float64)
+    m.head.double()
+    m.gate.data = m.gate.data.double().fill_(0.5)
+    items = _mixed_length_items(m)
+    lengths = sorted({it.length for it in items})
+    assert len(lengths) == 2
+    tr = Trainer(m, TOK, TrainConfig(steps=1, bf16=False), "cpu")
+    m.train()
+
+    def run(threshold):
+        tr.ckpt_threshold = threshold
+        m.zero_grad()
+        plan = tr._plan(items)
+        seen = []
+        for kind, mb, ckpt in plan:
+            tr._set_checkpointing(ckpt)
+            seen.append((kind, ckpt, {it.length for it in mb}))
+            assert bool(getattr(m.backbone, "is_gradient_checkpointing", ckpt)) == ckpt
+            out, t = tr._forward(kind, mb)
+            (decision_loss(out, t.targets)["total"] * len(mb) / len(items)).backward()
+        tr._set_checkpointing(False)
+        return seen, m.text_model().layers[0].self_attn.q_proj.weight.grad.clone()
+
+    plain_plan, plain = run(None)
+    sel_plan, selective = run(lengths[1])
+    all_plan, everything = run(0)
+    assert all(not ckpt for _, ckpt, _ in plain_plan)
+    # short questions keep prefix sharing without checkpointing; long ones are
+    # checkpointed full rows
+    assert ("shared", False, {lengths[0]}) in sel_plan
+    assert all(kind == "rows" and lens == {lengths[1]} for kind, ckpt, lens in sel_plan if ckpt)
+    assert all(ckpt and kind == "rows" for kind, ckpt, _ in all_plan)
+    for g in (selective, everything):
+        assert float((g - plain).norm() / plain.norm()) < 1e-5
+
+
+def test_oom_backoff_enables_selective_checkpointing_before_shrinking_batches(monkeypatch):
+    m = _model()
+    tr = Trainer(m, TOK, TrainConfig(steps=1, bf16=False, micro_batch_tokens=8192), "cpu")
+    calls = []
+
+    def fake_step(items):
+        calls.append((tr.ckpt_threshold, tr.micro_tokens, tr.micro_ckpt_tokens))
+        if len(calls) == 1:
+            tr._chunk_ckpt = False
+            raise torch.cuda.OutOfMemoryError("plain chunk")
+        if len(calls) == 2:
+            tr._chunk_ckpt = True
+            raise torch.cuda.OutOfMemoryError("checkpointed chunk")
+        return {"ok": True}
+
+    monkeypatch.setattr(tr, "_train_step", fake_step)
+    assert tr.train_step([]) == {"ok": True}
+    assert calls == [(None, 8192, 8192), (1024, 8192, 8192), (1024, 8192, 4096)]

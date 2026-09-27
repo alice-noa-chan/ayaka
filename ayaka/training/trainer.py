@@ -39,6 +39,10 @@ class TrainConfig:
     bf16: bool = True
     grad_checkpointing: bool = False  # off: ~30% faster; OOM backoff turns it on
     min_micro_batch_tokens: int = 1_024
+    # When OOM forces activation checkpointing, apply it only to forward chunks
+    # holding a question at least this long (0 = every chunk, the old global
+    # mode). Short chunks keep full speed and shared-prefix encoding.
+    selective_checkpoint_tokens: int = 1_024
     missing_tau: float = 0.8
     log_every: int = 20
     eval_every: int = 0
@@ -56,10 +60,12 @@ class Trainer:
         self.cfg = cfg
         self.device = torch.device(device)
         torch.manual_seed(cfg.seed)
-        self.micro_tokens = cfg.micro_batch_tokens
-        self.checkpointing = False
-        if cfg.grad_checkpointing:
-            self._enable_checkpointing()
+        self.micro_tokens = cfg.micro_batch_tokens  # chunks without checkpointing
+        self.micro_ckpt_tokens = cfg.micro_batch_tokens  # checkpointed chunks
+        # None: never checkpoint; N: checkpoint chunks with a question >= N tokens
+        self.ckpt_threshold: int | None = 0 if cfg.grad_checkpointing else None
+        self._ckpt_active = False
+        self._chunk_ckpt = False  # kind of the chunk that is running (OOM backoff)
         backbone_params = [p for p in model.backbone.parameters() if p.requires_grad]
         head_params = list(model.head.parameters()) + [model.gate]
         self.opt = torch.optim.AdamW(
@@ -81,33 +87,68 @@ class Trainer:
     def _autocast(self):
         return torch.autocast("cuda", dtype=torch.bfloat16, enabled=self.use_amp)
 
-    def _enable_checkpointing(self) -> None:
-        if hasattr(self.model.backbone, "gradient_checkpointing_enable"):
-            self.model.backbone.gradient_checkpointing_enable(
+    @property
+    def checkpointing(self) -> bool:
+        return self.ckpt_threshold is not None
+
+    def _set_checkpointing(self, on: bool) -> None:
+        """Toggle backbone activation checkpointing for the next forward."""
+        backbone = self.model.backbone
+        if on == self._ckpt_active or not hasattr(backbone, "gradient_checkpointing_enable"):
+            return
+        if on:
+            backbone.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
             )
-            self.checkpointing = True
+        else:
+            backbone.gradient_checkpointing_disable()
+        self._ckpt_active = on
+
+    def _plan(self, items: list[TrainItem]) -> list[tuple[str, list[TrainItem], bool]]:
+        """Forward chunks as (kind, items, checkpointed)."""
+        thr = self.ckpt_threshold
+        plain = items if thr is None else [it for it in items if it.length < thr]
+        heavy = [] if thr is None else [it for it in items if it.length >= thr]
+        chunks = [(k, mb, False) for k, mb in plan_chunks(plain, self.micro_tokens)]
+        # activation checkpointing drops KV caches inside HF layers: no sharing then
+        chunks += [
+            (k, mb, True) for k, mb in plan_chunks(heavy, self.micro_ckpt_tokens, share=False)
+        ]
+        return chunks
 
     def train_step(self, items: list[TrainItem]) -> dict:
-        """One optimizer step. On CUDA OOM the step is retried with half
-        the micro-batch; below the floor, activation checkpointing is
-        switched on — so one config fits any GPU size."""
+        """One optimizer step, retried on CUDA OOM so one config fits any GPU.
+
+        An OOM in an uncheckpointed chunk first turns on checkpointing for
+        long chunks only (``selective_checkpoint_tokens``), then halves the
+        uncheckpointed micro-batch, then checkpoints shorter questions too.
+        An OOM in a checkpointed chunk halves that chunk kind's micro-batch.
+        """
+        floor = self.cfg.min_micro_batch_tokens
         while True:
             try:
                 return self._train_step(items)
             except torch.cuda.OutOfMemoryError:
                 self.opt.zero_grad(set_to_none=True)
                 torch.cuda.empty_cache()
-                if self.micro_tokens // 2 >= self.cfg.min_micro_batch_tokens:
+                if self._chunk_ckpt:
+                    if self.micro_ckpt_tokens // 2 < floor:
+                        raise
+                    self.micro_ckpt_tokens //= 2
+                elif self.ckpt_threshold is None:
+                    self.ckpt_threshold = self.cfg.selective_checkpoint_tokens
+                elif self.micro_tokens // 2 >= floor:
                     self.micro_tokens //= 2
-                elif not self.checkpointing:
-                    self._enable_checkpointing()
-                    self.micro_tokens = self.cfg.micro_batch_tokens
+                elif self.ckpt_threshold > floor:
+                    self.ckpt_threshold //= 2
+                elif self.ckpt_threshold > 0:
+                    self.ckpt_threshold = 0
                 else:
                     raise
                 print(
                     f"[train] CUDA OOM -> micro_batch_tokens={self.micro_tokens} "
-                    f"checkpointing={self.checkpointing}",
+                    f"checkpointed>={self.ckpt_threshold} tokens "
+                    f"(micro {self.micro_ckpt_tokens})",
                     flush=True,
                 )
 
@@ -132,8 +173,9 @@ class Trainer:
         self.model.train()
         n_q = len(items)
         agg: dict[str, float] = {}
-        # activation checkpointing drops KV caches inside HF layers: no sharing then
-        for kind, mb in plan_chunks(items, self.micro_tokens, share=not self.checkpointing):
+        for kind, mb, ckpt in self._plan(items):
+            self._chunk_ckpt = ckpt
+            self._set_checkpointing(ckpt)
             out, t = self._forward(kind, mb)
             parts = decision_loss(
                 out,
@@ -161,6 +203,7 @@ class Trainer:
             lr=self.sched.get_last_lr()[0],
             gate=self.model.gate.detach().tolist(),
             micro_tokens=self.micro_tokens,
+            checkpoint_threshold=self.ckpt_threshold,
             family_questions=dict(Counter(it.family for it in items)),
             source_questions=dict(Counter(it.source for it in items)),
             long_questions=sum(it.length >= self.model.cfg.long_prompt_tokens for it in items),
