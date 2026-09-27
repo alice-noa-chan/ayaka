@@ -107,3 +107,22 @@ def test_recovery_drops_unfinished_or_hallucinated_quotes_and_all_calculations()
 def test_recovery_requires_actual_source_support():
     with pytest.raises(EvidenceError):
         recover_grounded_quotes("Weight 12 kg", '{"quotes":["Weight 99 kg"]}')
+
+
+def _prompt_example(system, source_prefix, output_prefix):
+    lines = system.splitlines()
+    source = next(ln for ln in lines if ln.startswith(source_prefix))
+    output = next(ln for ln in lines if ln.startswith(output_prefix))
+    return json.loads(source[len(source_prefix) :]), parse_program(output[len(output_prefix) :])
+
+
+def test_prompt_examples_execute_and_share_no_ngram_with_public_benchmark():
+    from ayaka.data.decontam import Decontaminator
+    from ayaka.evidence import EXTRACTION_SYSTEM
+    from ayaka.evidence_ids import SYSTEM
+
+    source, program = _prompt_example(EXTRACTION_SYSTEM, "Example source: ", "Example output: ")
+    out = validate_program(source, program)["calculations"]
+    assert out["total"]["result"] == "220.32" and out["question_holds"]["result"] is True
+    decon = Decontaminator.from_jevbench()
+    assert not decon.text_hit(EXTRACTION_SYSTEM) and not decon.text_hit(SYSTEM)

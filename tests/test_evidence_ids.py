@@ -79,3 +79,16 @@ def test_recovered_ids_never_execute_failed_or_unfinished_calculations():
         recover_id_evidence("Limit 120 EUR.", '{"e":[0,888],"c":{}}')
     with pytest.raises(EvidenceError):
         recover_id_evidence("Limit 120 EUR.", '{"e":[0,')
+
+
+def test_prompt_example_plan_is_valid_for_its_indexed_source():
+    import json
+
+    from ayaka.evidence_ids import SYSTEM, index_source
+
+    source = "Subtotal 240.00.\nDiscount 15 percent.\nTax 8 percent after discount.\nBudget 225.00."
+    fields = index_source(source)["fields"]
+    assert [m["value"] for m in fields.values()] == ["240.00", "15", "8", "225.00"]
+    plan = json.loads(next(ln for ln in SYSTEM.splitlines() if ln.startswith("Output: "))[8:])
+    out = validate_id_plan(source, plan)["calculations"]
+    assert out["total"]["result"] == "220.32" and out["question_holds"]["result"] is True

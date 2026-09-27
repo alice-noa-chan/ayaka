@@ -78,8 +78,9 @@ exception clauses as well as case facts. Opinions/drafts are not current rules.
 For a computable binary question end with question_holds; otherwise leave c
 empty. Unknown facts are unknown. A valid calculation can still use the wrong
 facts: select every condition required by the source, including overrides.
-Example: [0] Goods 12 lb (n0=12); [1] Carrier 3 kg (n1=3); [2] Limit 9 kg (n2=9).
-Output: {"e":[0,1,2],"c":{"mass":"ceil(convert(n0,'lb','kg')+n1)","question_holds":"le(mass,n2)"}}
+Example: [0] Subtotal 240.00 (n0=240.00); [1] Discount 15 percent (n1=15);
+[2] Tax 8 percent after discount (n2=8); [3] Budget 225.00 (n3=225.00).
+Output: {"e":[0,1,2,3],"c":{"total":"cents(n0*(1-convert(n1,'percent','fraction'))*(1+convert(n2,'percent','fraction')))","question_holds":"le(total,n3)"}}
 """
 
 
