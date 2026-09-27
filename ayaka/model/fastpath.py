@@ -154,7 +154,13 @@ def forward_kept(
     return text.norm(hidden), below_shared
 
 
-def prefix_cache(text, prefix_ids: torch.Tensor, cache=None):
+def prefix_cache(
+    text,
+    prefix_ids: torch.Tensor,
+    cache=None,
+    attention_mask: torch.Tensor | None = None,
+    position_ids: torch.Tensor | None = None,
+):
     """Encode a shared prefix for later suffix branches, stopping before
     the KV-shared layers: their outputs at prefix positions are never
     read (suffix queries use the non-shared layers' cached K/V), so the
@@ -166,8 +172,9 @@ def prefix_cache(text, prefix_ids: torch.Tensor, cache=None):
     cfg = text.config
     cache = cache if cache is not None else DynamicCache(config=cfg)
     inputs_embeds, per_layer_inputs = _embed(text, prefix_ids)
-    position_ids = _positions(prefix_ids, cache)
-    masks = _masks(cfg, inputs_embeds, None, cache, position_ids, explicit=False)
+    if position_ids is None:
+        position_ids = _positions(prefix_ids, cache)
+    masks = _masks(cfg, inputs_embeds, attention_mask, cache, position_ids, explicit=False)
     pos_emb = {t: text.rotary_emb(inputs_embeds, position_ids, t) for t in text.unique_layer_types}
     _run_layers(
         text,
@@ -181,3 +188,40 @@ def prefix_cache(text, prefix_ids: torch.Tensor, cache=None):
         {},
     )
     return cache
+
+
+def prefill_last(text, input_ids, attention_mask=None, position_ids=None):
+    """Native generation prefill with only the final shared-layer query.
+
+    This is the same source-prefix optimization as Electra's serving path.
+    It supports left-padded batches; the complete attention mask must also be
+    provided on later cached generation calls. Returns (last hidden, cache).
+    """
+    if input_ids.shape[1] < 2 or kv_shared_start(text.config) is None:
+        out = text(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            use_cache=True,
+        )
+        return out.last_hidden_state[:, -1, :], out.past_key_values
+    if position_ids is None:
+        position_ids = (
+            (attention_mask.cumsum(-1) - 1).clamp(min=0)
+            if attention_mask is not None
+            else torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0)
+        )
+    cache = prefix_cache(
+        text,
+        input_ids[:, :-1],
+        attention_mask=attention_mask[:, :-1] if attention_mask is not None else None,
+        position_ids=position_ids[:, :-1],
+    )
+    out = text(
+        input_ids=input_ids[:, -1:],
+        attention_mask=attention_mask,
+        position_ids=position_ids[:, -1:],
+        past_key_values=cache,
+        use_cache=True,
+    )
+    return out.last_hidden_state[:, -1, :], out.past_key_values
