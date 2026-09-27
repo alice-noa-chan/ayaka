@@ -12,9 +12,26 @@ from contextlib import nullcontext
 from dataclasses import replace
 from time import perf_counter
 
-from .evidence import EvidenceError, augmented_state, needs_evidence
+from .evidence import EvidenceError, augmented_state, needs_calculation, needs_evidence
 from .evidence_ids import id_messages, parse_id_plan, recover_id_evidence, validate_id_plan
 from .evidence_policy import EvidencePolicy, fuse_probabilities
+
+
+def decision_request(state, spec):
+    """The extractor's view of one question: positional labels, no gold."""
+    labels = [str(i) for i in range(len(spec.candidates))]
+    criteria = dict(zip(labels, spec.candidates, strict=True))
+    if spec.type == "noul":
+        criteria = {"false": spec.candidates[0], "true": spec.candidates[1]}
+    return {
+        "state": state,
+        "question": {"type": spec.type, "instructions": spec.instruction, "criteria": criteria},
+        "labels": labels,
+    }
+
+
+def gate_passes(policy: EvidencePolicy, request) -> bool:
+    return needs_calculation(request) if policy.gate == "calculation" else needs_evidence(request)
 
 
 class EvidenceDecision:
@@ -40,19 +57,8 @@ class EvidenceDecision:
             baselines = self.original.decide(state, questions, device=device)
         results = []
         for spec, baseline in zip(questions, baselines, strict=True):
-            labels = [str(i) for i in range(len(spec.candidates))]
-            criteria = dict(zip(labels, spec.candidates, strict=True))
-            if spec.type == "noul":
-                criteria = {"false": spec.candidates[0], "true": spec.candidates[1]}
-            request = {
-                "state": state,
-                "question": {
-                    "type": spec.type,
-                    "instructions": spec.instruction,
-                    "criteria": criteria,
-                },
-                "labels": labels,
-            }
+            request = decision_request(state, spec)
+            labels = request["labels"]
             baseline_p = dict(zip(labels, baseline.probs, strict=True))
             extra = {"route": "baseline", "error": None, "extraction_s": 0.0, "readout_s": 0.0}
             auxiliary = baseline_p
@@ -61,7 +67,7 @@ class EvidenceDecision:
             if (
                 self.policy.readout != "baseline"
                 and max(baseline.probs) <= self.policy.baseline_cutoff
-                and needs_evidence(request)
+                and gate_passes(self.policy, request)
             ):
                 tic = perf_counter()
                 raw = ""

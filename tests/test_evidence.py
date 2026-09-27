@@ -126,3 +126,25 @@ def test_prompt_examples_execute_and_share_no_ngram_with_public_benchmark():
     assert out["total"]["result"] == "220.32" and out["question_holds"]["result"] is True
     decon = Decontaminator.from_jevbench()
     assert not decon.text_hit(EXTRACTION_SYSTEM) and not decon.text_hit(SYSTEM)
+
+
+def test_calculation_gate_needs_a_quantitative_question_and_source_operands():
+    from ayaka.evidence import needs_calculation, needs_evidence
+
+    def req(state, instruction, criteria):
+        return {
+            "state": state,
+            "question": {"instructions": instruction, "criteria": criteria},
+            "labels": ["no", "yes"],
+        }
+
+    numbers = "Invoice 240.00, discount 15 percent, tax 8 percent."
+    assert needs_calculation(req(numbers, "Is the total within budget?", {}))
+    assert not needs_calculation(req(numbers, "Is the tone polite?", {"false": "rude"}))
+    assert not needs_calculation(req("The vendor was polite.", "Is the total under 5?", {}))
+    # option descriptions count as part of the question
+    assert needs_calculation(req(numbers, "Which applies?", {"a": "Over 200 after tax"}))
+    # long rule-heavy prose passes the broad gate but not the calculation gate
+    policy = "Clause 1: an exception applies unless overridden. " * 60
+    prose = req(policy, "Which clause governs?", {})
+    assert needs_evidence(prose) and not needs_calculation(prose)

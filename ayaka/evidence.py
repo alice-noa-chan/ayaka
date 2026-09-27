@@ -89,6 +89,32 @@ def needs_evidence(record):
     return len(text) > 1800 or numeric or rules
 
 
+QUANTITATIVE = re.compile(
+    r"\d|\b(total|sum|amount|price|cost|fee|budget|balance|limit|cap|threshold|exceed\w*|"
+    r"at (?:most|least)|more than|less than|within|before|after|late|deadline|cutoff|"
+    r"day|days|week|weeks|month|months|hour|hours|minute|minutes|date|expire\w*|"
+    r"weight|kg|lb|percent|rate|probabilit\w*|likel\w*|chance|odds|expected|average)\b",
+    re.I,
+)
+
+
+def needs_calculation(record):
+    """Narrow gate: the question asks about a quantity and the source has operands.
+
+    Uses only the request (state, instruction, option descriptions); never labels'
+    correctness, families or benchmark identifiers. Unlike ``needs_evidence`` it
+    ignores document length and rule vocabulary, so ordinary long or policy
+    decisions keep the single-pass readout.
+    """
+    r = public_input(record)
+    question = r["question"]
+    criteria = question.get("criteria") or {}
+    options = criteria.values() if isinstance(criteria, dict) else criteria
+    asked = " ".join([str(question.get("instructions", ""))] + [str(o) for o in options])
+    operands = len(re.findall(r"\d+(?:[.,]\d+)?", source_text(r["state"])))
+    return operands >= 3 and bool(QUANTITATIVE.search(asked))
+
+
 def as_date(value):
     if isinstance(value, (dt.date, dt.datetime)):
         return value

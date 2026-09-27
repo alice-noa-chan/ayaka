@@ -81,3 +81,20 @@ def test_grounded_predicate_is_fused_and_score_metadata_is_recomputed():
         [QuestionSpec("score", "Rate authority.", ["low", "high"], ordinals=[2, 8])],
     )[0]
     assert score.expected == pytest.approx(4.4)
+
+
+def test_calculation_gate_skips_non_quantitative_questions():
+    base = Original([0.6, 0.4])
+
+    def forbidden(_):
+        raise AssertionError("extractor should not be called")
+
+    policy = EvidencePolicy(baseline_cutoff=1, gate="calculation")
+    wrapper = EvidenceDecision(base, forbidden, policy)
+    out = wrapper.decide(
+        "Clause 3 exception unless overridden; amounts 120, 150 and 30 EUR.",
+        [QuestionSpec("noul", "Was the manager courteous?", ["false", "true"])],
+    )[0]
+    assert out.probs == [0.6, 0.4] and out.extras["evidence"]["route"] == "baseline"
+    with pytest.raises(ValueError):
+        EvidencePolicy(gate="everything")

@@ -13,10 +13,13 @@ class EvidencePolicy:
     boolean_confidence: float | None = None
     baseline_cutoff: float = 0.9
     recover_ids: bool = False
+    gate: str = "broad"  # broad: needs_evidence; calculation: needs_calculation
 
     def __post_init__(self):
         if self.readout not in ("quotes", "executed", "native", "baseline"):
             raise ValueError("unknown evidence readout")
+        if self.gate not in ("broad", "calculation"):
+            raise ValueError("unknown evidence gate")
         if not 0 <= self.weight <= 1 or not 0 <= self.baseline_cutoff <= 1:
             raise ValueError("invalid probability weight/cutoff")
         if self.boolean_confidence is not None and not 0.5 <= self.boolean_confidence < 1:
