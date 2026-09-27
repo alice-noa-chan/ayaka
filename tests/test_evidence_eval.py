@@ -101,3 +101,43 @@ def test_collect_runs_gated_questions_and_policies_use_stored_variants():
     summary = report(rows, policy)["dev"]
     assert summary["baseline"]["correct"] == 0 and summary["policy"]["correct"] == 1
     assert summary["valid_plans"] == 1
+
+
+class ReasonStub:
+    def decide(self, state, questions, device=None):
+        p = [0.2, 0.8] if "<worked_steps>" in str(state) else [0.7, 0.3]
+        return [
+            DecisionResult(q.type, p, dict(zip(q.candidates, p, strict=True))) for q in questions
+        ]
+
+
+class Notes:
+    def __init__(self):
+        self.seen = []
+
+    def generate(self, batch):
+        self.seen += batch
+        return ["discounted 204.00; taxed 220.32; budget 225.00" for _ in batch]
+
+
+def test_reasoning_variant_is_collected_scored_and_never_sees_gold():
+    from ayaka.eval.evidence_eval import available
+
+    notes = Notes()
+    rows = collect(
+        ReasonStub(),
+        None,
+        [_record("Is the total within budget?", "q1")],
+        log=lambda _: None,
+        reasoner=notes,
+    )
+    row = rows[0]
+    assert row["reasoned"] == {"no": 0.2, "yes": 0.8} and "raw_plan" not in row
+    assert "SECRET" not in json.dumps(notes.seen) and "expected" not in json.dumps(notes.seen)
+    reasoned = EvidencePolicy(readout="reasoned", weight=1.0, baseline_cutoff=1.0)
+    probs, routed, _ = apply_policy(row, reasoned)
+    assert routed and probs == {"no": 0.2, "yes": 0.8}
+    # plan policies are not scored on rows collected without plans
+    assert not available(rows, EvidencePolicy(readout="executed"))
+    policy, _ = select(rows)
+    assert policy.readout == "reasoned"

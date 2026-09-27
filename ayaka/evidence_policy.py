@@ -16,7 +16,7 @@ class EvidencePolicy:
     gate: str = "broad"  # broad: needs_evidence; calculation: needs_calculation
 
     def __post_init__(self):
-        if self.readout not in ("quotes", "executed", "native", "baseline"):
+        if self.readout not in ("quotes", "executed", "native", "reasoned", "baseline"):
             raise ValueError("unknown evidence readout")
         if self.gate not in ("broad", "calculation"):
             raise ValueError("unknown evidence gate")

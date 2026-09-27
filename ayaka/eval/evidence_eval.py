@@ -22,7 +22,13 @@ import math
 import os
 import time
 
-from ..evidence import EvidenceError, augmented_state, needs_calculation
+from ..evidence import (
+    EvidenceError,
+    augmented_state,
+    needs_calculation,
+    reasoned_state,
+    reasoning_messages,
+)
 from ..evidence_ids import id_messages, parse_id_plan, recover_id_evidence, validate_id_plan
 from ..evidence_pipeline import decision_request
 from ..evidence_policy import EvidencePolicy, fuse_probabilities
@@ -87,9 +93,20 @@ def _probs(result, labels):
     return dict(zip(labels, result.probs, strict=True))
 
 
-def collect(decision, generator, records, batch_size: int = 8, device=None, log=print) -> list:
-    """Baseline + (gated) evidence variants for every record."""
-    import torch
+def collect(
+    decision,
+    generator,
+    records,
+    batch_size: int = 8,
+    device=None,
+    log=print,
+    reasoner=None,
+) -> list:
+    """Baseline + (gated) evidence variants for every record.
+
+    ``generator`` (ID plans) and ``reasoner`` (free-form worked steps) are each
+    optional; a missing one skips its variants.
+    """
 
     rows, pending = [], []
     for rec in records:
@@ -114,18 +131,32 @@ def collect(decision, generator, records, batch_size: int = 8, device=None, log=
         rows.append(row)
     log(f"[evidence] {len(rows)} questions, {len(pending)} pass the calculation gate")
 
-    def extract(batch):
+    pending.sort(key=lambda x: len(str(x[2]["state"])))
+    if generator is not None:
+        _batched(pending, generator, id_messages, batch_size, log, "extracted", decision, device)
+    if reasoner is not None:
+        _batched(
+            pending, reasoner, reasoning_messages, batch_size, log, "reasoned", decision, device
+        )
+    return rows
+
+
+def _batched(pending, gen, messages, batch_size, log, what, decision, device):
+    import torch
+
+    finish = _finish if what == "extracted" else _finish_reasoning
+
+    def run(batch):
         tic = time.perf_counter()
-        texts = generator.generate([id_messages(req) for _, _, req in batch])
+        texts = gen.generate([messages(req) for _, _, req in batch])
         per = (time.perf_counter() - tic) / len(batch)
         return [(t, per) for t in texts]
 
-    pending.sort(key=lambda x: len(str(x[2]["state"])))
     i, size = 0, batch_size
     while i < len(pending):
         batch = pending[i : i + size]
         try:
-            outs = extract(batch)
+            outs = run(batch)
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
             if size > 1:
@@ -139,11 +170,20 @@ def collect(decision, generator, records, batch_size: int = 8, device=None, log=
             for row, _, _ in batch:
                 row["error"] = str(exc)
         for (row, item, request), (raw, secs) in zip(batch, outs, strict=True):
-            _finish(decision, row, item, request, raw, secs, device)
+            finish(decision, row, item, request, raw, secs, device)
         i += len(batch)
         if i % 40 < len(batch):
-            log(f"[evidence] extracted {i}/{len(pending)}")
-    return rows
+            log(f"[evidence] {what} {i}/{len(pending)}")
+
+
+def _finish_reasoning(decision, row, item, request, raw, secs, device):
+    row.update(reasoning=raw[:4000], reasoning_s=secs)
+    if not raw.strip():
+        return
+    tic = time.perf_counter()
+    state = reasoned_state(item.state, raw)
+    row["reasoned"] = _probs(decision.decide(state, [item.spec], device=device)[0], item.labels)
+    row["reasoned_readout_s"] = time.perf_counter() - tic
 
 
 def _finish(decision, row, item, request, raw, secs, device):
@@ -189,7 +229,18 @@ def policy_grid():
             recover_ids=True,
             gate="calculation",
         )
+    for weight, cutoff in itertools.product((0.5, 1.0), (0.8, 0.9, 0.99, 1.0)):
+        yield EvidencePolicy(
+            readout="reasoned", weight=weight, baseline_cutoff=cutoff, gate="calculation"
+        )
     yield EvidencePolicy(readout="baseline")
+
+
+def available(rows, policy) -> bool:
+    """A policy is scored only on rows that were collected with its variant."""
+    key = {"reasoned": "reasoning", "quotes": "raw_plan", "executed": "raw_plan"}
+    need = key.get(policy.readout)
+    return need is None or all(need in r for r in rows if r["gate"])
 
 
 def apply_policy(row, policy: EvidencePolicy):
@@ -203,6 +254,11 @@ def apply_policy(row, policy: EvidencePolicy):
     latency = row["baseline_s"]
     if not routed:
         return base, False, latency
+    if policy.readout == "reasoned":
+        latency += row.get("reasoning_s", 0.0) + row.get("reasoned_readout_s", 0.0)
+        aux = row.get("reasoned")
+        probs, _ = fuse_probabilities(base, aux or base, policy, usable=aux is not None)
+        return probs, True, latency
     latency += row.get("extraction_s", 0.0)
     usable = row.get("verified", False)
     if usable and (policy.recover_ids or not row.get("recovered")):
@@ -246,7 +302,7 @@ def score(rows, policy) -> dict:
 
 def select(dev_rows) -> tuple[EvidencePolicy, list]:
     """Most dev correct, then lower NLL, then fewer routed questions."""
-    table = [(p, score(dev_rows, p)) for p in policy_grid()]
+    table = [(p, score(dev_rows, p)) for p in policy_grid() if available(dev_rows, p)]
     table.sort(key=lambda x: (-x[1]["correct"], x[1]["nll"], x[1]["routed"]))
     return table[0][0], table
 
@@ -293,9 +349,12 @@ def main(argv=None):
     c.add_argument("--limit", type=int, default=0)
     c.add_argument("--batch-size", type=int, default=8)
     c.add_argument("--max-new-tokens", type=int, default=768)
+    c.add_argument("--variants", default="plans", help="comma list of: plans (ID plans), reasoning")
+    c.add_argument("--reason-tokens", type=int, default=384)
     c.add_argument("--out", required=True)
     s = sub.add_parser("select")
     s.add_argument("--dev", nargs="+", required=True)
+    s.add_argument("--extra", nargs="*", default=[], help="more variants for the same rows")
     s.add_argument("--apply", nargs="*", default=[])
     s.add_argument("--out", default="")
     args = ap.parse_args(argv)
@@ -315,23 +374,39 @@ def main(argv=None):
         tok = HFTokenizer.from_pretrained(model.cfg.backbone)
         print(f"[evidence] model loaded in {time.perf_counter() - tic:.0f}s", flush=True)
         records = load_records(args.split, args.data, args.limit)
+        variants = set(args.variants.split(","))
         with torch.inference_mode():
             rows = collect(
                 Decision(model, tok),
-                PlanGenerator(model, tok, max_new_tokens=args.max_new_tokens),
+                PlanGenerator(model, tok, max_new_tokens=args.max_new_tokens)
+                if "plans" in variants
+                else None,
                 records,
                 batch_size=args.batch_size,
                 log=lambda m: print(m, flush=True),
+                reasoner=PlanGenerator(
+                    model, tok, max_new_tokens=args.reason_tokens, stop_when=None
+                )
+                if "reasoning" in variants
+                else None,
             )
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump({"split": args.split, "data": args.data, "rows": rows}, f, ensure_ascii=False)
         return rows
 
+    extra = {}
+    for p in args.extra:
+        with open(p, encoding="utf-8") as f:
+            for r in json.load(f)["rows"]:
+                extra[(r["tier"], r["id"])] = r
+
     def rows_of(paths):
         out = []
         for p in paths:
             with open(p, encoding="utf-8") as f:
-                out += json.load(f)["rows"]
+                for r in json.load(f)["rows"]:
+                    more = extra.get((r["tier"], r["id"]), {})
+                    out.append({**more, **r} if more else r)
         return out
 
     dev = rows_of(args.dev)

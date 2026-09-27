@@ -436,6 +436,28 @@ Example output: {"quotes":["Started 31 January 2025.","Term 1 calendar month."],
 For a non-calculation question, quote the key rules/facts and leave calculations empty."""
 
 
+REASONING_SYSTEM = """Read the source and the question. Work out every quantity the question depends on, step by step: name the numbers and dates you use, convert units, apply the stated rules, conditions, exceptions and effective dates, and show each arithmetic step with its result. Keep it to at most 12 short lines. Do not choose, name or rank an answer option."""
+
+
+def reasoning_messages(record):
+    r = public_input(record)
+    return [
+        {"role": "system", "content": REASONING_SYSTEM},
+        {"role": "user", "content": json.dumps(r, ensure_ascii=False, sort_keys=True)},
+    ]
+
+
+def reasoned_state(state, notes):
+    """Source followed by unverified worked steps; no proposed answer."""
+    return (
+        source_text(state)
+        + "\n\n<worked_steps>\n"
+        + str(notes).strip()
+        + "\n</worked_steps>\nThe worked steps are unverified model notes. Check every number, "
+        "condition and exception against the source above before relying on them."
+    )
+
+
 def extraction_messages(record):
     r = public_input(record)
     return [
