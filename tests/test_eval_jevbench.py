@@ -90,3 +90,45 @@ def test_run_jevbench_tiny_smoke(tmp_path):
     assert (tmp_path / "r.json").exists()
     refs = compare_references(rep["tiers"])
     assert all(0 <= a <= 1 for a in refs["jev-1.13.0"]["accuracy"].values())
+
+
+@pytest.mark.parametrize(
+    ("axes", "published"),
+    [
+        # JevBench v1.4.2.1 published rows: (I, C, S, K) -> composite
+        ((53.1, 76.3, 83.3, 52.0), 63.29),  # Jev 1.13.0
+        ((53.0, 75.5, 93.5, 55.8), 65.8),  # Plumb-4B
+        ((44.2, 54.9, 77.0, 64.8), 45.1),  # system-one-open (Intelligence < 50 penalty)
+    ],
+)
+def test_jevbench_score_reproduces_published_composites(axes, published):
+    from ayaka.eval.jevbench import jevbench_score
+
+    assert jevbench_score(*axes) == pytest.approx(published, abs=0.15)
+
+
+def test_speed_and_cost_axes_match_published_values():
+    from ayaka.eval.jevbench import cost_axis, speed_axis, speed_score
+
+    assert speed_score(0.1) == 100 and speed_score(1.0) == pytest.approx(80)
+    # Jev 1.13.0 (hosted API, no adjustment): p50 0.652 s, p95 0.722 s -> 83.3
+    assert speed_axis(0.6524, 0.7222, self_hosted=False) == pytest.approx(83.3, abs=0.1)
+    # self-hosted: x2 + 0.15 s
+    assert speed_axis(0.1, 0.1) == pytest.approx(speed_score(0.35))
+    assert cost_axis(0.03991) == pytest.approx(52.0, abs=0.1)  # Jev 1.13.0
+    assert cost_axis(0.01488) == pytest.approx(64.8, abs=0.1)  # system-one-open (E2B)
+
+
+def test_leaderboard_estimate_uses_original_tier_latency_and_backbone_cost():
+    from ayaka.eval.jevbench import leaderboard_estimate, speed_axis
+
+    tiers = {
+        "easy": {"accuracy": 1.0, "chance": 0.3, "latency_p50_s": 9.0, "latency_p95_s": 9.0},
+        "original": {"accuracy": 0.9, "chance": 0.3, "latency_p50_s": 0.1, "latency_p95_s": 0.2},
+        "hard": {"accuracy": 0.5, "chance": 0.3, "latency_p50_s": 9.0, "latency_p95_s": 9.0},
+    }
+    est = leaderboard_estimate(tiers, backbone="google/gemma-4-12B-it")
+    assert est["speed"] == pytest.approx(speed_axis(0.1, 0.2))
+    assert est["cost"] is not None and est["jevbench_score"] is None
+    assert leaderboard_estimate(tiers, "google/gemma-4-12B-it", calibration=70.0)["jevbench_score"]
+    assert leaderboard_estimate(tiers, backbone="unknown")["cost"] is None

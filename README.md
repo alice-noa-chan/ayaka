@@ -197,6 +197,13 @@ truncated, because cutting the middle could remove the answer's evidence.
   the published per-task outcomes of Jev 1.13.0 and other systems on the same
   items. It also reports a chance-corrected Intelligence proxy using the
   official tier weights over the public tiers.
+  `summary.leaderboard_estimate` applies the v1.4.2.1 leaderboard axes:
+  Speed from the original tier's p50/p95 after the self-hosted ×2 + 0.15 s
+  adjustment, and Cost from the board's own estimate for the backbone. The
+  composite is the harmonic mean of the four axes, times (axis/50)² for
+  Intelligence, Speed or Cost below 50. It is reported only when a
+  Calibration value is supplied. The Intelligence proxy is optimistic: there
+  is no judge tier, no sealed items and no public-minus-sealed gap penalty.
 - **Held-out reference set**: accuracy, KL and ECE against the reference
   distributions of `jev_open_test` (Open-Jev rows of `test_set_30k`).
 - **Held-out mixture metrics** during training.

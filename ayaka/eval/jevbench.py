@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -34,6 +35,20 @@ from ..primitives import Decision, QuestionSpec
 TIERS = ("easy", "original", "hard")
 TIER_WEIGHTS = {"easy": 14, "original": 28, "hard": 30}
 NO_LABELS = {"no", "false"}
+
+# JevBench v1.4.2.1 leaderboard axes (results/v1.4.2.1/*-results.json, "scoring").
+# Self-hosted latency is adjusted x2 + 0.15 s by the benchmark; Speed is measured
+# on the standard(+judge) run, whose public counterpart here is "original".
+SELF_HOSTED_LATENCY = (2.0, 0.15)
+SPEED_TIER = "original"
+# Cost is estimated by the benchmark from a hosted list price of the base model
+# for self-hosted systems. Values are the board's own estimates for systems on
+# the same backbones (system-one-open on E2B, Winnow-12B on 12B); None = unknown.
+BACKBONE_USD_PER_1000 = {
+    "google/gemma-4-E2B-it": 0.01488,
+    "google/gemma-4-E4B-it": None,
+    "google/gemma-4-12B-it": 0.03709,
+}
 
 
 def data_dir() -> str:
@@ -141,11 +156,90 @@ def evaluate(decision: Decision, records: list[dict], device=None) -> dict:
         "chance_corrected": max(0.0, (acc - ch) / (1 - ch)),
         "brier": brier / n,
         "ece": _ece(confs, correct),
-        "latency_p50_s": sorted(lat)[len(lat) // 2] if lat else 0.0,
+        "latency_p50_s": _quantile(lat, 0.50),
+        "latency_p95_s": _quantile(lat, 0.95),
         "by_family": {k: sum(v) / len(v) for k, v in by_family.items()},
         "by_type": {k: sum(v) / len(v) for k, v in by_type.items()},
         "results": results,
     }
+
+
+def _quantile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
+
+
+def speed_score(seconds: float) -> float:
+    """100 - 20 log10(s / 0.1 s), clipped to 0..100 (0.1 s = 100, 1 s = 80)."""
+    if seconds <= 0:
+        return 100.0
+    return min(100.0, max(0.0, 100 - 20 * math.log10(seconds / 0.1)))
+
+
+def speed_axis(p50_s: float, p95_s: float, self_hosted: bool = True) -> float:
+    """Mean of score(p50) and score(p95), after the self-hosted adjustment."""
+    if self_hosted:
+        scale, offset = SELF_HOSTED_LATENCY
+        p50_s, p95_s = p50_s * scale + offset, p95_s * scale + offset
+    return (speed_score(p50_s) + speed_score(p95_s)) / 2
+
+
+def cost_axis(usd_per_1000: float) -> float:
+    """100 - 30 log10($ per 1,000 decisions / $0.001), clipped to 0..100."""
+    if usd_per_1000 <= 0:
+        return 100.0
+    return min(100.0, max(0.0, 100 - 30 * math.log10(usd_per_1000 / 0.001)))
+
+
+def jevbench_score(intelligence: float, calibration: float, speed: float, cost: float) -> float:
+    """Composite: equal-weight harmonic mean of the four axes, times
+    (axis / 50)^2 for Intelligence, Speed and Cost each when below 50.
+    Calibration has no penalty term; a label-only system scores 0 there."""
+    axes = (intelligence, calibration, speed, cost)
+    if min(axes) <= 0:
+        return 0.0
+    score = len(axes) / sum(1 / a for a in axes)
+    for axis in (intelligence, speed, cost):
+        if axis < 50:
+            score *= (axis / 50) ** 2
+    return score
+
+
+def leaderboard_estimate(
+    report_tiers: dict[str, dict],
+    backbone: str | None = None,
+    usd_per_1000: float | None = None,
+    calibration: float | None = None,
+) -> dict:
+    """Estimate JevBench axes from a public-tier run.
+
+    Only public tiers are available, so Intelligence is the public proxy (no
+    judge tier, no sealed hard set, no public-minus-sealed gap penalty) and is
+    optimistic. Latency is measured in-process, not over HTTP. Calibration
+    uses the benchmark's own procedure, which is not reproduced here, so the
+    composite is given only when a Calibration value is supplied.
+    """
+    acc = {t: m["accuracy"] for t, m in report_tiers.items()}
+    chance = {t: m["chance"] for t, m in report_tiers.items()}
+    out: dict = {"intelligence_proxy": intelligence_proxy(acc, chance)}
+    timing = report_tiers.get(SPEED_TIER)
+    if timing is None:
+        lat = [r["latency_s"] for m in report_tiers.values() for r in m.get("results", [])]
+        timing = {"latency_p50_s": _quantile(lat, 0.5), "latency_p95_s": _quantile(lat, 0.95)}
+    out["speed"] = speed_axis(timing["latency_p50_s"], timing.get("latency_p95_s", 0.0))
+    if usd_per_1000 is None and backbone is not None:
+        usd_per_1000 = BACKBONE_USD_PER_1000.get(backbone)
+    out["usd_per_1000"] = usd_per_1000
+    out["cost"] = cost_axis(usd_per_1000) if usd_per_1000 is not None else None
+    out["calibration"] = calibration
+    out["jevbench_score"] = (
+        jevbench_score(out["intelligence_proxy"], calibration, out["speed"], out["cost"])
+        if calibration is not None and out["cost"] is not None
+        else None
+    )
+    return out
 
 
 def _ece(confs: list[float], correct: list[bool], n_bins: int = 10) -> float:
@@ -220,10 +314,12 @@ def run_jevbench(
     acc = {t: m["accuracy"] for t, m in report["tiers"].items()}
     chance = {t: m["chance"] for t, m in report["tiers"].items()}
     refs = compare_references(report["tiers"])
+    backbone = getattr(getattr(model, "cfg", None), "backbone", None)
     report["summary"] = {
         "accuracy": acc,
         "intelligence_proxy": intelligence_proxy(acc, chance),
         "hard_ece": report["tiers"].get("hard", {}).get("ece"),
+        "leaderboard_estimate": leaderboard_estimate(report["tiers"], backbone),
         "references": {
             k: {"accuracy": v["accuracy"], "intelligence_proxy": v["intelligence_proxy"]}
             for k, v in refs.items()
@@ -233,6 +329,11 @@ def run_jevbench(
         print(
             f"[jevbench] intelligence proxy: ours={report['summary']['intelligence_proxy']:.1f}",
             flush=True,
+        )
+        est = report["summary"]["leaderboard_estimate"]
+        cost = "n/a" if est["cost"] is None else f"{est['cost']:.1f}"
+        print(
+            f"[jevbench] leaderboard axes (est.): speed={est['speed']:.1f} cost={cost}", flush=True
         )
         for v in refs.values():
             accs = " ".join(f"{t}={a:.3f}" for t, a in v["accuracy"].items())
