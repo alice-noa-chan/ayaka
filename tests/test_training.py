@@ -333,3 +333,26 @@ def test_plan_chunks_shares_only_when_worth_it():
         it for cell in pools.values() for s in cell for it in sample_to_items(s, TOK, tiny_config())
     ]
     assert {k for k, _ in plan_chunks(singles, 4096)} == {"rows"}  # one question per sample
+
+
+def test_time_budget_stops_training_and_is_reported(tmp_path):
+    cfg = RunConfig(
+        model_size="tiny",
+        steps=50,
+        questions_per_step=8,
+        micro_batch_tokens=4096,
+        eval_questions=8,
+        eval_every=0,
+        fidelity_questions=0,
+        jevbench=False,
+        decontaminate=False,
+        artifacts_dir=str(tmp_path),
+        run_name="budget",
+        log_every=0,
+        bf16=False,
+        max_train_seconds=1e-9,
+    )
+    res = run_training(cfg, pools=synthetic_pools(8), verbose=False)
+    assert res["steps"] == 1 and res["stopped_early"] is True
+    meta = json.loads((Path(res["checkpoint"]) / "meta.json").read_text())
+    assert meta["stopped_early"] is True

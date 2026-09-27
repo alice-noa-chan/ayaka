@@ -141,6 +141,7 @@ class RunConfig:
     compile: bool = False  # torch.compile per decoder layer (experimental)
     log_every: int = 20
     save_every: int = 0
+    max_train_seconds: float = 0.0  # wall-clock guard for the optimizer loop (0 = none)
 
 
 def apply_release_policy(cfg: RunConfig, verbose: bool = True) -> None:
@@ -520,6 +521,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
         log_every=cfg.log_every,
         eval_every=cfg.eval_every,
         seed=cfg.seed,
+        max_train_seconds=cfg.max_train_seconds,
     )
     trainer = Trainer(model, tok, tcfg, device)
     if verbose:
@@ -545,10 +547,19 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
     train_sec = time.time() - t0
     with open(os.path.join(art, "history.json"), "w") as f:
         json.dump(history, f)
-    meta = {"steps": trainer.step_i, "train_sec": train_sec, "run": asdict(cfg)}
+    meta = {
+        "steps": trainer.step_i,
+        "train_sec": train_sec,
+        "stopped_early": trainer.stopped_early,
+        "run": asdict(cfg),
+    }
     save_checkpoint(model, ckpt_dir, meta)  # before calibration: a late failure can't lose the run
 
-    report: dict = {"train_sec": train_sec, "steps": trainer.step_i}
+    report: dict = {
+        "train_sec": train_sec,
+        "steps": trainer.step_i,
+        "stopped_early": trainer.stopped_early,
+    }
     if cfg.calibrate:
         if _is_synthetic(pools):
             cal = eval_items

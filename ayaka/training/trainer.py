@@ -43,6 +43,9 @@ class TrainConfig:
     log_every: int = 20
     eval_every: int = 0
     seed: int = 0
+    # wall-clock budget for the optimizer loop (0 = none). The LR schedule still
+    # follows `steps`, so size `steps` to fit; this is a billing guard.
+    max_train_seconds: float = 0.0
     loss_weights: LossWeights = field(default_factory=LossWeights)
 
 
@@ -69,6 +72,7 @@ class Trainer:
         )
         self.sched = cosine_warmup_schedule(self.opt, cfg.steps, cfg.warmup_frac, cfg.min_lr_frac)
         self.step_i = 0
+        self.stopped_early = False
         self.use_amp = cfg.bf16 and self.device.type == "cuda"
 
     def n_trainable(self) -> int:
@@ -196,6 +200,15 @@ class Trainer:
                 )
             if on_step is not None:
                 on_step(self.step_i, rec)
+            if self.cfg.max_train_seconds and rec["elapsed"] >= self.cfg.max_train_seconds:
+                self.stopped_early = True
+                if verbose:
+                    print(
+                        f"[train] time budget {self.cfg.max_train_seconds:.0f}s reached at step "
+                        f"{self.step_i}/{self.cfg.steps}; stopping",
+                        flush=True,
+                    )
+                break
         return history
 
     @torch.no_grad()
