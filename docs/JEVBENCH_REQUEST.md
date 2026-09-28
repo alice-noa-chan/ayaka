@@ -1,6 +1,6 @@
 # JevBench benchmark request (GitHub issue draft)
 
-Fill the `TODO` fields after the Hugging Face upload, then open an issue at
+Ready to post as an issue at
 <https://github.com/fstandhartinger/jevbench/issues>.
 
 ---
@@ -9,8 +9,9 @@ Fill the `TODO` fields after the Hugging Face upload, then open an issue at
 
 ### Model
 
-- Hugging Face: `https://huggingface.co/alice-noa-chan/TODO` at revision `TODO`
-- Code: <https://github.com/alice-noa-chan/ayaka> at commit `TODO`
+- Hugging Face: <https://huggingface.co/alice-noa-chan/ayaka-large> at revision
+  `b8902ce0249fa33c01dfb079459e0badc6e5ba08`
+- Code: <https://github.com/alice-noa-chan/ayaka> at commit `c8a9bf00900a119b858bf2660e095fdf5bf03e7e`
 - License: MIT for code and fine-tuned weights. The base model
   `google/gemma-4-12B-it` is Apache-2.0 and its notices apply to the base
   portion. Training data licences are listed per source in the model card.
@@ -19,9 +20,10 @@ Fill the `TODO` fields after the Hugging Face upload, then open an issue at
 ### How to run
 
 ```bash
-pip install "git+https://github.com/alice-noa-chan/ayaka@TODO-commit"
-# weights: TODO (checkpoint with unmerged LoRA, or merged export: see below)
-python -m ayaka.serve --ckpt <checkpoint-dir> --reasoning --device cuda --port 8000
+pip install "git+https://github.com/alice-noa-chan/ayaka@c8a9bf00900a119b858bf2660e095fdf5bf03e7e"
+# downloads the adapter/head (525 MB) and the pinned Gemma 4 12B base
+python -m ayaka.serve --ckpt alice-noa-chan/ayaka-large --revision b8902ce0249fa33c01dfb079459e0badc6e5ba08 \
+  --reasoning --device cuda --port 8000
 ```
 
 The server is `POST /v1/systemone` in TypeSafe's format. Health:
@@ -84,7 +86,8 @@ change the answer.
   - On Open-Jev decisions, 4% of questions are routed.
 - **Precision:** BF16 weights and activations.
 - **Hardware:** tested on NVIDIA A100 80GB and H100 80GB. Weights take
-  about 24 GB in BF16. Peak serving memory: TODO. Latency, one request at a
+  about 24 GB in BF16. Peak serving memory has not been measured separately;
+  it ran with room to spare on 80 GB cards. Latency, one request at a
   time:
   - single pass: p50 0.15 s (H100) / 0.29 s (A100 over HTTP);
   - routed hard questions: p50 about 10 s (A100).
