@@ -377,7 +377,7 @@ def main(argv=None):
         dtype = torch.bfloat16 if device == "cuda" else torch.float32
         tic = time.perf_counter()
         model = load_checkpoint(args.ckpt, device=device, dtype=dtype, merge=False).eval()
-        tok = HFTokenizer.from_pretrained(model.cfg.backbone)
+        tok = HFTokenizer.for_config(model.cfg)
         print(f"[evidence] model loaded in {time.perf_counter() - tic:.0f}s", flush=True)
         records = load_records(args.split, args.data, args.limit)
         variants = set(args.variants.split(","))

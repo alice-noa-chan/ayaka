@@ -47,11 +47,15 @@ class ElectraConfig:
         "down_proj",
     )
     tiny_overrides: dict = field(default_factory=dict)  # only for backbone == "tiny"
+    # exact Hub revision of ``backbone`` (None = latest). Pinned so a later
+    # upstream update cannot silently change a released model.
+    backbone_revision: str | None = None
 
 
 ELECTRA_SMALL = ElectraConfig(
     name="electra-small",
     backbone="google/gemma-4-E2B-it",
+    backbone_revision="3e22461f65e89153144f8adb70e3b8c2cc9845a7",
     pointer_dim=256,
     set_mixer_layers=2,
     set_mixer_heads=4,
@@ -62,6 +66,7 @@ ELECTRA_SMALL = ElectraConfig(
 ELECTRA_BASE = ElectraConfig(
     name="electra-base",
     backbone="google/gemma-4-E4B-it",
+    backbone_revision="ee0ef6023621cff504d758262d4e04895a5af4a2",
     pointer_dim=384,
     set_mixer_layers=2,
     set_mixer_heads=6,
@@ -72,6 +77,7 @@ ELECTRA_BASE = ElectraConfig(
 ELECTRA_LARGE = ElectraConfig(
     name="electra-large",
     backbone="google/gemma-4-12B-it",
+    backbone_revision="707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
     pointer_dim=512,
     set_mixer_layers=3,
     set_mixer_heads=8,

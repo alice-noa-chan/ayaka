@@ -29,6 +29,23 @@ REQUIRED = (
     "export_meta.json",
     "backbone/model.safetensors.index.json",
 )
+# checkpoint layout: LoRA kept unmerged (needed by the worked-steps route); the
+# base model is fetched from its own repo at the pinned revision
+REQUIRED_CKPT = (
+    "electra_config.json",
+    "head.pt",
+    "meta.json",
+    "adapter/adapter_config.json",
+    "adapter/adapter_model.safetensors",
+)
+
+
+def is_checkpoint(folder: str) -> bool:
+    return os.path.isdir(os.path.join(folder, "adapter")) and not os.path.exists(
+        os.path.join(folder, "export_meta.json")
+    )
+
+
 PLACEHOLDER = "<code-url>"
 
 
@@ -41,7 +58,14 @@ def _size(path: str) -> int:
 
 def check_export(export_dir: str) -> list[str]:
     """Problems that block an upload (empty list = ready)."""
-    problems = [f"missing {r}" for r in REQUIRED if not os.path.exists(os.path.join(export_dir, r))]
+    required = REQUIRED_CKPT if is_checkpoint(export_dir) else REQUIRED
+    problems = [f"missing {r}" for r in required if not os.path.exists(os.path.join(export_dir, r))]
+    if is_checkpoint(export_dir):
+        cfg_path = os.path.join(export_dir, "electra_config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                if not json.load(f).get("backbone_revision"):
+                    problems.append("electra_config.json has no pinned backbone_revision")
     card = os.path.join(export_dir, "README.md")
     if not os.path.exists(card):
         problems.append("missing README.md model card (python -m ayaka.modelcard --export ...)")
@@ -106,7 +130,9 @@ def main(argv: list[str] | None = None) -> dict:
     ap = argparse.ArgumentParser(
         description="Upload an Electra export to the Hugging Face Hub (dry-run by default)"
     )
-    ap.add_argument("--export", required=True, help="export folder (ayaka.export)")
+    ap.add_argument(
+        "--export", required=True, help="export folder (ayaka.export) or checkpoint folder"
+    )
     ap.add_argument("--repo", required=True, help="<user-or-org>/<name>")
     ap.add_argument(
         "--public", action="store_true", help="create the repo public (default: private)"

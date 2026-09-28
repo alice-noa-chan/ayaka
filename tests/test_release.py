@@ -146,3 +146,61 @@ def test_bundle_code_makes_installable_copy(exported):
         os.path.join(dest, "ayaka", "eval", "data", "jevbench_public", "hard.jsonl")
     )
     assert not any("__pycache__" in r for r, _, _ in os.walk(dest))
+
+
+def test_checkpoint_publish_requires_pinned_base_revision_and_card(tmp_path, monkeypatch):
+    import json as _json
+
+    import torch
+
+    from ayaka.checkpoint import apply_lora, compact_checkpoint, resolve_checkpoint, save_checkpoint
+    from ayaka.config import MODEL_FAMILY, tiny_config
+    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.publish import is_checkpoint
+
+    assert all(c.backbone_revision for c in MODEL_FAMILY.values())
+    m = apply_lora(ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32))
+    save_checkpoint(m, str(tmp_path / "ck"), {"step": 1})
+    assert is_checkpoint(str(tmp_path / "ck"))
+    problems = check_export(str(tmp_path / "ck"))
+    assert any("backbone_revision" in p for p in problems)
+    assert any("README.md" in p for p in problems)
+
+    compact_checkpoint(str(tmp_path / "ck"), str(tmp_path / "rel"), backbone_revision="abc123")
+    cfg = _json.loads((tmp_path / "rel" / "electra_config.json").read_text())
+    assert cfg["backbone_revision"] == "abc123"
+    (tmp_path / "rel" / "README.md").write_text("---\nlicense: mit\n---\n# card\n")
+    assert check_export(str(tmp_path / "rel")) == []
+
+    # local folders are used as-is; anything else is a Hub repo at a revision
+    assert resolve_checkpoint(str(tmp_path / "rel")) == str(tmp_path / "rel")
+    calls = []
+    import huggingface_hub
+
+    monkeypatch.setattr(
+        huggingface_hub, "snapshot_download", lambda **kw: calls.append(kw) or "/cache/snap"
+    )
+    assert resolve_checkpoint("alice-noa-chan/ayaka-large", "v1") == "/cache/snap"
+    assert calls == [{"repo_id": "alice-noa-chan/ayaka-large", "revision": "v1"}]
+
+
+def test_tokenizer_for_config_uses_the_pinned_revision(monkeypatch):
+    import transformers
+
+    from ayaka.config import MODEL_FAMILY
+    from ayaka.tokenization import HFTokenizer
+
+    seen = {}
+
+    class Fake:
+        bos_token_id = 2
+        pad_token_id = 0
+
+    def fake(repo, revision=None):
+        seen.update(repo=repo, revision=revision)
+        return Fake()
+
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", fake)
+    cfg = MODEL_FAMILY["electra-large"]
+    HFTokenizer.for_config(cfg)
+    assert seen == {"repo": cfg.backbone, "revision": cfg.backbone_revision}

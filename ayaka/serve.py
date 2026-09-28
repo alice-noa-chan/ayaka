@@ -181,7 +181,10 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="TypeSafe-compatible Electra server")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--model", help="export folder (ayaka.export)")
-    src.add_argument("--ckpt", help="training checkpoint dir (adapter kept unmerged)")
+    src.add_argument(
+        "--ckpt", help="checkpoint dir or Hub repo <user>/<name> (adapter kept unmerged)"
+    )
+    ap.add_argument("--revision", default=None, help="Hub revision for --ckpt")
     ap.add_argument(
         "--reasoning",
         action="store_true",
@@ -223,13 +226,14 @@ def main(argv: list[str] | None = None) -> None:
     if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
         ap.error("--reasoning with --reasoner-adapter off needs --ckpt (exports are merged)")
     if args.ckpt:
-        from .checkpoint import load_checkpoint
+        from .checkpoint import load_checkpoint, resolve_checkpoint
         from .tokenization import HFTokenizer
 
+        args.ckpt = resolve_checkpoint(args.ckpt, args.revision)
         model = load_checkpoint(
             args.ckpt, device=args.device, dtype=getattr(torch, args.dtype), merge=False
         ).eval()
-        tok = HFTokenizer.from_pretrained(model.cfg.backbone)
+        tok = HFTokenizer.for_config(model.cfg)
         name = os.path.basename(os.path.normpath(os.path.dirname(os.path.abspath(args.ckpt))))
     else:
         model, tok = load_exported(

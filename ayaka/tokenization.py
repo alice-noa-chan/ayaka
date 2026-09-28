@@ -33,10 +33,15 @@ class HFTokenizer:
         self._single: dict[str, int] = {}
 
     @classmethod
-    def from_pretrained(cls, repo: str) -> HFTokenizer:
+    def from_pretrained(cls, repo: str, revision: str | None = None) -> HFTokenizer:
         from transformers import AutoTokenizer
 
-        return cls(AutoTokenizer.from_pretrained(repo), repo)
+        return cls(AutoTokenizer.from_pretrained(repo, revision=revision), repo)
+
+    @classmethod
+    def for_config(cls, cfg) -> HFTokenizer:
+        """The backbone's tokenizer at the config's pinned revision."""
+        return cls.from_pretrained(cfg.backbone, getattr(cfg, "backbone_revision", None))
 
     def encode(self, text: str) -> list[int]:
         return self.hf.encode(text, add_special_tokens=False)

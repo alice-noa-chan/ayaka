@@ -38,7 +38,13 @@ def tiny_text_config(vocab_size: int = 512):
     )
 
 
-def load_text_backbone(repo: str, dtype: torch.dtype = torch.bfloat16, device="cpu", seed: int = 0):
+def load_text_backbone(
+    repo: str,
+    dtype: torch.dtype = torch.bfloat16,
+    device="cpu",
+    seed: int = 0,
+    revision: str | None = None,
+):
     """Return (Gemma4TextModel, text_config).
 
     ``repo == "tiny"`` builds a random CPU test stack. A multimodal Gemma 4
@@ -52,7 +58,7 @@ def load_text_backbone(repo: str, dtype: torch.dtype = torch.bfloat16, device="c
         cfg = tiny_text_config()
         lm = Gemma4ForCausalLM(cfg).to(dtype)
     else:
-        any_cfg = AutoConfig.from_pretrained(repo)
+        any_cfg = AutoConfig.from_pretrained(repo, revision=revision)
         text_only = any_cfg.model_type == "gemma4_text"
         cfg = any_cfg if text_only else any_cfg.text_config
         kwargs = {} if text_only else {"key_mapping": TEXT_KEY_MAPPING}
@@ -63,6 +69,7 @@ def load_text_backbone(repo: str, dtype: torch.dtype = torch.bfloat16, device="c
             config=cfg,
             dtype=dtype,
             attn_implementation="sdpa",
+            revision=revision,
             device_map={"": dev.index or 0} if dev.type == "cuda" else None,
             **kwargs,
         )

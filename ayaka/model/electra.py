@@ -168,7 +168,9 @@ class ElectraDecisionModel(nn.Module):
     def from_config(
         cls, cfg: ElectraConfig, dtype: torch.dtype = torch.bfloat16, device="cpu"
     ) -> ElectraDecisionModel:
-        backbone, text_config = load_text_backbone(cfg.backbone, dtype=dtype, device=device)
+        backbone, text_config = load_text_backbone(
+            cfg.backbone, dtype=dtype, device=device, revision=cfg.backbone_revision
+        )
         model = cls(cfg, backbone, text_config)
         model.head.to(device)
         model.gate.data = model.gate.data.to(device)

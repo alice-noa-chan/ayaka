@@ -109,7 +109,7 @@ def cmd_eval(args) -> dict:
     else:
         model = load_checkpoint(args.ckpt, device=dev, dtype=dtype)
     model.requires_grad_(False)
-    tok = HFTokenizer.from_pretrained(model.cfg.backbone)
+    tok = HFTokenizer.for_config(model.cfg)
     tr = Trainer(model, tok, TrainConfig(steps=1), dev)
     decon = Decontaminator.from_jevbench()
     name = args.name or (

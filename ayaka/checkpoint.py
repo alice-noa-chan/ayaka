@@ -49,6 +49,19 @@ def save_checkpoint(model: ElectraDecisionModel, path: str, meta: dict | None = 
     return path
 
 
+def resolve_checkpoint(path_or_repo: str, revision: str | None = None) -> str:
+    """A local checkpoint dir, or ``<user>/<repo>`` downloaded from the Hub.
+
+    Only checkpoint files are fetched (config, head, adapter, metadata); the
+    base model comes from its own repo at the config's pinned revision.
+    """
+    if os.path.isdir(path_or_repo):
+        return path_or_repo
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(repo_id=path_or_repo, revision=revision)
+
+
 def load_config(path: str) -> ElectraConfig:
     with open(os.path.join(path, "electra_config.json")) as f:
         d = json.load(f)
@@ -78,7 +91,12 @@ def load_checkpoint(
     return model.to(device)
 
 
-def compact_checkpoint(src: str, dst: str, dtype: torch.dtype = torch.bfloat16) -> dict:
+def compact_checkpoint(
+    src: str,
+    dst: str,
+    dtype: torch.dtype = torch.bfloat16,
+    backbone_revision: str | None = None,
+) -> dict:
     """Copy a checkpoint with its LoRA tensors stored in ``dtype``.
 
     Training keeps adapter weights in fp32 (1.05 GB for large); general-purpose
@@ -102,6 +120,13 @@ def compact_checkpoint(src: str, dst: str, dtype: torch.dtype = torch.bfloat16) 
         k: v.to(dtype) if v.is_floating_point() else v for k, v in load_file(weights).items()
     }
     save_file(tensors, weights, metadata={"format": "pt"})
+    if backbone_revision:
+        cfg_path = os.path.join(dst, "electra_config.json")
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        cfg["backbone_revision"] = backbone_revision
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f, indent=2)
     meta_path = os.path.join(dst, "meta.json")
     with open(meta_path) as f:
         meta = json.load(f)
@@ -119,5 +144,8 @@ if __name__ == "__main__":
     c = sub.add_parser("compact", help="copy a checkpoint with a bf16 LoRA adapter")
     c.add_argument("src")
     c.add_argument("dst")
+    c.add_argument("--backbone-revision", default=None, help="pin the base model revision")
     args = ap.parse_args()
-    print(json.dumps(compact_checkpoint(args.src, args.dst)))
+    print(
+        json.dumps(compact_checkpoint(args.src, args.dst, backbone_revision=args.backbone_revision))
+    )

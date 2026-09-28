@@ -451,19 +451,17 @@ def main(argv: list[str] | None = None) -> dict:
             args.export, device=args.device, dtype=dtype, linear_mode=args.linear_mode
         )
     elif args.ckpt:
+        from ..checkpoint import resolve_checkpoint
+
         model = load_checkpoint(
-            args.ckpt, device=args.device, dtype=dtype, merge=not args.reasoning
+            resolve_checkpoint(args.ckpt), device=args.device, dtype=dtype, merge=not args.reasoning
         )
     else:
         model = ElectraDecisionModel.from_config(
             model_config(args.zero_shot), dtype=dtype, device=args.device
         )
     if tok is None:
-        tok = (
-            ToyTokenizer()
-            if model.cfg.backbone == "tiny"
-            else HFTokenizer.from_pretrained(model.cfg.backbone)
-        )
+        tok = ToyTokenizer() if model.cfg.backbone == "tiny" else HFTokenizer.for_config(model.cfg)
     return run_jevbench(
         model,
         tok,
