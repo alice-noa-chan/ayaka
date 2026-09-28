@@ -45,7 +45,7 @@ tiers only. It is not the leaderboard score (see
 
 | system | easy | original | hard | Intelligence proxy |
 |---|---|---|---|---|
-| **Ayaka large + worked-steps route** (served over HTTP) | 48/48 | 72/72 | **88/111** | **87.0** |
+| **Ayaka large + worked-steps route** (bundled server, self-hosted) | 48/48 | 72/72 | **88/111** | **87.0** |
 | Ayaka large, single pass | 48/48 | 72/72 | 72/111 | 77.9 |
 | Ayaka small (E2B), single pass | 48/48 | 66/72 | 51/111 | 61.4 |
 | Jev 1.13.0 (TypeSafe) | 48/48 | 71/72 | 81/111 | 82.3 |
@@ -60,7 +60,7 @@ tiers only. It is not the leaderboard score (see
   13 broken, exact McNemar p ≈ 2e-13).
 - **Ordinary decisions.** On Open-Jev test (300), 4% of questions are
   routed and accuracy goes from 273 to 274.
-- **Latency** (A100, one request at a time, through HTTP):
+- **Latency** (A100, one request at a time, measured through the bundled `/v1/systemone` server):
   - easy and original: p50 0.29 s;
   - routed hard questions: p50 about 10 s.
   - On H100 the single-pass p50 is 0.15 s.
@@ -68,6 +68,11 @@ tiers only. It is not the leaderboard score (see
   questions), on one H100.
 
 ## Quick start
+
+Ayaka is released as open weights and code, and there is no hosted API. You
+run the bundled server on your own GPU. It speaks the same
+`/v1/systemone` protocol JevBench uses to call decision models. "small" and
+"large" are model sizes (Gemma 4 E2B and 12B), not service tiers.
 
 ```bash
 pip install -e .
