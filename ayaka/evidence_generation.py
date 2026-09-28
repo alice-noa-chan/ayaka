@@ -54,7 +54,11 @@ class PlanGenerator:
         max_context: int = 12_288,
         stop_when=plan_complete,
         check_every: int = 4,
+        adapter: str = "off",
     ):
+        if adapter not in ("off", "on"):
+            raise ValueError("adapter must be 'off' (base model) or 'on' (decision LoRA)")
+        self.adapter = adapter
         self.model = model
         self.tok = tok
         self.max_new_tokens = max_new_tokens
@@ -71,8 +75,12 @@ class PlanGenerator:
         return self.generate([messages])[0]
 
     def _adapter_off(self):
+        """ "off": generate with the base model; "on": keep the decision LoRA
+        (identical to a merged export). A merged backbone has no switch."""
         disable = getattr(self.model.backbone, "disable_adapter", None)
-        return disable() if disable is not None else nullcontext()
+        if self.adapter == "on" or disable is None:
+            return nullcontext()
+        return disable()
 
     @torch.inference_mode()
     def generate(self, batch_messages) -> list[str]:

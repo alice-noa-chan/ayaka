@@ -351,6 +351,12 @@ def main(argv=None):
     c.add_argument("--max-new-tokens", type=int, default=768)
     c.add_argument("--variants", default="plans", help="comma list of: plans (ID plans), reasoning")
     c.add_argument("--reason-tokens", type=int, default=384)
+    c.add_argument(
+        "--reasoner-adapter",
+        default="off",
+        choices=["off", "on"],
+        help="worked steps from the base model (off) or with the decision LoRA (on)",
+    )
     c.add_argument("--out", required=True)
     s = sub.add_parser("select")
     s.add_argument("--dev", nargs="+", required=True)
@@ -385,7 +391,11 @@ def main(argv=None):
                 batch_size=args.batch_size,
                 log=lambda m: print(m, flush=True),
                 reasoner=PlanGenerator(
-                    model, tok, max_new_tokens=args.reason_tokens, stop_when=None
+                    model,
+                    tok,
+                    max_new_tokens=args.reason_tokens,
+                    stop_when=None,
+                    adapter=args.reasoner_adapter,
                 )
                 if "reasoning" in variants
                 else None,

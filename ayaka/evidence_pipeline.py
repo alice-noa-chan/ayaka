@@ -49,20 +49,28 @@ FROZEN_REASONING_POLICY = EvidencePolicy(
 
 
 def reasoning_decision(
-    model, tok, max_seq_len=None, policy=FROZEN_REASONING_POLICY, max_new_tokens=384
+    model,
+    tok,
+    max_seq_len=None,
+    policy=FROZEN_REASONING_POLICY,
+    max_new_tokens=384,
+    reasoner_adapter: str = "off",
 ):
     """Decision wrapped with the gated worked-steps route.
 
-    Needs the decision LoRA unmerged (``load_checkpoint(..., merge=False)``):
-    worked steps come from the base model with the adapter disabled, the
-    readout from the trained adapter.
+    ``reasoner_adapter="off"`` (the evaluated default) writes worked steps with
+    the base model and needs the decision LoRA unmerged
+    (``load_checkpoint(..., merge=False)``). ``"on"`` writes them with the
+    decision LoRA active, which also works on a merged export.
     """
     from .evidence_generation import PlanGenerator
     from .primitives import Decision
 
-    if not hasattr(model.backbone, "disable_adapter"):
+    if reasoner_adapter == "off" and not hasattr(model.backbone, "disable_adapter"):
         raise ValueError("reasoning route needs an unmerged adapter checkpoint (merge=False)")
-    reasoner = PlanGenerator(model, tok, max_new_tokens=max_new_tokens, stop_when=None)
+    reasoner = PlanGenerator(
+        model, tok, max_new_tokens=max_new_tokens, stop_when=None, adapter=reasoner_adapter
+    )
     return EvidenceDecision(Decision(model, tok, max_seq_len), reasoner, policy)
 
 

@@ -70,3 +70,27 @@ def test_generation_runs_with_the_adapter_disabled_and_rejects_overlong_context(
 def test_plan_complete_detects_a_parseable_id_plan():
     assert plan_complete('{"e":[0],"c":{}} trailing')
     assert not plan_complete('{"e":[0],"c":{')
+
+
+def test_adapter_on_keeps_the_decision_lora_active_and_allows_merged_models():
+    from ayaka.evidence_pipeline import reasoning_decision
+
+    model, tok = _model(), Tok()
+    entered = []
+
+    @contextmanager
+    def disable_adapter():
+        entered.append(True)
+        yield
+
+    object.__setattr__(model.backbone, "disable_adapter", disable_adapter)
+    PlanGenerator(model, tok, max_new_tokens=1, stop_when=None, adapter="on")(
+        [{"role": "user", "content": "x"}]
+    )
+    assert entered == []
+    with pytest.raises(ValueError):
+        PlanGenerator(model, tok, adapter="sometimes")
+    merged = _model()  # no disable_adapter: a merged export
+    assert reasoning_decision(merged, tok, reasoner_adapter="on").extractor.adapter == "on"
+    with pytest.raises(ValueError):
+        reasoning_decision(merged, tok)

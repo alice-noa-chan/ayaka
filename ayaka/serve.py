@@ -185,7 +185,14 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--reasoning",
         action="store_true",
-        help="gated worked-steps route for low-confidence calculation questions (needs --ckpt)",
+        help="gated worked-steps route for low-confidence calculation questions",
+    )
+    ap.add_argument(
+        "--reasoner-adapter",
+        default="off",
+        choices=["off", "on"],
+        help="off: worked steps from the base model (needs --ckpt); on: with the decision "
+        "LoRA, which also works on merged exports",
     )
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--host", default="0.0.0.0")
@@ -213,8 +220,8 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     if args.threads:
         torch.set_num_threads(args.threads)
-    if args.reasoning and not args.ckpt:
-        ap.error("--reasoning needs --ckpt: exports merge the adapter the route disables")
+    if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
+        ap.error("--reasoning with --reasoner-adapter off needs --ckpt (exports are merged)")
     if args.ckpt:
         from .checkpoint import load_checkpoint
         from .tokenization import HFTokenizer
@@ -235,7 +242,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.reasoning:
         from .evidence_pipeline import reasoning_decision
 
-        decision = reasoning_decision(model, tok, max_seq_len=args.max_seq_len or None)
+        decision = reasoning_decision(
+            model,
+            tok,
+            max_seq_len=args.max_seq_len or None,
+            reasoner_adapter=args.reasoner_adapter,
+        )
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
