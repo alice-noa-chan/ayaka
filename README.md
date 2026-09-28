@@ -60,10 +60,26 @@ tiers only. It is not the leaderboard score (see
   13 broken, exact McNemar p ≈ 2e-13).
 - **Ordinary decisions.** On Open-Jev test (300), 4% of questions are
   routed and accuracy goes from 273 to 274.
-- **Latency** (A100, one request at a time, measured through the bundled `/v1/systemone` server):
-  - easy and original: p50 0.29 s;
-  - routed hard questions: p50 about 10 s.
-  - On H100 the single-pass p50 is 0.15 s.
+- **Latency** (A100 SXM 80GB, one request at a time):
+
+  | tier | single pass p50 / p95 | with `--reasoning` p50 / p95 |
+  |---|---|---|
+  | easy | 0.18 / 0.19 s | 0.29 / 0.30 s |
+  | original | 0.18 / 0.18 s | 0.29 / 0.30 s |
+  | hard | 0.19 / 0.80 s | 9.9 / 31.4 s |
+
+  Single-pass numbers were measured in-process; `--reasoning` numbers went
+  through the HTTP server (+~0.1 s). On H100 the single-pass p50 is 0.15 s.
+- **Tokens per decision** (what `usage` reports):
+
+  | cohort | input | output |
+  |---|---|---|
+  | Open-Jev test | 348 | 10 |
+  | public original | 146 | 0 |
+  | public hard | 1,242 | 160 |
+
+  At the leaderboard's 12B reference price ($0.05 per million input
+  tokens) that is $0.007-0.062 per 1,000 decisions.
 - **Setup.** Large is Gemma 4 12B with LoRA r64, 860 steps (about 55K
   questions), on one H100.
 
@@ -75,7 +91,7 @@ run the bundled server on your own GPU. It speaks the same
 "large" are model sizes (Gemma 4 E2B and 12B), not service tiers.
 
 ```bash
-pip install -e .
+pip install -c constraints.txt -e .   # verified versions; see also the Dockerfile
 # single pass (merged export or checkpoint)
 python -m ayaka.serve --model <export-dir> --device cuda --port 8000
 # with the worked-steps route (checkpoint with the LoRA unmerged)
