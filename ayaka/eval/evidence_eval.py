@@ -328,7 +328,7 @@ def report(rows, policy) -> dict:
             "baseline": base,
             "policy": chosen,
             "gated": len(gated),
-            "valid_plans": sum(r.get("verified") and not r.get("recovered") for r in gated),
+            "valid_plans": sum(bool(r.get("verified") and not r.get("recovered")) for r in gated),
             "recovered_plans": sum(bool(r.get("recovered")) for r in gated),
             "families": {k: f"{b}->{p}/{n}" for k, (b, p, n) in sorted(fams.items())},
             "speed_axis_policy": speed_axis(chosen["latency_p50_s"], chosen["latency_p95_s"]),

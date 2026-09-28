@@ -141,3 +141,6 @@ def test_reasoning_variant_is_collected_scored_and_never_sees_gold():
     assert not available(rows, EvidencePolicy(readout="executed"))
     policy, _ = select(rows)
     assert policy.readout == "reasoned"
+    # reasoning-only rows carry no plan fields; the report must still count them
+    summary = report(rows, policy)["dev"]
+    assert summary["valid_plans"] == 0 and summary["policy"]["correct"] == 1
