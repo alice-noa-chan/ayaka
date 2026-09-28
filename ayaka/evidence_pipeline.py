@@ -12,7 +12,14 @@ from contextlib import nullcontext
 from dataclasses import replace
 from time import perf_counter
 
-from .evidence import EvidenceError, augmented_state, needs_calculation, needs_evidence
+from .evidence import (
+    EvidenceError,
+    augmented_state,
+    needs_calculation,
+    needs_evidence,
+    reasoned_state,
+    reasoning_messages,
+)
 from .evidence_ids import id_messages, parse_id_plan, recover_id_evidence, validate_id_plan
 from .evidence_policy import EvidencePolicy, fuse_probabilities
 
@@ -34,6 +41,31 @@ def gate_passes(policy: EvidencePolicy, request) -> bool:
     return needs_calculation(request) if policy.gate == "calculation" else needs_evidence(request)
 
 
+# Selected on the procedural dev set (500) and Open-Jev test (300) before public
+# or independent test scoring (runs/evidence-eval-20260928/frozen_policy.json).
+FROZEN_REASONING_POLICY = EvidencePolicy(
+    readout="reasoned", weight=1.0, baseline_cutoff=0.9, gate="calculation"
+)
+
+
+def reasoning_decision(
+    model, tok, max_seq_len=None, policy=FROZEN_REASONING_POLICY, max_new_tokens=384
+):
+    """Decision wrapped with the gated worked-steps route.
+
+    Needs the decision LoRA unmerged (``load_checkpoint(..., merge=False)``):
+    worked steps come from the base model with the adapter disabled, the
+    readout from the trained adapter.
+    """
+    from .evidence_generation import PlanGenerator
+    from .primitives import Decision
+
+    if not hasattr(model.backbone, "disable_adapter"):
+        raise ValueError("reasoning route needs an unmerged adapter checkpoint (merge=False)")
+    reasoner = PlanGenerator(model, tok, max_new_tokens=max_new_tokens, stop_when=None)
+    return EvidenceDecision(Decision(model, tok, max_seq_len), reasoner, policy)
+
+
 class EvidenceDecision:
     def __init__(
         self,
@@ -52,6 +84,35 @@ class EvidenceDecision:
         self.readout_context = readout_context
         self.native = native
 
+    # serve.DecisionService reads these for token accounting
+    @property
+    def tok(self):
+        return self.original.tok
+
+    @property
+    def max_seq_len(self):
+        return self.original.max_seq_len
+
+    def _reasoned(self, state, spec, request, extra, device):
+        """Worked steps from the extractor, then the normal readout on them."""
+        tic = perf_counter()
+        try:
+            notes = self.extractor(reasoning_messages(request))
+        except (EvidenceError, ValueError) as exc:
+            extra["error"] = f"{type(exc).__name__}: {str(exc)[:250]}"
+            return None
+        finally:
+            extra["extraction_s"] = perf_counter() - tic
+        if not str(notes).strip():
+            extra["error"] = "empty worked steps"
+            return None
+        extra["worked_steps"] = str(notes)[:4000]
+        tic = perf_counter()
+        with self.readout_context():
+            probs = self.original.decide(reasoned_state(state, notes), [spec], device=device)
+        extra["readout_s"] = perf_counter() - tic
+        return probs[0].probs
+
     def decide(self, state, questions, device=None):
         with self.readout_context():
             baselines = self.original.decide(state, questions, device=device)
@@ -65,6 +126,15 @@ class EvidenceDecision:
             verified = None
             computed = None
             if (
+                self.policy.readout != "baseline"
+                and max(baseline.probs) <= self.policy.baseline_cutoff
+                and gate_passes(self.policy, request)
+                and self.policy.readout == "reasoned"
+            ):
+                probabilities = self._reasoned(state, spec, request, extra, device)
+                if probabilities is not None:
+                    auxiliary = dict(zip(labels, probabilities, strict=True))
+            elif (
                 self.policy.readout != "baseline"
                 and max(baseline.probs) <= self.policy.baseline_cutoff
                 and gate_passes(self.policy, request)
@@ -109,7 +179,7 @@ class EvidenceDecision:
                 auxiliary,
                 self.policy,
                 computed_label=computed,
-                usable=verified is not None,
+                usable=verified is not None or auxiliary is not baseline_p,
             )
             p = [probabilities[lb] for lb in labels]
             extras = dict(baseline.extras, evidence=extra)

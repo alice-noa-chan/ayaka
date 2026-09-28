@@ -98,3 +98,61 @@ def test_calculation_gate_skips_non_quantitative_questions():
     assert out.probs == [0.6, 0.4] and out.extras["evidence"]["route"] == "baseline"
     with pytest.raises(ValueError):
         EvidencePolicy(gate="everything")
+
+
+class Reading(Original):
+    """Baseline 0.6/0.4; with worked steps in the state 0.1/0.9."""
+
+    def decide(self, state, questions, device=None):
+        self.calls.append(state)
+        p = [0.1, 0.9] if "<worked_steps>" in str(state) else list(self.p)
+        return [
+            DecisionResult(q.type, p, dict(zip(q.candidates, p, strict=True))) for q in questions
+        ]
+
+
+QUANT = QuestionSpec("noul", "Is the total within the 225 budget?", ["over", "within"])
+SOURCE = "Subtotal 240.00, discount 15 percent, tax 8 percent after discount."
+
+
+def test_reasoned_route_reads_worked_steps_and_records_them():
+    from ayaka.evidence_pipeline import FROZEN_REASONING_POLICY
+
+    base = Reading([0.6, 0.4])
+    seen = []
+
+    def reasoner(messages):
+        seen.append(messages)
+        return "discounted 204.00; taxed 220.32 <= 225"
+
+    out = EvidenceDecision(base, reasoner, FROZEN_REASONING_POLICY).decide(SOURCE, [QUANT])[0]
+    assert out.probs == [0.1, 0.9] and out.extras["evidence"]["route"] == "reasoned"
+    assert "220.32" in out.extras["evidence"]["worked_steps"]
+    assert len(seen) == 1 and "within" in str(seen[0])  # option text, not gold
+    assert "<worked_steps>" in base.calls[-1]
+
+
+def test_reasoned_route_skips_confident_or_empty_cases():
+    from ayaka.evidence_pipeline import FROZEN_REASONING_POLICY
+
+    def forbidden(_):
+        raise AssertionError("confident baselines must not generate")
+
+    confident = EvidenceDecision(Reading([0.95, 0.05]), forbidden, FROZEN_REASONING_POLICY)
+    assert confident.decide(SOURCE, [QUANT])[0].probs == [0.95, 0.05]
+    empty = EvidenceDecision(Reading([0.6, 0.4]), lambda _: "  ", FROZEN_REASONING_POLICY)
+    out = empty.decide(SOURCE, [QUANT])[0]
+    assert out.probs == [0.6, 0.4] and out.extras["evidence"]["route"] == "baseline"
+
+
+def test_reasoning_decision_requires_an_unmerged_adapter():
+    import torch
+
+    from ayaka.config import tiny_config
+    from ayaka.evidence_pipeline import reasoning_decision
+    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.tokenization import ToyTokenizer
+
+    merged = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    with pytest.raises(ValueError):
+        reasoning_decision(merged, ToyTokenizer())
