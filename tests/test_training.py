@@ -428,3 +428,30 @@ def test_oom_backoff_enables_selective_checkpointing_before_shrinking_batches(mo
     monkeypatch.setattr(tr, "_train_step", fake_step)
     assert tr.train_step([]) == {"ok": True}
     assert calls == [(None, 8192, 8192), (1024, 8192, 8192), (1024, 8192, 4096)]
+
+
+def test_compact_checkpoint_halves_adapter_with_small_output_drift(tmp_path):
+    from ayaka.checkpoint import compact_checkpoint
+
+    torch.manual_seed(3)
+    m = _model()
+    with torch.no_grad():
+        for name, p in m.backbone.named_parameters():
+            if "lora_" in name:
+                p.normal_(0, 0.05)  # LoRA B starts at zero: make the adapter matter
+    save_checkpoint(m, str(tmp_path / "full"), {"step": 1})
+    sizes = compact_checkpoint(str(tmp_path / "full"), str(tmp_path / "bf16"))
+    assert sizes["adapter_bytes_after"] < 0.55 * sizes["adapter_bytes_before"]
+    assert json.loads((tmp_path / "bf16" / "meta.json").read_text())["adapter_dtype"] == "bfloat16"
+    q = [QuestionSpec("noul", "Is it late?", ["no", "yes"])]
+    state = {"order": 7, "status": "shipped on day 3"}
+    out = {}
+    for name in ("full", "bf16"):
+        loaded = load_checkpoint(str(tmp_path / name), dtype=torch.bfloat16)
+        out[name] = Decision(loaded, TOK).decide(state, q)[0].probs
+    # an approximation: PEFT computes adapters in fp32, so rounding them moves
+    # outputs slightly (LoRA weights here are far larger than trained ones)
+    assert out["full"] != out["bf16"]
+    assert max(abs(a - b) for a, b in zip(out["full"], out["bf16"], strict=True)) < 0.01
+    with pytest.raises(ValueError):
+        compact_checkpoint(str(tmp_path / "full"), str(tmp_path / "full"))

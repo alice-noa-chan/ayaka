@@ -76,3 +76,48 @@ def load_checkpoint(
             model.backbone = model.backbone.merge_and_unload()
     model.load_head_state_dict(torch.load(os.path.join(path, "head.pt"), map_location=device))
     return model.to(device)
+
+
+def compact_checkpoint(src: str, dst: str, dtype: torch.dtype = torch.bfloat16) -> dict:
+    """Copy a checkpoint with its LoRA tensors stored in ``dtype``.
+
+    Training keeps adapter weights in fp32 (1.05 GB for large); general-purpose
+    compression saves only 7-10% of them. A bf16 copy halves the size but is an
+    approximation, not a lossless copy: PEFT keeps adapter weights in fp32 even
+    on a bf16 backbone, so rounding them changes merged weights slightly (on
+    the tiny test model, decision probabilities moved by ~0.003). Check parity
+    on a real checkpoint before serving a compacted copy. The head, config and
+    metadata are copied unchanged; meta.json records the dtype.
+    """
+    import shutil
+
+    from safetensors.torch import load_file, save_file
+
+    if os.path.abspath(src) == os.path.abspath(dst):
+        raise ValueError("compact into a new directory")
+    shutil.copytree(src, dst)
+    weights = os.path.join(dst, "adapter", "adapter_model.safetensors")
+    before = os.path.getsize(weights)
+    tensors = {
+        k: v.to(dtype) if v.is_floating_point() else v for k, v in load_file(weights).items()
+    }
+    save_file(tensors, weights, metadata={"format": "pt"})
+    meta_path = os.path.join(dst, "meta.json")
+    with open(meta_path) as f:
+        meta = json.load(f)
+    meta["adapter_dtype"] = str(dtype).removeprefix("torch.")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2, default=str)
+    return {"adapter_bytes_before": before, "adapter_bytes_after": os.path.getsize(weights)}
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description="checkpoint utilities")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("compact", help="copy a checkpoint with a bf16 LoRA adapter")
+    c.add_argument("src")
+    c.add_argument("dst")
+    args = ap.parse_args()
+    print(json.dumps(compact_checkpoint(args.src, args.dst)))
