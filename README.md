@@ -47,10 +47,10 @@ tiers only. It is not the leaderboard score (see
 
 | system | easy | original | hard | Intelligence proxy |
 |---|---|---|---|---|
-| **Ayaka large + worked-steps route** (bundled server, self-hosted) | 48/48 | 72/72 | **88/111** | **87.0** |
-| Ayaka large, single pass | 48/48 | 72/72 | 72/111 | 77.9 |
-| Ayaka base (E4B), single pass | 48/48 | 68/72 | 61/111 | 68.6 |
-| Ayaka small (E2B), single pass | 48/48 | 65/72 | 55/111 | 62.8 |
+| **[Ayaka large](https://huggingface.co/alice-noa-chan/ayaka-large) + worked-steps route** (bundled server, self-hosted) | 48/48 | 72/72 | **88/111** | **87.0** |
+| [Ayaka large](https://huggingface.co/alice-noa-chan/ayaka-large), single pass | 48/48 | 72/72 | 72/111 | 77.9 |
+| [Ayaka base](https://huggingface.co/alice-noa-chan/ayaka-base) (E4B), single pass | 48/48 | 68/72 | 61/111 | 68.6 |
+| [Ayaka small](https://huggingface.co/alice-noa-chan/ayaka-small) (E2B), single pass | 48/48 | 65/72 | 55/111 | 62.8 |
 | Jev 1.13.0 (TypeSafe) | 48/48 | 71/72 | 81/111 | 82.3 |
 | Winnow-12B Q8 | 48/48 | 69/72 | 81/111 | 80.7 |
 | SemIf / OpenJev (Qwen3.5-4B) | 48/48 | 71/72 | 68/111 | 74.9 |
@@ -184,11 +184,23 @@ runs.
 
 ## Model family
 
-| size  | backbone                | bf16 export | int8 export | train GPU         |
-| ----- | ----------------------- | ----------- | ----------- | ----------------- |
-| small | `google/gemma-4-E2B-it` | ~9.3 GB     | 4.6 GB      | A100-80GB (≥24GB) |
-| base  | `google/gemma-4-E4B-it` | ~15 GB      | ~8 GB       | A100-80GB (≥32GB) |
-| large | `google/gemma-4-12B-it` | ~24 GB      | ~12 GB      | H100 / A100-80GB  |
+| size | weights | backbone | for | released as |
+|---|---|---|---|---|
+| small | [alice-noa-chan/ayaka-small](https://huggingface.co/alice-noa-chan/ayaka-small) | `google/gemma-4-E2B-it` | lowest latency, memory and cost | single pass |
+| base | [alice-noa-chan/ayaka-base](https://huggingface.co/alice-noa-chan/ayaka-base) | `google/gemma-4-E4B-it` | a middle ground | single pass |
+| large | [alice-noa-chan/ayaka-large](https://huggingface.co/alice-noa-chan/ayaka-large) | `google/gemma-4-12B-it` | accuracy, especially the hard tier | single pass, or `--reasoning` |
+
+Each repository holds the LoRA adapter (bf16), `head.safetensors` and the
+config. The base model is fetched at a pinned revision. Merged bf16/int8
+exports can still be produced with `ayaka.pipeline export` (the size
+estimates are below), but the worked-steps route needs the unmerged
+checkpoint.
+
+| size | bf16 export | int8 export | train GPU |
+|---|---|---|---|
+| small | ~9.3 GB | 4.6 GB | A100-80GB (≥24GB) |
+| base | ~15 GB | ~8 GB | A100-80GB (≥32GB) |
+| large | ~24 GB | ~12 GB | H100 / A100-80GB |
 
 ## Architecture
 
