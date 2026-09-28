@@ -2,9 +2,12 @@
 
 A checkpoint directory holds only what training changed:
 
-    electra_config.json   ElectraConfig (backbone repo, head sizes, ...)
+    ayaka_config.json     model config (backbone repo + pinned revision, head sizes, ...)
+    electra_config.json   the same config under its legacy name ("Electra" was the
+                          project's pre-Gemma model name); kept for older loaders
     adapter/              PEFT LoRA adapter for the Gemma 4 text stack
-    head.pt               pointer head + gate + per-primitive temperatures
+    head.safetensors      pointer head + gate + per-primitive temperatures
+    head.pt               the same tensors as a legacy torch pickle (training only)
     meta.json             run metadata (steps, metrics, teacher lineage)
 
 Loading merges the adapter into the backbone for plain-speed inference.
@@ -37,13 +40,53 @@ def apply_lora(model: ElectraDecisionModel) -> ElectraDecisionModel:
     return model
 
 
+CONFIG_FILES = ("ayaka_config.json", "electra_config.json")  # preferred first
+
+
+def config_path(path: str) -> str:
+    for name in CONFIG_FILES:
+        if os.path.exists(os.path.join(path, name)):
+            return os.path.join(path, name)
+    raise FileNotFoundError(f"no {' or '.join(CONFIG_FILES)} in {path}")
+
+
+def write_config(cfg_dict: dict, path: str) -> None:
+    for name in CONFIG_FILES:
+        with open(os.path.join(path, name), "w") as f:
+            json.dump(cfg_dict, f, indent=2)
+
+
+def save_head(head_sd: dict, path: str, pickle: bool = True) -> None:
+    """head.safetensors (flat: head.<name>, gate, temperature) and, for older
+    loaders, the same nested dict as head.pt."""
+    from safetensors.torch import save_file
+
+    flat = {f"head.{k}": v.detach().cpu().contiguous() for k, v in head_sd["head"].items()}
+    flat["gate"] = head_sd["gate"].detach().cpu().contiguous()
+    flat["temperature"] = head_sd["temperature"].detach().cpu().contiguous()
+    save_file(flat, os.path.join(path, "head.safetensors"), metadata={"format": "pt"})
+    if pickle:
+        torch.save(head_sd, os.path.join(path, "head.pt"))
+
+
+def load_head(path: str, device="cpu") -> dict:
+    """Prefer head.safetensors; fall back to the legacy head.pt pickle."""
+    st = os.path.join(path, "head.safetensors")
+    if os.path.exists(st):
+        from safetensors.torch import load_file
+
+        flat = load_file(st, device=str(device))
+        head = {k[len("head.") :]: v for k, v in flat.items() if k.startswith("head.")}
+        return {"head": head, "gate": flat["gate"], "temperature": flat["temperature"]}
+    return torch.load(os.path.join(path, "head.pt"), map_location=device, weights_only=True)
+
+
 def save_checkpoint(model: ElectraDecisionModel, path: str, meta: dict | None = None) -> str:
     os.makedirs(path, exist_ok=True)
-    with open(os.path.join(path, "electra_config.json"), "w") as f:
-        json.dump(asdict(model.cfg), f, indent=2)
+    write_config(asdict(model.cfg), path)
     if hasattr(model.backbone, "save_pretrained") and hasattr(model.backbone, "peft_config"):
         model.backbone.save_pretrained(os.path.join(path, "adapter"))
-    torch.save(model.head_state_dict(), os.path.join(path, "head.pt"))
+    save_head(model.head_state_dict(), path)
     with open(os.path.join(path, "meta.json"), "w") as f:
         json.dump(meta or {}, f, indent=2, default=str)
     return path
@@ -63,7 +106,7 @@ def resolve_checkpoint(path_or_repo: str, revision: str | None = None) -> str:
 
 
 def load_config(path: str) -> ElectraConfig:
-    with open(os.path.join(path, "electra_config.json")) as f:
+    with open(config_path(path)) as f:
         d = json.load(f)
     d["lora_targets"] = tuple(d.get("lora_targets", ()))
     return ElectraConfig(**d)
@@ -87,7 +130,7 @@ def load_checkpoint(
         model.backbone = PeftModel.from_pretrained(model.backbone, adapter, is_trainable=trainable)
         if merge and not trainable:
             model.backbone = model.backbone.merge_and_unload()
-    model.load_head_state_dict(torch.load(os.path.join(path, "head.pt"), map_location=device))
+    model.load_head_state_dict(load_head(path, device))
     return model.to(device)
 
 
@@ -120,13 +163,17 @@ def compact_checkpoint(
         k: v.to(dtype) if v.is_floating_point() else v for k, v in load_file(weights).items()
     }
     save_file(tensors, weights, metadata={"format": "pt"})
+    with open(config_path(dst)) as f:
+        cfg = json.load(f)
     if backbone_revision:
-        cfg_path = os.path.join(dst, "electra_config.json")
-        with open(cfg_path) as f:
-            cfg = json.load(f)
         cfg["backbone_revision"] = backbone_revision
-        with open(cfg_path, "w") as f:
-            json.dump(cfg, f, indent=2)
+    write_config(cfg, dst)  # both names, identical content
+    # release copies carry the head as safetensors only (no pickle to load)
+    head_sd = load_head(dst)
+    save_head(head_sd, dst, pickle=False)
+    legacy = os.path.join(dst, "head.pt")
+    if os.path.exists(legacy):
+        os.remove(legacy)
     meta_path = os.path.join(dst, "meta.json")
     with open(meta_path) as f:
         meta = json.load(f)

@@ -32,8 +32,9 @@ REQUIRED = (
 # checkpoint layout: LoRA kept unmerged (needed by the worked-steps route); the
 # base model is fetched from its own repo at the pinned revision
 REQUIRED_CKPT = (
+    "ayaka_config.json",
     "electra_config.json",
-    "head.pt",
+    "head.safetensors",
     "meta.json",
     "adapter/adapter_config.json",
     "adapter/adapter_model.safetensors",
@@ -61,11 +62,15 @@ def check_export(export_dir: str) -> list[str]:
     required = REQUIRED_CKPT if is_checkpoint(export_dir) else REQUIRED
     problems = [f"missing {r}" for r in required if not os.path.exists(os.path.join(export_dir, r))]
     if is_checkpoint(export_dir):
-        cfg_path = os.path.join(export_dir, "electra_config.json")
+        if os.path.exists(os.path.join(export_dir, "head.pt")):
+            problems.append(
+                "head.pt pickle present: release checkpoints ship head.safetensors only"
+            )
+        cfg_path = os.path.join(export_dir, "ayaka_config.json")
         if os.path.exists(cfg_path):
             with open(cfg_path) as f:
                 if not json.load(f).get("backbone_revision"):
-                    problems.append("electra_config.json has no pinned backbone_revision")
+                    problems.append("ayaka_config.json has no pinned backbone_revision")
     card = os.path.join(export_dir, "README.md")
     if not os.path.exists(card):
         problems.append("missing README.md model card (python -m ayaka.modelcard --export ...)")

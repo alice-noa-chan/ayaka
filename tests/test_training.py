@@ -455,3 +455,38 @@ def test_compact_checkpoint_halves_adapter_with_small_output_drift(tmp_path):
     assert max(abs(a - b) for a, b in zip(out["full"], out["bf16"], strict=True)) < 0.01
     with pytest.raises(ValueError):
         compact_checkpoint(str(tmp_path / "full"), str(tmp_path / "full"))
+
+
+def test_head_safetensors_and_config_alias_roundtrip_with_legacy_fallback(tmp_path):
+    import os
+
+    from ayaka.checkpoint import compact_checkpoint, load_head
+
+    torch.manual_seed(5)
+    m = _model()
+    with torch.no_grad():
+        m.gate.fill_(0.3)
+        m.temperature.fill_(1.7)
+    save_checkpoint(m, str(tmp_path / "ck"), {"step": 1})
+    for name in ("ayaka_config.json", "electra_config.json", "head.safetensors", "head.pt"):
+        assert (tmp_path / "ck" / name).exists()
+    a = load_head(str(tmp_path / "ck"))
+    b = torch.load(tmp_path / "ck" / "head.pt", weights_only=True)
+    assert torch.equal(a["gate"], b["gate"]) and torch.equal(a["temperature"], b["temperature"])
+    assert all(torch.equal(a["head"][k], v) for k, v in b["head"].items())
+
+    # a pre-safetensors checkpoint (legacy names only) still loads
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    for name in ("electra_config.json", "head.pt", "meta.json"):
+        (legacy / name).write_bytes((tmp_path / "ck" / name).read_bytes())
+    os.rename(tmp_path / "ck" / "adapter", legacy / "adapter")
+    loaded = load_checkpoint(str(legacy), dtype=torch.float32)
+    assert torch.allclose(loaded.temperature, torch.full_like(loaded.temperature, 1.7))
+
+    compact_checkpoint(str(legacy), str(tmp_path / "rel"))
+    assert not (tmp_path / "rel" / "head.pt").exists()
+    assert (tmp_path / "rel" / "head.safetensors").exists()
+    assert (tmp_path / "rel" / "ayaka_config.json").exists()
+    rel = load_checkpoint(str(tmp_path / "rel"), dtype=torch.float32)
+    assert torch.allclose(rel.gate, torch.full_like(rel.gate, 0.3))
