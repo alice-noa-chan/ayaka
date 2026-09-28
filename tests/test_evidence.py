@@ -148,3 +148,40 @@ def test_calculation_gate_needs_a_quantitative_question_and_source_operands():
     policy = "Clause 1: an exception applies unless overridden. " * 60
     prose = req(policy, "Which clause governs?", {})
     assert needs_evidence(prose) and not needs_calculation(prose)
+
+
+def test_calculation_gate_ignores_rubric_level_numbers():
+    from ayaka.evidence import needs_calculation
+
+    state = "Order 4411 shipped 2026-03-02 with 3 parcels; the reply apologised twice."
+    rubric = ["0: not helpful at all", "1: slightly helpful", "2: partly", "3: mostly", "4: fully"]
+    judge = {
+        "state": state,
+        "question": {
+            "type": "score",
+            "instructions": "How helpful is the reply?",
+            "criteria": rubric,
+        },
+        "labels": ["0", "1", "2", "3", "4"],
+    }
+    assert not needs_calculation(judge)
+    # enumerated choice labels are not quantities either
+    enumerated = {
+        "state": state,
+        "question": {
+            "type": "choice",
+            "instructions": "Which tone fits?",
+            "criteria": {"a": "1) formal", "b": "2) casual"},
+        },
+        "labels": ["a", "b"],
+    }
+    assert not needs_calculation(enumerated)
+    # but a real quantity in an option or the instruction still passes
+    quantity = dict(
+        enumerated, question=dict(enumerated["question"], criteria={"a": "Over 200 kg"})
+    )
+    assert needs_calculation(quantity)
+    asked = dict(
+        judge, question=dict(judge["question"], instructions="Were all 3 parcels on time?")
+    )
+    assert needs_calculation(asked)

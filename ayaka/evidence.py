@@ -98,6 +98,9 @@ QUANTITATIVE = re.compile(
 )
 
 
+LEVEL_MARKER = re.compile(r"^\s*[(\[]?\d{1,2}\s*[)\].:\-]\s*")
+
+
 def needs_calculation(record):
     """Narrow gate: the question asks about a quantity and the source has operands.
 
@@ -110,7 +113,13 @@ def needs_calculation(record):
     question = r["question"]
     criteria = question.get("criteria") or {}
     options = criteria.values() if isinstance(criteria, dict) else criteria
-    asked = " ".join([str(question.get("instructions", ""))] + [str(o) for o in options])
+    # Enumeration markers ("0: not helpful", "(2) partly") are labels, not
+    # quantities, and a rating scale's level numbers never are: judge rubrics
+    # (HelpSteer2-style 0-4 scores) otherwise passed the gate 71% of the time.
+    options = [LEVEL_MARKER.sub("", str(o)) for o in options]
+    if question.get("type") == "score":
+        options = [re.sub(r"\d", " ", o) for o in options]
+    asked = " ".join([str(question.get("instructions", ""))] + options)
     operands = len(re.findall(r"\d+(?:[.,]\d+)?", source_text(r["state"])))
     return operands >= 3 and bool(QUANTITATIVE.search(asked))
 
