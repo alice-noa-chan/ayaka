@@ -105,10 +105,14 @@ class DecisionService:
             n: answer(spec, labels, r.probs)
             for n, (spec, labels), r in zip(names, parsed, results, strict=True)
         }
+        generated = [(r.extras.get("evidence") or {}).get("worked_steps", "") for r in results]
         return {
             "model": body.get("model") or self.model_name,
             "answers": answers,
-            "usage": {"input_tokens": self._count_tokens(state, parsed), "output_tokens": 0},
+            "usage": {
+                "input_tokens": self._count_tokens(state, parsed),
+                "output_tokens": sum(len(self.decision.tok.encode(g)) for g in generated if g),
+            },
         }
 
     def _count_tokens(self, state, parsed) -> int:
@@ -175,7 +179,14 @@ def main(argv: list[str] | None = None) -> None:
     from .export import load_exported
 
     ap = argparse.ArgumentParser(description="TypeSafe-compatible Electra server")
-    ap.add_argument("--model", required=True, help="export folder (ayaka.export)")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--model", help="export folder (ayaka.export)")
+    src.add_argument("--ckpt", help="training checkpoint dir (adapter kept unmerged)")
+    ap.add_argument(
+        "--reasoning",
+        action="store_true",
+        help="gated worked-steps route for low-confidence calculation questions (needs --ckpt)",
+    )
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
@@ -202,14 +213,31 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     if args.threads:
         torch.set_num_threads(args.threads)
-    model, tok = load_exported(
-        args.model,
-        device=args.device,
-        dtype=getattr(torch, args.dtype),
-        linear_mode=args.linear_mode,
-    )
-    name = os.path.basename(os.path.normpath(args.model))
-    decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
+    if args.reasoning and not args.ckpt:
+        ap.error("--reasoning needs --ckpt: exports merge the adapter the route disables")
+    if args.ckpt:
+        from .checkpoint import load_checkpoint
+        from .tokenization import HFTokenizer
+
+        model = load_checkpoint(
+            args.ckpt, device=args.device, dtype=getattr(torch, args.dtype), merge=False
+        ).eval()
+        tok = HFTokenizer.from_pretrained(model.cfg.backbone)
+        name = os.path.basename(os.path.normpath(os.path.dirname(os.path.abspath(args.ckpt))))
+    else:
+        model, tok = load_exported(
+            args.model,
+            device=args.device,
+            dtype=getattr(torch, args.dtype),
+            linear_mode=args.linear_mode,
+        )
+        name = os.path.basename(os.path.normpath(args.model))
+    if args.reasoning:
+        from .evidence_pipeline import reasoning_decision
+
+        decision = reasoning_decision(model, tok, max_seq_len=args.max_seq_len or None)
+    else:
+        decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
     httpd = serve(decision, name, args.host, args.port)
     print(

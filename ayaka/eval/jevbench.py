@@ -288,6 +288,60 @@ def compare_references(tiers: dict[str, dict]) -> dict:
     return out
 
 
+class EndpointDecision:
+    """Decision-compatible client for a running ``/v1/systemone`` server.
+
+    Lets ``evaluate`` score the real serving path, latency included (HTTP and
+    JSON). Options are sent as positional labels; probabilities come back in
+    candidate order.
+    """
+
+    def __init__(self, url: str, timeout: float = 300.0):
+        self.url = url.rstrip("/")
+        if not self.url.endswith("/v1/systemone"):
+            self.url += "/v1/systemone"
+        self.timeout = timeout
+
+    def _question(self, spec):
+        if spec.type == "noul":
+            crit = {"false": spec.candidates[0], "true": spec.candidates[1]}
+        elif spec.type == "score":
+            crit = {str(o): c for o, c in zip(spec.ordinals, spec.candidates, strict=True)}
+        else:
+            crit = {str(i): c for i, c in enumerate(spec.candidates)}
+        return {"type": spec.type, "instructions": spec.instruction, "criteria": crit}
+
+    def decide(self, state, questions, device=None):
+        import urllib.request
+
+        from ..primitives import DecisionResult
+
+        body = {
+            "state": state,
+            "questions": {f"q{i}": self._question(q) for i, q in enumerate(questions)},
+        }
+        req = urllib.request.Request(
+            self.url,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            out = json.loads(resp.read())
+        results = []
+        for i, spec in enumerate(questions):
+            ans = out["answers"][f"q{i}"]
+            if spec.type == "noul":
+                probs = [1 - ans["noul"], ans["noul"]]
+            elif spec.type == "score":
+                probs = [ans["probabilities"][str(o)] for o in spec.ordinals]
+            else:
+                probs = [ans["probabilities"][str(j)] for j in range(len(spec.candidates))]
+            results.append(
+                DecisionResult(spec.type, probs, dict(zip(spec.candidates, probs, strict=True)))
+            )
+        return results
+
+
 def run_jevbench(
     model,
     tok,
@@ -297,9 +351,11 @@ def run_jevbench(
     data: str | None = None,
     verbose: bool = True,
     max_seq_len: int | None = None,
+    decision=None,
 ) -> dict:
-    decision = Decision(model, tok, max_seq_len=max_seq_len)
-    dev = next(model.parameters()).device
+    """``decision`` overrides the plain Decision (evidence route, HTTP endpoint)."""
+    decision = decision or Decision(model, tok, max_seq_len=max_seq_len)
+    dev = next(model.parameters()).device if model is not None else None
     report: dict = {"tiers": {}}
     for tier in tiers:
         path = os.path.join(data or data_dir(), f"{tier}.jsonl")
@@ -353,6 +409,7 @@ def main(argv: list[str] | None = None) -> dict:
 
     from ..checkpoint import load_checkpoint
     from ..config import model_config
+    from ..evidence_pipeline import reasoning_decision
     from ..model.electra import ElectraDecisionModel
     from ..tokenization import HFTokenizer, ToyTokenizer
 
@@ -361,6 +418,10 @@ def main(argv: list[str] | None = None) -> dict:
     g.add_argument("--ckpt", help="checkpoint directory")
     g.add_argument("--zero-shot", help="model size to evaluate untrained (e.g. electra-small)")
     g.add_argument("--export", help="export folder (ayaka.export), bf16 or int8")
+    g.add_argument("--endpoint", help="URL of a running ayaka.serve (scores the HTTP path)")
+    ap.add_argument(
+        "--reasoning", action="store_true", help="gated worked-steps route (with --ckpt)"
+    )
     ap.add_argument("--tiers", default=",".join(TIERS))
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -373,6 +434,15 @@ def main(argv: list[str] | None = None) -> dict:
         dtype = getattr(torch, args.dtype)
     else:
         dtype = torch.bfloat16 if args.device.startswith("cuda") else torch.float32
+    if args.endpoint:
+        return run_jevbench(
+            None,
+            None,
+            out_path=args.out,
+            tiers=[t for t in args.tiers.split(",") if t],
+            limit=args.limit,
+            decision=EndpointDecision(args.endpoint),
+        )
     tok = None
     if args.export:
         from ..export import load_exported
@@ -381,7 +451,9 @@ def main(argv: list[str] | None = None) -> dict:
             args.export, device=args.device, dtype=dtype, linear_mode=args.linear_mode
         )
     elif args.ckpt:
-        model = load_checkpoint(args.ckpt, device=args.device, dtype=dtype)
+        model = load_checkpoint(
+            args.ckpt, device=args.device, dtype=dtype, merge=not args.reasoning
+        )
     else:
         model = ElectraDecisionModel.from_config(
             model_config(args.zero_shot), dtype=dtype, device=args.device
@@ -399,6 +471,9 @@ def main(argv: list[str] | None = None) -> dict:
         tiers=[t for t in args.tiers.split(",") if t],
         limit=args.limit,
         max_seq_len=args.max_seq_len or None,
+        decision=reasoning_decision(model, tok, args.max_seq_len or None)
+        if args.reasoning
+        else None,
     )
 
 

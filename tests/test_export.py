@@ -179,3 +179,36 @@ def test_http_server_roundtrip(model):
             assert json.loads(r.read())["status"] == "ok"
     finally:
         httpd.shutdown()
+
+
+def test_endpoint_client_scores_the_http_path_like_the_direct_decision(model):
+    from ayaka.eval.jevbench import EndpointDecision
+
+    direct = Decision(model, TOK)
+    httpd = serve(direct, "electra-tiny", host="127.0.0.1", port=0)
+    th = threading.Thread(target=httpd.serve_forever, daemon=True)
+    th.start()
+    try:
+        client = EndpointDecision(f"http://127.0.0.1:{httpd.server_address[1]}")
+        got = client.decide(STATE, QUESTIONS)
+        ref = direct.decide(STATE, QUESTIONS)
+        for g, r in zip(got, ref, strict=True):
+            assert g.probs == pytest.approx(r.probs, abs=1e-5)
+    finally:
+        httpd.shutdown()
+
+
+def test_service_reports_generated_worked_steps_as_output_tokens(model):
+    from ayaka.evidence_pipeline import EvidenceDecision
+    from ayaka.evidence_policy import EvidencePolicy
+
+    policy = EvidencePolicy(readout="reasoned", weight=1.0, baseline_cutoff=1.0, gate="calculation")
+    wrapped = EvidenceDecision(Decision(model, TOK), lambda _: "12 + 30 = 42", policy)
+    svc = DecisionService(wrapped, "electra-tiny")
+    body = {
+        "state": "Items cost 12, 30 and 5 EUR.",
+        "questions": {"q": {"type": "noul", "instructions": "Is the total at most 45 EUR?"}},
+    }
+    out = svc.handle(body)
+    assert out["usage"]["output_tokens"] == len(TOK.encode("12 + 30 = 42"))
+    assert 0.0 <= out["answers"]["q"]["noul"] <= 1.0
