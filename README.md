@@ -47,7 +47,8 @@ tiers only. It is not the leaderboard score (see
 |---|---|---|---|---|
 | **Ayaka large + worked-steps route** (bundled server, self-hosted) | 48/48 | 72/72 | **88/111** | **87.0** |
 | Ayaka large, single pass | 48/48 | 72/72 | 72/111 | 77.9 |
-| Ayaka small (E2B), single pass | 48/48 | 66/72 | 51/111 | 61.4 |
+| Ayaka base (E4B), single pass | 48/48 | 68/72 | 61/111 | 68.6 |
+| Ayaka small (E2B), single pass | 48/48 | 65/72 | 55/111 | 62.8 |
 | Jev 1.13.0 (TypeSafe) | 48/48 | 71/72 | 81/111 | 82.3 |
 | Winnow-12B Q8 | 48/48 | 69/72 | 81/111 | 80.7 |
 | SemIf / OpenJev (Qwen3.5-4B) | 48/48 | 71/72 | 68/111 | 74.9 |
@@ -81,7 +82,16 @@ tiers only. It is not the leaderboard score (see
   At the leaderboard's 12B reference price ($0.05 per million input
   tokens) that is $0.007-0.062 per 1,000 decisions.
 - **Setup.** Large is Gemma 4 12B with LoRA r64, 860 steps (about 55K
-  questions), on one H100.
+  questions), on one H100. Base (E4B) and small (E2B) use LoRA r32 and
+  1,200 steps on one A100 each, trained directly on the same data and code
+  (no distillation). They are released as single pass: the worked-steps
+  route was measured and frozen only for large. Single-pass p50 on A100 is
+  0.07 s for small and 0.18 s for base. Hard-tier ECE is 0.238 for small and
+  0.223 for base.
+- **Weights:**
+  [ayaka-large](https://huggingface.co/alice-noa-chan/ayaka-large),
+  [ayaka-base](https://huggingface.co/alice-noa-chan/ayaka-base),
+  [ayaka-small](https://huggingface.co/alice-noa-chan/ayaka-small).
 
 ## Quick start
 
