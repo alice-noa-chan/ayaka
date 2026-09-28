@@ -193,6 +193,12 @@ def main(argv: list[str] | None = None) -> None:
         choices=["auto", "dequant", "mixed", "dynamic"],
         help="int8 exports on CPU: auto keeps bf16 accuracy; mixed is ~30%% faster, less accurate",
     )
+    ap.add_argument(
+        "--max-seq-len",
+        type=int,
+        default=0,
+        help="prompt token budget per question (default: the config's serve_max_seq_len)",
+    )
     args = ap.parse_args(argv)
     if args.threads:
         torch.set_num_threads(args.threads)
@@ -203,7 +209,7 @@ def main(argv: list[str] | None = None) -> None:
         linear_mode=args.linear_mode,
     )
     name = os.path.basename(os.path.normpath(args.model))
-    decision = Decision(model, tok)
+    decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
     httpd = serve(decision, name, args.host, args.port)
     print(

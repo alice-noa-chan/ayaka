@@ -185,7 +185,7 @@ Every training sample that shares a 13-gram with a JevBench public item is
 dropped (`ayaka/data/decontam.py`).
 
 Measured prompt lengths (Gemma 4 tokenizer): jev-distill mean 191 tokens (p99
-602), JevBench hard mean 1,242 (max 3,892). `max_seq_len` is 4096. To cover
+602), JevBench hard mean 1,242 (max 3,892). `max_seq_len` is 4096 for training. Inference uses `serve_max_seq_len` (8192 by default; `--max-seq-len` on `ayaka.serve` and `ayaka.eval.jevbench`). Without it, longer states lose their middle, while the sealed hard tier describes 2-6K-token policies. To cover
 long evidence, QuALITY articles that fit (about 1,100 questions, mean 2.8K
 tokens) make up 6% of the mixture. Longer articles are skipped instead of
 truncated, because cutting the middle could remove the answer's evidence.

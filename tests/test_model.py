@@ -283,3 +283,27 @@ def test_windowed_attention_is_exact(block, monkeypatch):
     assert torch.allclose(win[0], ref[0], atol=1e-10)
     assert torch.allclose(win[1], ref[1], atol=1e-10)
     assert win[2] == pytest.approx(ref[2], abs=1e-10)
+
+
+def test_inference_budget_keeps_states_that_training_would_truncate():
+    from ayaka.prompt import render_prefix
+    from ayaka.tokenization import ToyTokenizer
+
+    tok = ToyTokenizer()
+    cfg = tiny_config(max_seq_len=160, serve_max_seq_len=4096)
+    torch.manual_seed(0)
+    m = ElectraDecisionModel.from_config(cfg, dtype=torch.float32).eval()
+    state = "clause " * 60 + "DECISIVE-FACT-IN-THE-MIDDLE " + "filler " * 60
+    q = QuestionSpec("noul", "Does it hold?", ["no", "yes"])
+    trained_prefix, _ = encode_decision(state, [q.view()], tok, cfg.max_seq_len)
+    decision = Decision(m, tok)
+    assert decision.max_seq_len == 4096
+    served_prefix, _ = encode_decision(state, [q.view()], tok, decision.max_seq_len)
+    full = render_prefix(state, tok)  # no truncation at all
+    assert served_prefix == full and len(trained_prefix) < len(full)
+    probs = decision.decide(state, [q])[0].probs
+    assert abs(sum(probs) - 1) < 1e-5
+    # an explicit budget still wins, and old configs never shrink below training
+    assert Decision(m, tok, max_seq_len=200).max_seq_len == 200
+    old = ElectraDecisionModel.from_config(tiny_config(serve_max_seq_len=64), dtype=torch.float32)
+    assert Decision(old, tok).max_seq_len == old.cfg.max_seq_len

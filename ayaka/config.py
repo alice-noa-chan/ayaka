@@ -29,7 +29,11 @@ class ElectraConfig:
     set_mixer_heads: int
     lora_r: int
     lora_alpha: int
-    max_seq_len: int = 4096  # prompt tokens per question (state + question + options)
+    max_seq_len: int = 4096  # training prompt tokens per question (state + question + options)
+    # Inference prompt budget (Decision / serve / eval). Longer states are
+    # otherwise cut in the middle; JevBench hard documents reach ~6K tokens and
+    # every Gemma 4 backbone supports far longer contexts than training uses.
+    serve_max_seq_len: int = 8192
     max_label_candidates: int = 26  # A..Z single-token readout; larger sets use the pointer
     long_prompt_tokens: int = 1024  # long bucket for pointer mixing and temperatures
     lora_dropout: float = 0.05
@@ -91,6 +95,7 @@ def tiny_config(**overrides) -> ElectraConfig:
         "lora_r": 4,
         "lora_alpha": 8,
         "max_seq_len": 512,
+        "serve_max_seq_len": 512,
     }
     base.update(overrides)
     return ElectraConfig(**base)

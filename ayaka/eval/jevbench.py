@@ -296,8 +296,9 @@ def run_jevbench(
     limit: int = 0,
     data: str | None = None,
     verbose: bool = True,
+    max_seq_len: int | None = None,
 ) -> dict:
-    decision = Decision(model, tok)
+    decision = Decision(model, tok, max_seq_len=max_seq_len)
     dev = next(model.parameters()).device
     report: dict = {"tiers": {}}
     for tier in tiers:
@@ -364,6 +365,7 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--dtype", default="", help="bfloat16|float32 (default: bf16 on cuda)")
+    ap.add_argument("--max-seq-len", type=int, default=0, help="0 = config serve_max_seq_len")
     ap.add_argument("--linear-mode", default="auto", help="int8 export runtime (see ayaka.export)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
@@ -396,6 +398,7 @@ def main(argv: list[str] | None = None) -> dict:
         out_path=args.out,
         tiers=[t for t in args.tiers.split(",") if t],
         limit=args.limit,
+        max_seq_len=args.max_seq_len or None,
     )
 
 

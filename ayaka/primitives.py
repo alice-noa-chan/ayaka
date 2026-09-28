@@ -56,7 +56,9 @@ class Decision:
     def __init__(self, model: ElectraDecisionModel, tok: Tokenizer, max_seq_len: int | None = None):
         self.model = model
         self.tok = tok
-        self.max_seq_len = max_seq_len or model.cfg.max_seq_len
+        cfg = model.cfg
+        # inference budget; checkpoints saved before the field default to 8192
+        self.max_seq_len = max_seq_len or max(cfg.serve_max_seq_len, cfg.max_seq_len)
         self.max_labels = model.cfg.max_label_candidates
         self.reuse_head = True  # encode the constant prompt head once
         self._head: tuple[list[int], object, torch.device] | None = None
