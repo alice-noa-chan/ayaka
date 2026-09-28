@@ -7,6 +7,8 @@ name = "ayaka"
 version = "0.1.0"
 description = "Electra: a non-autoregressive decision model family on Gemma 4 (shared state prefix + isolated question branches + permutation-equivariant candidate sets + pointer/label distribution readout + per-primitive calibration)"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+urls = {Homepage = "https://github.com/alice-noa-chan/ayaka"}
 dependencies = [
     "torch>=2.6",
     "transformers>=5.6",

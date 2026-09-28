@@ -116,7 +116,7 @@ def exported(tmp_path):
 
 def test_model_card_reads_run_artifacts(exported):
     card = build_card(str(exported), code_url="https://github.com/example/ayaka")
-    assert card.startswith("---\nlicense: apache-2.0\nbase_model: google/gemma-4-E2B-it")
+    assert card.startswith("---\nlicense: mit\nbase_model: google/gemma-4-E2B-it")
     assert "  - SargeDev/jev-distill-corpus-v3" in card and "  - stanfordnlp/snli" in card
     assert "61.2" in card and "Jev 1.13.0" in card  # our proxy + reference row
     assert "81.0%" in card and "`jev_open_test`" in card  # reference held-out set

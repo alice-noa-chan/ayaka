@@ -147,7 +147,7 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
     )
     front = [
         "---",
-        "license: apache-2.0",
+        "license: mit",
         f"base_model: {base}",
         "base_model_relation: finetune" if not quantized else "base_model_relation: quantized",
         "library_name: ayaka",
@@ -267,7 +267,9 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         "",
         "## License and attribution",
         "",
-        f"- Model weights: Apache-2.0, derived from [`{base}`](https://huggingface.co/{base}) (Apache-2.0).",
+        f"- Code and fine-tuned weights: MIT. The weights are derived from [`{base}`]"
+        f"(https://huggingface.co/{base}), released under Apache-2.0; its notices apply to "
+        "the base-model portion.",
         "- JevBench public items and per-task reference outcomes (bundled with the code for "
         "evaluation and decontamination): MIT, © Florian Standhartinger and contributors.",
         "- Training data licenses are listed per source above. "
