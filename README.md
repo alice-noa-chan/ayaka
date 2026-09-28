@@ -139,17 +139,36 @@ failed: only 24 of 324 dev plans were valid. It remains in the code
 
 ## Benchmark disclosure
 
-- **Training.** Public JevBench items were never used as training data.
-  Every training sample that shares a 13-gram with them is dropped.
-- **Development use.** The public tiers were used heavily as a regression and
-  diagnostic benchmark. Model size, the choice of route and error analysis
-  (including reading failed plan outputs) were made after seeing public
-  aggregate results.
-- **Selection.** Route hyperparameters were selected only on non-public data.
-- **Contamination fixed.** An early extraction prompt contained a worked
-  example structurally mirroring one public hard item. It was replaced
-  before the reported runs.
-- Expect the sealed tier to be lower than these public numbers.
+No JevBench items or labels were included in the training corpus. All 35
+training sources were checked against the public items for shared 13-grams,
+and 0 samples matched. However, public JevBench results were used as a
+development signal. They helped identify weak task families and informed
+synthetic-data design, model-size selection, and the decision to develop a
+reasoning path. Public-item outputs were also read to diagnose failures (a
+zero-shot calculation-plan format, a calibration bug). One prompt example
+that structurally mirrored a public item was removed before the reported
+runs.
+
+**Not selected on public results:**
+
+- **Reasoning-route threshold, gating and fusion.** This covers the
+  calculation gate rules, the confidence cutoff of 0.9 and the fusion
+  weight. They were selected on a procedural dev set (500 questions) and
+  Open-Jev test (300 questions) only. The policy was frozen and
+  hash-recorded before any public scoring.
+- **Worked-steps writer.** Using the base model with the adapter off,
+  rather than with the adapter on, was decided on the dev set.
+- **Checkpoint.** Each model is the final checkpoint of its run. No
+  intermediate checkpoint was compared on public items.
+- **Training length and hyperparameters.** Steps were set by budget (860
+  for large, 1,200 for small and base). Learning rate, LoRA rank and the
+  data-mixture quotas were fixed before training and not re-tuned on public
+  scores. The synthetic sources themselves were designed as described
+  above.
+- **Calibration temperatures.** They were fitted on held-out
+  training-distribution data.
+- **Freeze.** The released models are frozen for this submission, and no
+  further changes will be made in response to public results.
 
 ## Model family
 

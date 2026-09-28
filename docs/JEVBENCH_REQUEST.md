@@ -10,7 +10,7 @@ Ready to post as an issue at
 ### Model
 
 - Hugging Face: <https://huggingface.co/alice-noa-chan/ayaka-large> at revision
-  `5af5bd353ccd1690da47be9bd1ce7d5674d21d52`
+  `ef13c3d421499c3b581a0fb4ff41a8e6554d07b6`
 - Code: <https://github.com/alice-noa-chan/ayaka> at commit
   `7727e9ec5cec062c05de34ad40ade6fc1b6866d3`
 - License: MIT for code and fine-tuned weights. The base model
@@ -29,7 +29,7 @@ pip install -c https://raw.githubusercontent.com/alice-noa-chan/ayaka/$C/constra
   "git+https://github.com/alice-noa-chan/ayaka@$C"
 # downloads the adapter and head (525 MB) plus the pinned Gemma 4 12B base
 python -m ayaka.serve --ckpt alice-noa-chan/ayaka-large \
-  --revision 5af5bd353ccd1690da47be9bd1ce7d5674d21d52 --reasoning --device cuda --port 8000
+  --revision ef13c3d421499c3b581a0fb4ff41a8e6554d07b6 --reasoning --device cuda --port 8000
 ```
 
 A Dockerfile is in the repository. It builds from the exact base image,
@@ -136,18 +136,36 @@ the confidence cutoff, and 4% of Open-Jev decisions.
 
 ### Use of the JevBench public set
 
-- **Not used as training data.** All 35 sources were checked against the
-  public items for shared 13-grams, and 0 samples matched.
-- **Used for evaluation and diagnosis during development.** Model size, the
-  choice to add the worked-steps route, and error analysis (including
-  reading failed outputs on public items) followed public aggregate results.
-- **Route hyperparameters** (gate, confidence cutoff, fusion weight) were
-  selected only on a procedural dev set and Open-Jev test, and frozen before
-  public scoring.
-- **An early prompt** contained a worked example structurally mirroring one
-  public hard item. It was removed before the reported runs.
-- **No further tuning.** The model is frozen for this submission, and no
-  changes will follow from public results.
+No JevBench items or labels were included in the training corpus. All 35
+training sources were checked against the public items for shared 13-grams,
+and 0 samples matched. However, public JevBench results were used as a
+development signal. They helped identify weak task families and informed
+synthetic-data design, model-size selection, and the decision to develop a
+reasoning path. Public-item outputs were also read to diagnose failures (a
+zero-shot calculation-plan format, a calibration bug). One prompt example
+that structurally mirrored a public item was removed before the reported
+runs.
+
+**Not selected on public results:**
+
+- **Reasoning-route threshold, gating and fusion.** This covers the
+  calculation gate rules, the confidence cutoff of 0.9 and the fusion
+  weight. They were selected on a procedural dev set (500 questions) and
+  Open-Jev test (300 questions) only. The policy was frozen and
+  hash-recorded before any public scoring.
+- **Worked-steps writer.** Using the base model with the adapter off,
+  rather than with the adapter on, was decided on the dev set.
+- **Checkpoint.** Each model is the final checkpoint of its run. No
+  intermediate checkpoint was compared on public items.
+- **Training length and hyperparameters.** Steps were set by budget (860
+  for large, 1,200 for small and base). Learning rate, LoRA rank and the
+  data-mixture quotas were fixed before training and not re-tuned on public
+  scores. The synthetic sources themselves were designed as described
+  above.
+- **Calibration temperatures.** They were fitted on held-out
+  training-distribution data.
+- **Freeze.** The released models are frozen for this submission, and no
+  further changes will be made in response to public results.
 
 Our public-tier numbers, for reference (the sealed tier will likely be
 lower): easy 48/48, original 72/72, hard 88/111 through the HTTP server.
