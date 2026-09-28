@@ -1,0 +1,12 @@
+# Exact versions every reported Ayaka GPU run used (2026-09-27/28 training,
+# evaluation and serving pods). Install with:  pip install -c constraints.txt -e .
+# torch is not pinned here: those runs used the image's build
+# torch==2.8.0.dev20250319+cu128 (see Dockerfile), which is not on PyPI.
+transformers==5.17.0
+peft==0.21.0
+accelerate==1.15.0
+safetensors==0.8.0
+tokenizers==0.23.2
+huggingface_hub==1.33.0
+datasets==5.0.1
+numpy==2.1.2
