@@ -7,7 +7,7 @@
 ### Model
 
 - Hugging Face: <https://huggingface.co/alice-noa-chan/ayaka-small> at
-  revision `99ae2b62e80bcb535b460dd5228f5a447d7ae67a`
+  revision `8ef97557668d17e2455be322ac8cbbb59b08ece1`
 - Code: <https://github.com/alice-noa-chan/ayaka> at commit `df010826b1807e94b7f1fc8d09eeacc7046ae372`
 - License: MIT for code and fine-tuned weights. The base model
   `google/gemma-4-E2B-it` is Apache-2.0. The model card lists all 35
@@ -23,7 +23,7 @@
 ```bash
 C=df010826b1807e94b7f1fc8d09eeacc7046ae372
 pip install -c https://raw.githubusercontent.com/alice-noa-chan/ayaka/$C/constraints.txt   "git+https://github.com/alice-noa-chan/ayaka@$C"
-python -m ayaka.serve --ckpt alice-noa-chan/ayaka-small --revision 99ae2b62e80bcb535b460dd5228f5a447d7ae67a   --device cuda --port 8000
+python -m ayaka.serve --ckpt alice-noa-chan/ayaka-small --revision 8ef97557668d17e2455be322ac8cbbb59b08ece1   --device cuda --port 8000
 ```
 
 Single pass only: no `--reasoning`, and no tokens are generated. The server

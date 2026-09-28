@@ -1,5 +1,7 @@
 # Ayaka: an open, license-clean Jev-class decision model
 
+<p align="center"><img src="docs/assets/ayaka.png" width="256" alt="Ayaka"></p>
+
 Hand it a **state** and typed questions (`noul` / `choice` / `score`) with
 runtime candidate sets. It returns a calibrated probability for every
 candidate. Most decisions take a single forward pass with no generation.

@@ -10,7 +10,7 @@ Ready to post as an issue at
 ### Model
 
 - Hugging Face: <https://huggingface.co/alice-noa-chan/ayaka-large> at revision
-  `ef13c3d421499c3b581a0fb4ff41a8e6554d07b6`
+  `018642a6eff74f84219df2d026fc01fa22ecd246`
 - Code: <https://github.com/alice-noa-chan/ayaka> at commit
   `7727e9ec5cec062c05de34ad40ade6fc1b6866d3`
 - License: MIT for code and fine-tuned weights. The base model
@@ -29,7 +29,7 @@ pip install -c https://raw.githubusercontent.com/alice-noa-chan/ayaka/$C/constra
   "git+https://github.com/alice-noa-chan/ayaka@$C"
 # downloads the adapter and head (525 MB) plus the pinned Gemma 4 12B base
 python -m ayaka.serve --ckpt alice-noa-chan/ayaka-large \
-  --revision ef13c3d421499c3b581a0fb4ff41a8e6554d07b6 --reasoning --device cuda --port 8000
+  --revision 018642a6eff74f84219df2d026fc01fa22ecd246 --reasoning --device cuda --port 8000
 ```
 
 A Dockerfile is in the repository. It builds from the exact base image,
