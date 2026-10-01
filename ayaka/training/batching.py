@@ -37,10 +37,16 @@ class TrainItem:
     reasoning_positions: list[int] | None = None  # prediction positions, never prompt tokens
     reasoning_labels: list[int] | None = None
     native_inputs: dict[str, torch.Tensor] | None = None  # CPU image prefix, never a KV cache
+    proposal_input_ids: list[int] | None = None
+    proposal_positions: list[int] | None = None
+    proposal_labels: list[int] | None = None
 
     @property
     def length(self) -> int:
-        return len(self.enc.prefix_ids) + len(self.enc.rendered.suffix_ids)
+        return max(
+            len(self.enc.prefix_ids) + len(self.enc.rendered.suffix_ids),
+            len(self.proposal_input_ids or []),
+        )
 
 
 def _noul_canonical(q: Question) -> Question:

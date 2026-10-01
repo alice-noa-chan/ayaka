@@ -53,6 +53,7 @@ class TrainConfig:
     max_train_seconds: float = 0.0
     loss_weights: LossWeights = field(default_factory=LossWeights)
     reasoning_ce_weight: float = 0.3
+    proposal_ce_weight: float = 0.2
 
 
 class Trainer:
@@ -178,6 +179,15 @@ class Trainer:
 
     def _forward(self, kind: str, mb: list[TrainItem], apply_temperature: bool = False):
         """One planned chunk -> (DecisionOutput, TrainTensors)."""
+        out, tensors = self._decision_forward(kind, mb, apply_temperature)
+        if any(it.proposal_labels for it in mb):
+            from .candidates import proposal_ce
+
+            with self._autocast():
+                tensors.proposal_ce = proposal_ce(self.model, mb, self.tok.pad_id)
+        return out, tensors
+
+    def _decision_forward(self, kind, mb, apply_temperature=False):
         if any(it.native_inputs is not None for it in mb):
             if self.image_backend is None or len(mb) != 1 or kind != "image":
                 raise ValueError(
@@ -250,6 +260,9 @@ class Trainer:
             if hasattr(t, "reasoning_ce"):
                 parts["reasoning_ce"] = t.reasoning_ce
                 parts["total"] = parts["total"] + self.cfg.reasoning_ce_weight * t.reasoning_ce
+            if hasattr(t, "proposal_ce"):
+                parts["proposal_ce"] = t.proposal_ce
+                parts["total"] = parts["total"] + self.cfg.proposal_ce_weight * t.proposal_ce
             frac = len(mb) / n_q
             (parts["total"] * frac).backward()
             for k, v in parts.items():
