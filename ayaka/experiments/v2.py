@@ -49,6 +49,23 @@ def training_stream(items, seed=15):
         yield rng.sample(items, min(8, len(items)))
 
 
+def shipping_regressions():
+    from ..data.schema import Question, Sample
+
+    return [
+        Sample(
+            text,
+            [Question.noul("shipping", instruction, 1)],
+            {"source_example_id": language, "language": language, "split": "test"},
+        )
+        for text, instruction, language in [
+            ("The order has shipped.", "Has the order shipped?", "en"),
+            ("주문이 발송되었습니다.", "주문이 발송되었나요?", "ko"),
+            ("注文は発送済みです。", "注文は発送済みですか？", "ja"),
+        ]
+    ]
+
+
 def write_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -545,28 +562,13 @@ def worker(manifest_path, out, stage, seconds):
                             unfinished.append(name)
                         # Basic repository-authored EN/KO/JA semantic regression;
                         # separate from broad multilingual benchmark claims.
-                        from ..data.schema import Question, Sample
-
-                        regressions = [
-                            Sample(
-                                text,
-                                [Question.noul("greeting", instruction, 1)],
-                                {
-                                    "source_example_id": language,
-                                    "language": language,
-                                    "split": "test",
-                                },
-                            )
-                            for text, instruction, language in [
-                                ("The order has shipped.", "Has the order shipped?", "en"),
-                                ("주문이 발송되었습니다.", "주문이 발송되었나요?", "ko"),
-                                ("注文は発送済みです。", "注文は発送済みですか？", "ja"),
-                            ]
-                        ]
                         write_json(
                             folder / "eval" / name / "language_regression.json",
                             evaluate_efforts(
-                                decision, regressions, efforts=(), deadline=sub_deadline
+                                decision,
+                                shipping_regressions(),
+                                efforts=("high",),
+                                deadline=sub_deadline,
                             ),
                         )
                     decision = None

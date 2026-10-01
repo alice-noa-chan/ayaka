@@ -10,7 +10,29 @@ from ayaka.experiments.v2 import (
     bounded_run,
     candidate_config,
     load_manifest,
+    shipping_regressions,
 )
+
+
+def test_simple_multilingual_regressions_really_generate_at_forced_high():
+    from test_reasoning_pipeline import Generator, Original
+
+    from ayaka.eval.reasoning_v2 import evaluate_efforts
+    from ayaka.primitives import DecisionResult
+    from ayaka.reasoning_pipeline import ControlledDecision
+
+    original, generator = Original(), Generator()
+    original.decide = lambda state, questions, device=None: [
+        DecisionResult(q.type, [0.01, 0.99], dict(zip(q.candidates, [0.01, 0.99], strict=True)))
+        for q in questions
+    ]
+    samples = shipping_regressions()
+    assert all(not any(c.isdigit() for c in s.state) for s in samples)
+    report = evaluate_efforts(ControlledDecision(original, generator), samples, efforts=("high",))
+    assert generator.budgets == [1024, 1024, 1024]
+    assert all(r["budget"] == 1024 and r["route"] == "reasoned" for r in report["rows"]["high"])
+    assert {r["language"] for r in report["rows"]["high"]} == {"en", "ko", "ja"}
+    assert all(r["reasoning_tokens"] == 0 for r in report["rows"]["off"])
 
 
 def test_pinned_manifest_enforces_license_total_size_and_lora_targets():
