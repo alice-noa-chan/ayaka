@@ -21,7 +21,7 @@ from ..metrics import compute_metrics
 from ..model.electra import ElectraDecisionModel
 from ..model.ragged import ragged_log_softmax
 from ..tokenization import Tokenizer
-from .batching import TrainItem, collate_items, plan_chunks
+from .batching import TrainItem, budget_batches, collate_items, plan_chunks
 from .reasoning import trace_ce
 from .schedule import cosine_warmup_schedule
 
@@ -55,6 +55,8 @@ class TrainConfig:
     reasoning_ce_weight: float = 0.3
     proposal_ce_weight: float = 0.2
     ce_chunk_tokens: int = 128
+    image_batch_rows: int = 4
+    image_feature_cache_bytes: int = 128 * 1024 * 1024
 
 
 class Trainer:
@@ -71,12 +73,21 @@ class Trainer:
         self.cfg = cfg
         self.device = torch.device(device)
         self.image_backend = image_backend
+        self.image_features = None
+        if cfg.image_batch_rows < 1 or cfg.image_feature_cache_bytes < 0:
+            raise ValueError("image batch rows must be positive and cache bytes nonnegative")
         if image_backend is not None:
             if image_backend.model is not model:
                 raise ValueError("training and image backend must share the exact decision model")
             from .multimodal import freeze_image_components
 
             freeze_image_components(image_backend)
+            if cfg.image_feature_cache_bytes:
+                from .image_features import FrozenImageFeatures
+
+                self.image_features = FrozenImageFeatures(
+                    image_backend, cfg.image_feature_cache_bytes
+                )
         torch.manual_seed(cfg.seed)
         self.micro_tokens = cfg.micro_batch_tokens  # chunks without checkpointing
         self.micro_ckpt_tokens = cfg.micro_batch_tokens  # checkpointed chunks
@@ -137,9 +148,21 @@ class Trainer:
         chunks += [
             (k, mb, True) for k, mb in plan_chunks(heavy, self.micro_ckpt_tokens, share=False)
         ]
-        # Native processors use architecture-specific patch layouts. Single rows
-        # avoid cross-question media mixing and keep their exact bidirectional masks.
-        chunks += [("image", [it], thr is not None and it.length >= thr) for it in images]
+        for checkpointed in (False, True):
+            budget = self.micro_ckpt_tokens if checkpointed else self.micro_tokens
+            # RPS and missing-evidence penalties average their eligible subset.
+            # Homogeneous strata preserve the previous singleton loss weights.
+            strata = {}
+            for item in images:
+                if (thr is not None and item.length >= thr) == checkpointed:
+                    strata.setdefault((item.type, item.flagged), []).append(item)
+            for group in strata.values():
+                chunks += [
+                    ("image", rows, checkpointed)
+                    for rows in budget_batches(
+                        group, budget, max_rows=self.cfg.image_batch_rows, shuffle_seed=None
+                    )
+                ]
         return chunks
 
     def train_step(self, items: list[TrainItem]) -> dict:
@@ -192,15 +215,17 @@ class Trainer:
 
     def _decision_forward(self, kind, mb, apply_temperature=False):
         if any(it.native_inputs is not None for it in mb):
-            if self.image_backend is None or len(mb) != 1 or kind != "image":
+            if self.image_backend is None or kind != "image":
                 raise ValueError(
-                    "native image training requires an image backend and isolated rows"
+                    "native image training requires an image backend and independent rows"
                 )
             from .multimodal import image_forward
 
             t = collate_items(mb, self.tok.pad_id).to(self.device)
             with self._autocast():
-                hidden, spans, norm = image_forward(self.image_backend, mb[0], t.batch)
+                hidden, spans, norm = image_forward(
+                    self.image_backend, mb, t.batch, self.image_features
+                )
                 out = self.model.decide(
                     hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
                 )

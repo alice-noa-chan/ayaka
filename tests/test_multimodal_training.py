@@ -35,7 +35,7 @@ def test_native_joint_loss_backpropagates_to_adapter_only_and_preserves_weights(
     )
     before = {n: p.detach().clone() for n, p in model.named_parameters()}
     model.train()
-    assert [kind for kind, _, _ in trainer._plan(items)] == ["image", "image"]
+    assert [kind for kind, _, _ in trainer._plan(items)] == ["image"]
     for item in items:
         trainer._set_checkpointing(checkpointed)
         out, tensors = trainer._forward("image", [item])
