@@ -63,6 +63,23 @@ def test_paired_uncertainty_clusters_repeated_underlying_cases():
     assert clustered["cc_delta_95ci"][1] > naive["cc_delta_95ci"][1]
 
 
+def test_score_error_changes_are_not_reported_as_broken_correct_answers():
+    spec = QuestionSpec("score", "Rating?", ["low", "high"], [0, 1])
+    direct = [
+        dict(typed_row(spec, probs, [1, 0]), id=str(i))
+        for i, probs in enumerate(([0.8, 0.2], [0.9, 0.1], [1, 0]))
+    ]
+    reasoned = [
+        dict(typed_row(spec, probs, [1, 0]), id=str(i))
+        for i, probs in enumerate(([1, 0], [0.6, 0.4], [1 - 1e-12, 1e-12]))
+    ]
+    report = paired_report(direct, reasoned, replicates=30)
+    assert report["fixed"] == report["broken"] == 0
+    assert report["score_improved"] == report["score_worsened"] == 1
+    assert report["score_count_tolerance"] == 1e-6
+    assert report["mean_nll_gain"] != 0  # continuous metrics keep actual differences
+
+
 def test_curriculum_splits_do_not_overlap_and_detect_shared_templates():
     splits = {split: [s for s, _ in curriculum(split)] for split in SPLITS}
     assert_isolated(splits)

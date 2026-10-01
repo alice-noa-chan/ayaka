@@ -149,15 +149,25 @@ def paired_report(direct, reasoned, replicates=2000):
             summarize([reasoned[i] for i in indices])["cc_equal_types"]
             - summarize([direct[i] for i in indices])["cc_equal_types"]
         )
-    # Score uses reduced absolute error; classification uses increased
-    # native thresholded correctness. Also report paired proper-score gain.
-    gain = [
-        a.get("nmae", -a["correct"]) - b.get("nmae", -b["correct"])
+    classification_gain = [
+        b["correct"] - a["correct"]
         for a, b in zip(direct, reasoned, strict=True)
+        if a["type"] != "score"
     ]
+    score_gain = [
+        a["nmae"] - b["nmae"] for a, b in zip(direct, reasoned, strict=True) if a["type"] == "score"
+    ]
+    # Continuous Score error changes are not repaired/broken classification
+    # answers. Suppress roundoff in its diagnostic counts; retain every
+    # measured difference in aggregate competence, NLL and the bootstrap.
+    score_tolerance = 1e-6
     return {
-        "fixed": sum(g > 0 for g in gain),
-        "broken": sum(g < 0 for g in gain),
+        "fixed": sum(g > 0 for g in classification_gain),
+        "broken": sum(g < 0 for g in classification_gain),
+        "score_improved": sum(g > score_tolerance for g in score_gain),
+        "score_worsened": sum(g < -score_tolerance for g in score_gain),
+        "score_count_tolerance": score_tolerance,
+        "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
         "mean_nll_gain": sum(a["nll"] - b["nll"] for a, b in zip(direct, reasoned, strict=True))
         / len(direct),
         "cc_delta_95ci": [percentile(diffs, 0.025), percentile(diffs, 0.975)],
