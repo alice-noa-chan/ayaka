@@ -53,6 +53,11 @@ class ElectraConfig:
     # Old checkpoints remain v1/direct. v2 configs opt into auto + medium.
     version: int = 1
     reasoning_defaults: dict = field(default_factory=dict)
+    readout: str = "hybrid"  # lm | pointer | hybrid; set_mixer_layers=0 is simple pointer
+
+    def __post_init__(self):
+        if self.readout not in ("lm", "pointer", "hybrid"):
+            raise ValueError("readout must be lm, pointer, or hybrid")
 
 
 ELECTRA_SMALL = ElectraConfig(

@@ -34,6 +34,8 @@ class TrainItem:
     sample_id: str
     family: str = "unknown"
     source: str = "unknown"
+    reasoning_positions: list[int] | None = None  # prediction positions, never prompt tokens
+    reasoning_labels: list[int] | None = None
 
     @property
     def length(self) -> int:

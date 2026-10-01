@@ -22,6 +22,7 @@ from ..model.electra import ElectraDecisionModel
 from ..model.ragged import ragged_log_softmax
 from ..tokenization import Tokenizer
 from .batching import TrainItem, collate_items, plan_chunks
+from .reasoning import trace_ce
 from .schedule import cosine_warmup_schedule
 
 
@@ -51,6 +52,7 @@ class TrainConfig:
     # follows `steps`, so size `steps` to fit; this is a billing guard.
     max_train_seconds: float = 0.0
     loss_weights: LossWeights = field(default_factory=LossWeights)
+    reasoning_ce_weight: float = 0.3
 
 
 class Trainer:
@@ -154,6 +156,27 @@ class Trainer:
 
     def _forward(self, kind: str, mb: list[TrainItem], apply_temperature: bool = False):
         """One planned chunk -> (DecisionOutput, TrainTensors)."""
+        if any(it.reasoning_labels for it in mb):
+            t = collate_items(mb, self.tok.pad_id).to(self.device)
+            with self._autocast():
+                native = self.model.backbone(
+                    input_ids=t.batch.input_ids,
+                    attention_mask=t.batch.attention_mask,
+                    use_cache=False,
+                    output_hidden_states=self.model.span_layer is not None,
+                )
+                hidden = native.last_hidden_state
+                spans = (
+                    native.hidden_states[self.model.span_layer]
+                    if self.model.span_layer is not None
+                    else hidden
+                )
+                norm = self.model.text_model().norm if self.model.span_layer is not None else None
+                out = self.model.decide(
+                    hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
+                )
+                t.reasoning_ce = trace_ce(self.model, hidden, mb)
+            return out, t
         if kind == "shared":
             prefix = mb[0].enc.prefix_ids
             t = collate_items(mb, self.tok.pad_id, prefix_len=len(prefix)).to(self.device)
@@ -187,6 +210,9 @@ class Trainer:
                 weights=self.cfg.loss_weights,
                 missing_tau=self.cfg.missing_tau,
             )
+            if hasattr(t, "reasoning_ce"):
+                parts["reasoning_ce"] = t.reasoning_ce
+                parts["total"] = parts["total"] + self.cfg.reasoning_ce_weight * t.reasoning_ce
             frac = len(mb) / n_q
             (parts["total"] * frac).backward()
             for k, v in parts.items():

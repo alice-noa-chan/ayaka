@@ -261,11 +261,14 @@ class ElectraDecisionModel(nn.Module):
         # Training must retain pointer auxiliary losses and gate gradients,
         # even at initialization. In no-grad eval, an all-zero active gate
         # makes this entire branch irrelevant to the returned distribution.
-        skip_pointer = (
+        skip_pointer = self.cfg.readout == "lm" or (
             not self.training
             and not torch.is_grad_enabled()
+            and self.cfg.readout != "pointer"
             and bool((has_label_c & (gate == 0)).all())
         )
+        if self.cfg.readout == "lm" and not bool(has_label_c.all()):
+            raise ValueError("LM-only readout cannot handle pointer-only candidate sets")
         if skip_pointer:
             ptr = torch.zeros_like(lab)
         else:
@@ -280,6 +283,10 @@ class ElectraDecisionModel(nn.Module):
             )
             ptr = at_least_fp32(self.head(r, q, batch.cand_cu, cq))
         logits = torch.where(has_label_c, lab + gate * ptr, ptr)
+        if self.cfg.readout == "lm":
+            logits = lab
+        elif self.cfg.readout == "pointer":
+            logits = ptr
         if apply_temperature:
             logits = logits / self.temperature[prim_c, bucket[cq]]
         return DecisionOutput(logits, lab, ptr, batch.cand_cu, cq, batch.primitive)
