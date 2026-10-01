@@ -54,3 +54,50 @@ def test_unverified_or_invalid_closure_cannot_release_reservations(tmp_path, fie
     with pytest.raises(ValueError):
         reconcile_closed_windows(tmp_path, [observation])
     assert json.loads(path.read_text()) == ledger
+
+
+def test_closed_sequential_window_keeps_completed_durations_and_full_tail(tmp_path):
+    ledger = {
+        "elapsed_s": 10800,
+        "stages": [
+            {
+                "stage": "screen",
+                "status": "complete",
+                "allocation_s": 3600,
+                "actual_elapsed_s": 250,
+            },
+            {"stage": "sft", "status": "complete", "allocation_s": 3600, "actual_elapsed_s": 100},
+            {"stage": "evaluate", "status": "running", "allocation_s": 3600},
+        ],
+    }
+    path = tmp_path / "budget.json"
+    path.write_text(json.dumps(ledger))
+    observed = evidence()
+    del observed["stage_index"]
+    observed.update(stage_indices=[0, 1, 2], sequential_stages=True)
+    settled = reconcile_closed_windows(tmp_path, [observed])
+    assert settled["elapsed_s"] == 720
+    assert [r["charged_s"] for r in settled["stages"]] == [250, 100, 370]
+    assert settled["stages"][0]["status"] == "complete"
+    assert settled["stages"][2]["status"] == "interrupted"
+    assert reconcile_closed_windows(tmp_path, [observed]) == settled
+    with pytest.raises(ValueError, match="second reservation"):
+        reconcile_closed_windows(tmp_path, [{**evidence(), "stage_index": 0}])
+
+
+def test_sequential_audit_rejects_unmeasured_or_noncontiguous_prefixes(tmp_path):
+    ledger = {
+        "elapsed_s": 7200,
+        "stages": [
+            {"stage": "screen", "status": "running", "allocation_s": 3600},
+            {"stage": "evaluate", "status": "running", "allocation_s": 3600},
+        ],
+    }
+    path = tmp_path / "budget.json"
+    path.write_text(json.dumps(ledger))
+    observed = {**evidence(), "stage_indices": [0, 1], "sequential_stages": True}
+    with pytest.raises(ValueError, match="measured completion"):
+        reconcile_closed_windows(tmp_path, [observed])
+    assert json.loads(path.read_text()) == ledger
+    with pytest.raises(ValueError, match="contiguous"):
+        reconcile_closed_windows(tmp_path, [{**observed, "stage_indices": [1, 0]}])

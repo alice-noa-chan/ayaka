@@ -25,5 +25,20 @@
     "started_at": "2026-10-01T05:41:00+00:00",
     "ended_before": "2026-10-01T06:04:01+00:00",
     "startup_shutdown_margin_s": 120
+  },
+  {
+    "stage_indices": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "sequential_stages": true,
+    "container_id": "ta-01M3V205QXZTPCM9VJVVWRKG7R",
+    "app_id": "ap-DciAEG3qE9pwTVRYySvjHx",
+    "closure_evidence": "volume.commit succeeded; modal app stop --yes returned exit code 0; clock reported 2026-10-01 07:36:17 UTC; subsequent container inventory was empty. budget.json records completed sequential recover_screen, heads and sft subprocess durations; evaluate was interrupted after detecting curriculum label shortcuts.",
+    "started_at": "2026-10-01T06:21:36+00:00",
+    "ended_before": "2026-10-01T07:36:17+00:00",
+    "startup_shutdown_margin_s": 120
   }
 ]
