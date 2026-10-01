@@ -59,19 +59,27 @@ def reasoning_items(sample, tok, cfg, traces, *, include_direct=True):
     return items
 
 
-def trace_ce(model, hidden, items, chunk_tokens=32):
-    """Question-averaged trace CE, materializing only small vocabulary chunks."""
-    losses = []
+def trace_ce(model, hidden, items, chunk_tokens=128):
+    """Batch supervised positions, retaining the original per-question weighting."""
+    if chunk_tokens < 1:
+        raise ValueError("CE chunk size must be positive")
+    states, targets, weights = [], [], []
     for row, item in enumerate(items):
         if not item.reasoning_labels:
             continue
         positions = torch.tensor(item.reasoning_positions, device=hidden.device)
         labels = torch.tensor(item.reasoning_labels, device=hidden.device)
-        loss = hidden.sum() * 0
-        for start in range(0, len(labels), chunk_tokens):
-            logits = model.lm_logits(hidden[row, positions[start : start + chunk_tokens]])
-            loss = loss + F.cross_entropy(
-                logits.float(), labels[start : start + chunk_tokens], reduction="sum"
-            )
-        losses.append(loss / len(labels))
-    return sum(losses, hidden.sum() * 0) / len(items)
+        states.append(hidden[row, positions])
+        targets.append(labels)
+        weights.append(torch.full_like(labels, 1 / (len(labels) * len(items)), dtype=torch.float32))
+    loss = hidden[0, 0, 0] * 0
+    if not states:
+        return loss
+    states, targets, weights = torch.cat(states), torch.cat(targets), torch.cat(weights)
+    for start in range(0, len(targets), chunk_tokens):
+        logits = model.lm_logits(states[start : start + chunk_tokens])
+        token_loss = F.cross_entropy(
+            logits.float(), targets[start : start + chunk_tokens], reduction="none"
+        )
+        loss = loss + (token_loss * weights[start : start + chunk_tokens]).sum()
+    return loss

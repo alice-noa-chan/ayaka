@@ -54,6 +54,7 @@ class TrainConfig:
     loss_weights: LossWeights = field(default_factory=LossWeights)
     reasoning_ce_weight: float = 0.3
     proposal_ce_weight: float = 0.2
+    ce_chunk_tokens: int = 128
 
 
 class Trainer:
@@ -184,7 +185,9 @@ class Trainer:
             from .candidates import proposal_ce
 
             with self._autocast():
-                tensors.proposal_ce = proposal_ce(self.model, mb, self.tok.pad_id)
+                tensors.proposal_ce = proposal_ce(
+                    self.model, mb, self.tok.pad_id, self.cfg.ce_chunk_tokens
+                )
         return out, tensors
 
     def _decision_forward(self, kind, mb, apply_temperature=False):
@@ -201,7 +204,7 @@ class Trainer:
                 out = self.model.decide(
                     hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
                 )
-                t.reasoning_ce = trace_ce(self.model, hidden, mb)
+                t.reasoning_ce = trace_ce(self.model, hidden, mb, self.cfg.ce_chunk_tokens)
             return out, t
         if any(it.reasoning_labels for it in mb):
             t = collate_items(mb, self.tok.pad_id).to(self.device)
@@ -222,7 +225,7 @@ class Trainer:
                 out = self.model.decide(
                     hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
                 )
-                t.reasoning_ce = trace_ce(self.model, hidden, mb)
+                t.reasoning_ce = trace_ce(self.model, hidden, mb, self.cfg.ce_chunk_tokens)
             return out, t
         if kind == "shared":
             prefix = mb[0].enc.prefix_ids
@@ -242,7 +245,7 @@ class Trainer:
     def _train_step(self, items: list[TrainItem]) -> dict:
         self.model.train()
         n_q = len(items)
-        agg: dict[str, float] = {}
+        agg: dict[str, torch.Tensor] = {}
         for kind, mb, ckpt in self._plan(items):
             self._chunk_ckpt = ckpt
             self._set_checkpointing(ckpt)
@@ -266,13 +269,17 @@ class Trainer:
             frac = len(mb) / n_q
             (parts["total"] * frac).backward()
             for k, v in parts.items():
-                agg[k] = agg.get(k, 0.0) + float(v.detach()) * frac
+                agg[k] = agg.get(k, 0.0) + v.detach() * frac
         params = [p for g in self.opt.param_groups for p in g["params"]]
         gn = torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip)
         self.opt.step()
         self.sched.step()
         self.opt.zero_grad(set_to_none=True)
         self.step_i += 1
+        # One host transfer per step instead of a CUDA synchronization for every
+        # loss component in every micro-batch. Public history remains floats.
+        values = torch.stack(list(agg.values())).float().tolist()
+        agg = dict(zip(agg, values, strict=True))
         agg.update(
             step=self.step_i,
             grad_norm=float(gn),

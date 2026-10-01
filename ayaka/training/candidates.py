@@ -49,15 +49,26 @@ def proposal_items(sample, tok, cfg):
     ]
 
 
-def proposal_ce(model, items, pad_id):
-    loss = model.embed_weight().sum() * 0
-    for item in items:
-        if not item.proposal_labels:
-            continue
-        ids = torch.tensor([item.proposal_input_ids], device=model.embed_weight().device)
-        hidden = model.backbone(input_ids=ids, use_cache=False).last_hidden_state
-        proxy = replace(
-            item, reasoning_positions=item.proposal_positions, reasoning_labels=item.proposal_labels
+def proposal_ce(model, items, pad_id, chunk_tokens=128):
+    """One masked proposal batch; context remains separate from teacher readouts."""
+    selected = [item for item in items if item.proposal_labels]
+    if not selected:
+        return model.gate.sum() * 0
+    device = model.embed_weight().device
+    width = max(len(item.proposal_input_ids) for item in selected)
+    ids = torch.full((len(selected), width), pad_id, device=device, dtype=torch.long)
+    mask = torch.zeros_like(ids)
+    proxies = []
+    for row, item in enumerate(selected):
+        length = len(item.proposal_input_ids)
+        ids[row, :length] = torch.tensor(item.proposal_input_ids, device=device)
+        mask[row, :length] = 1
+        proxies.append(
+            replace(
+                item,
+                reasoning_positions=item.proposal_positions,
+                reasoning_labels=item.proposal_labels,
+            )
         )
-        loss = loss + trace_ce(model, hidden, [proxy])
-    return loss / len(items)
+    hidden = model.backbone(input_ids=ids, attention_mask=mask, use_cache=False).last_hidden_state
+    return trace_ce(model, hidden, proxies, chunk_tokens) * (len(selected) / len(items))
