@@ -8,7 +8,7 @@ import torch
 from ..candidates import policy_for, proposal_messages, validate_proposals
 from ..evidence_generation import chat_ids
 from .batching import sample_to_items
-from .reasoning import trace_ce
+from .reasoning import supervised_forward, trace_ce
 
 
 def proposal_items(sample, tok, cfg):
@@ -49,7 +49,7 @@ def proposal_items(sample, tok, cfg):
     ]
 
 
-def proposal_ce(model, items, pad_id, chunk_tokens=128):
+def proposal_ce(model, items, pad_id, chunk_tokens=128, *, prune=True):
     """One masked proposal batch; context remains separate from teacher readouts."""
     selected = [item for item in items if item.proposal_labels]
     if not selected:
@@ -70,5 +70,5 @@ def proposal_ce(model, items, pad_id, chunk_tokens=128):
                 reasoning_labels=item.proposal_labels,
             )
         )
-    hidden = model.backbone(input_ids=ids, attention_mask=mask, use_cache=False).last_hidden_state
+    hidden, _, proxies = supervised_forward(model, ids, mask, proxies, prune=prune)
     return trace_ce(model, hidden, proxies, chunk_tokens) * (len(selected) / len(items))

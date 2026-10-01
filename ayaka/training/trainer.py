@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from collections import Counter
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import torch
 
@@ -22,7 +22,7 @@ from ..model.electra import ElectraDecisionModel
 from ..model.ragged import ragged_log_softmax
 from ..tokenization import Tokenizer
 from .batching import TrainItem, budget_batches, collate_items, plan_chunks
-from .reasoning import trace_ce
+from .reasoning import supervised_forward, trace_ce
 from .schedule import cosine_warmup_schedule
 
 
@@ -57,6 +57,7 @@ class TrainConfig:
     ce_chunk_tokens: int = 128
     image_batch_rows: int = 4
     image_feature_cache_bytes: int = 128 * 1024 * 1024
+    prune_supervised_positions: bool = True
 
 
 class Trainer:
@@ -201,19 +202,25 @@ class Trainer:
                     flush=True,
                 )
 
-    def _forward(self, kind: str, mb: list[TrainItem], apply_temperature: bool = False):
+    def _forward(
+        self, kind: str, mb: list[TrainItem], apply_temperature: bool = False, *, auxiliary=True
+    ):
         """One planned chunk -> (DecisionOutput, TrainTensors)."""
-        out, tensors = self._decision_forward(kind, mb, apply_temperature)
-        if any(it.proposal_labels for it in mb):
+        out, tensors = self._decision_forward(kind, mb, apply_temperature, auxiliary=auxiliary)
+        if auxiliary and any(it.proposal_labels for it in mb):
             from .candidates import proposal_ce
 
             with self._autocast():
                 tensors.proposal_ce = proposal_ce(
-                    self.model, mb, self.tok.pad_id, self.cfg.ce_chunk_tokens
+                    self.model,
+                    mb,
+                    self.tok.pad_id,
+                    self.cfg.ce_chunk_tokens,
+                    prune=self.cfg.prune_supervised_positions and not self._ckpt_active,
                 )
         return out, tensors
 
-    def _decision_forward(self, kind, mb, apply_temperature=False):
+    def _decision_forward(self, kind, mb, apply_temperature=False, *, auxiliary=True):
         if any(it.native_inputs is not None for it in mb):
             if self.image_backend is None or kind != "image":
                 raise ValueError(
@@ -229,28 +236,37 @@ class Trainer:
                 out = self.model.decide(
                     hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
                 )
-                t.reasoning_ce = trace_ce(self.model, hidden, mb, self.cfg.ce_chunk_tokens)
+                if auxiliary:
+                    t.reasoning_ce = trace_ce(self.model, hidden, mb, self.cfg.ce_chunk_tokens)
             return out, t
         if any(it.reasoning_labels for it in mb):
             t = collate_items(mb, self.tok.pad_id).to(self.device)
             with self._autocast():
-                native = self.model.backbone(
-                    input_ids=t.batch.input_ids,
-                    attention_mask=t.batch.attention_mask,
-                    use_cache=False,
-                    output_hidden_states=self.model.span_layer is not None,
+                answers = [
+                    len(it.enc.prefix_ids) + len(it.enc.rendered.suffix_ids) - 1 for it in mb
+                ]
+                hidden, spans, supervised = supervised_forward(
+                    self.model,
+                    t.batch.input_ids,
+                    t.batch.attention_mask,
+                    mb,
+                    answers,
+                    prune=self.cfg.prune_supervised_positions and not self._ckpt_active,
                 )
-                hidden = native.last_hidden_state
-                spans = (
-                    native.hidden_states[self.model.span_layer]
-                    if self.model.span_layer is not None
-                    else hidden
+                compact = supervised is not mb
+                decision_batch = (
+                    replace(t.batch, answer_pos=torch.zeros_like(t.batch.answer_pos))
+                    if compact
+                    else t.batch
                 )
                 norm = self.model.text_model().norm if self.model.span_layer is not None else None
                 out = self.model.decide(
-                    hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
+                    hidden, decision_batch, apply_temperature, span_hidden=spans, span_norm=norm
                 )
-                t.reasoning_ce = trace_ce(self.model, hidden, mb, self.cfg.ce_chunk_tokens)
+                if auxiliary:
+                    t.reasoning_ce = trace_ce(
+                        self.model, hidden, supervised, self.cfg.ce_chunk_tokens
+                    )
             return out, t
         if kind == "shared":
             prefix = mb[0].enc.prefix_ids
@@ -267,7 +283,7 @@ class Trainer:
             out = self.model(t.batch, apply_temperature=apply_temperature)
         return out, t
 
-    def _train_step(self, items: list[TrainItem]) -> dict:
+    def _backward(self, items: list[TrainItem]):
         self.model.train()
         n_q = len(items)
         agg: dict[str, torch.Tensor] = {}
@@ -295,6 +311,10 @@ class Trainer:
             (parts["total"] * frac).backward()
             for k, v in parts.items():
                 agg[k] = agg.get(k, 0.0) + v.detach() * frac
+        return agg
+
+    def _train_step(self, items: list[TrainItem]) -> dict:
+        agg = self._backward(items)
         params = [p for g in self.opt.param_groups for p in g["params"]]
         gn = torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip)
         self.opt.step()
@@ -372,7 +392,7 @@ class Trainer:
         logits: list[list[float] | None] = [None] * len(items)
         index = {id(it): i for i, it in enumerate(items)}
         for kind, mb, _ in self._plan(items):
-            out, _ = self._forward(kind, mb, apply_temperature=apply_temperature)
+            out, _ = self._forward(kind, mb, apply_temperature=apply_temperature, auxiliary=False)
             lp = ragged_log_softmax(out.logits.float(), out.cand_cu).exp().tolist()
             lg = out.logits.float().tolist()
             cu = out.cand_cu.tolist()

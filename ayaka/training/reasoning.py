@@ -13,6 +13,43 @@ from ..reasoning_pipeline import readout_suffix, trace_messages
 from .batching import _noul_canonical, sample_to_items
 
 
+def supervised_forward(model, input_ids, attention_mask, items, answers=None, *, prune=True):
+    """Keep only answer/CE query positions in Gemma's independent KV-shared layers."""
+    if not prune or not model.prune_shared_positions:
+        output = model.backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            use_cache=False,
+            output_hidden_states=model.span_layer is not None,
+        )
+        hidden = output.last_hidden_state
+        spans = output.hidden_states[model.span_layer] if model.span_layer is not None else hidden
+        return hidden, spans, items
+    from ..model.fastpath import forward_kept
+
+    positions, proxies = [], []
+    for row, item in enumerate(items):
+        wanted = ([answers[row]] if answers is not None else []) + (item.reasoning_positions or [])
+        if not wanted:
+            wanted = [len(item.enc.prefix_ids) + len(item.enc.rendered.suffix_ids) - 1]
+        positions.append(wanted)
+        offset = int(answers is not None)
+        proxies.append(
+            replace(
+                item,
+                reasoning_positions=list(range(offset, offset + len(item.reasoning_labels or []))),
+            )
+        )
+    width = max(map(len, positions))
+    keep = torch.tensor(
+        [row + [row[-1]] * (width - len(row)) for row in positions], device=input_ids.device
+    )
+    hidden, spans = forward_kept(
+        model.text_model(), input_ids, keep, attention_mask=attention_mask, normalize_spans=False
+    )
+    return hidden, spans, proxies
+
+
 def reasoning_items(sample, tok, cfg, traces, *, include_direct=True):
     """Traces are supplied by the deterministic validation data builder.
 

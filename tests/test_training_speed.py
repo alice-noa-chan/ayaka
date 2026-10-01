@@ -68,7 +68,7 @@ def test_proposal_batch_matches_isolated_rows_with_different_lengths_and_one_for
     expected.backward()
     calls = []
     hook = model.backbone.register_forward_hook(lambda *args: calls.append(1))
-    actual = proposal_ce(model, items, tok.pad_id)
+    actual = proposal_ce(model, items, tok.pad_id, prune=False)
     actual.backward()
     hook.remove()
     assert calls == [1]
@@ -76,3 +76,70 @@ def test_proposal_batch_matches_isolated_rows_with_different_lengths_and_one_for
     for a, b in zip(model.parameters(), original.parameters(), strict=True):
         if b.grad is not None:
             torch.testing.assert_close(a.grad, b.grad, atol=2e-6, rtol=2e-4)
+
+
+@pytest.mark.parametrize("checkpointed", [False, True])
+def test_supervised_position_pruning_matches_full_joint_loss_and_gradients(checkpointed):
+    from ayaka.checkpoint import apply_lora
+    from ayaka.config import tiny_config
+    from ayaka.data.candidate_v2 import candidate_curriculum
+    from ayaka.data.reasoning_v2 import curriculum
+    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.tokenization import ToyTokenizer
+    from ayaka.training.candidates import proposal_items
+    from ayaka.training.reasoning import reasoning_items
+    from ayaka.training.trainer import TrainConfig, Trainer
+
+    torch.set_num_threads(1)
+    cfg, tok = tiny_config(version=2, max_seq_len=4096, lora_dropout=0), ToyTokenizer()
+    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model.backbone.requires_grad_(False)
+    apply_lora(model)
+    original = copy.deepcopy(model)
+    items = [
+        it
+        for sample, traces in curriculum("train", 1)
+        for it in reasoning_items(sample, tok, cfg, traces)
+    ]
+    items += proposal_items(candidate_curriculum("train", 1)[0], tok, cfg)
+    options = {"bf16": False, "grad_checkpointing": checkpointed, "micro_batch_tokens": 8192}
+    fast = Trainer(model, tok, TrainConfig(**options), "cpu")
+    full = Trainer(original, tok, TrainConfig(**options, prune_supervised_positions=False), "cpu")
+    lengths = []
+    hook = (
+        model.text_model()
+        .layers[-1]
+        .register_forward_pre_hook(lambda module, args: lengths.append(args[0].shape[1]))
+    )
+    actual, expected = fast._backward(items), full._backward(items)
+    hook.remove()
+    for key in actual:
+        torch.testing.assert_close(actual[key], expected[key], atol=2e-6, rtol=2e-5)
+    for a, b in zip(model.parameters(), original.parameters(), strict=True):
+        if b.grad is not None:
+            torch.testing.assert_close(a.grad, b.grad, atol=2e-5, rtol=3e-4)
+    if not checkpointed:
+        assert max(lengths) < max(it.length for it in items) / 2
+
+
+def test_prediction_skips_proposal_and_trace_auxiliary_projection(monkeypatch):
+    from ayaka.checkpoint import apply_lora
+    from ayaka.config import tiny_config
+    from ayaka.data.candidate_v2 import candidate_curriculum
+    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.tokenization import ToyTokenizer
+    from ayaka.training import candidates
+    from ayaka.training.candidates import proposal_items
+    from ayaka.training.trainer import TrainConfig, Trainer
+
+    cfg, tok = tiny_config(version=2, max_seq_len=4096), ToyTokenizer()
+    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    apply_lora(model)
+    trainer = Trainer(model, tok, TrainConfig(bf16=False), "cpu")
+    items = proposal_items(candidate_curriculum("dev", 1)[0], tok, cfg)
+    monkeypatch.setattr(
+        candidates,
+        "proposal_ce",
+        lambda *args, **kwargs: pytest.fail("prediction computed proposal training CE"),
+    )
+    assert sum(trainer.predict(items)[0]) == pytest.approx(1, abs=1e-5)
