@@ -39,7 +39,7 @@ def job_deadline(seconds):
     from threading import Timer
 
     def expired():
-        print("[train] hard job deadline reached; stopping before further GPU spend", flush=True)
+        print("[v2] hard job deadline reached; stopping before further GPU spend", flush=True)
         os._exit(124)
 
     timer = Timer(seconds, expired)
@@ -168,10 +168,16 @@ def sample_stream(samples, tok, cfg, backend, questions_per_step, seed, language
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", required=True)
-    parser.add_argument(
+    execution = parser.add_mutually_exclusive_group()
+    execution.add_argument(
         "--execute",
         action="store_true",
         help="explicitly start GPU training; omitted means audit only",
+    )
+    execution.add_argument(
+        "--backward-only",
+        action="store_true",
+        help="CUDA loss/gradient preflight only; never call an optimizer step",
     )
     parser.add_argument("--steps", type=int)
     parser.add_argument("--max-train-seconds", type=float)
@@ -190,7 +196,7 @@ def main(argv=None):
     config = dict(recipe["model"])
     config["lora_targets"] = tuple(config["lora_targets"])
     cfg = ElectraConfig(**config)
-    if not args.execute:
+    if not args.execute and not args.backward_only:
         result = {
             "status": "bundle_verified_no_training",
             "source_code_matches": source_matches(manifest),
@@ -201,6 +207,10 @@ def main(argv=None):
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return result
+    if args.backward_only:
+        if args.steps is not None:
+            raise ValueError("backward-only preflight does not accept optimizer steps")
+        args.steps = 1  # scheduler construction only; the optimizer is never executed
     if (
         args.steps is None
         or args.steps < 1
@@ -243,6 +253,7 @@ def execute_training(args, cfg, recipe, splits):
             sample.metadata.get("modality", "text"),
             sample.metadata["task_family"],
             sample.metadata["language"],
+            tuple(question.type for question in sample.questions),
         )
         if signature not in seen:
             representative += prepared_items(sample, tok, cfg, backend)
@@ -252,6 +263,8 @@ def execute_training(args, cfg, recipe, splits):
     root = Path(args.out)
     root.mkdir(parents=True, exist_ok=False)
     (root / "preflight.json").write_bytes(canonical(smoke) + b"\n")
+    if args.backward_only:
+        return {"status": "backward_preflight_only", **smoke}
 
     def save_progress(step, record):
         if step != 1 and step % args.checkpoint_every:

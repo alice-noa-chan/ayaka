@@ -153,7 +153,7 @@ def build_splits(per_type=32, image_cases=32, candidate_cases=32):
         samples = []
         for sample, traces in curriculum(split, per_type):
             sample.metadata.update(
-                source_lineage=sample.metadata["source_example_id"],
+                source_lineage=sample.metadata["case_facts_sha256"],
                 modality="text",
                 verified_traces=traces,
             )

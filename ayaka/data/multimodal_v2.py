@@ -127,7 +127,9 @@ def image_curriculum(split, count=8):
                     "license": "MIT",
                     "split": split,
                     "language": language,
-                    "source_lineage": lineage,
+                    "source_lineage": f"native-images-v1/{split}/{family}/unreadable"
+                    if unreadable
+                    else lineage,
                     "source_example_id": lineage + "/" + language,
                     "generator_template_id": f"image-{family}-layout-{variant}",
                     "rule_combination": f"{split}/{family}/{i}",

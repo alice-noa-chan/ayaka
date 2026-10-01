@@ -132,7 +132,7 @@ def language_curriculum(split, per_type=32):
                     "split": split,
                     "language": language,
                     "modality": "text",
-                    "source_lineage": lineage,
+                    "source_lineage": f"native-language-v1/{split}/{kind}/{i}",
                     "source_example_id": lineage,
                     "task_family": "native_language",
                     "generator_template_id": f"native-language/{split}/{language}/{kind}",

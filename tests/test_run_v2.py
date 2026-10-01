@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import pytest
+import torch
 from test_multimodal import build, media
 
 from ayaka.checkpoint import apply_lora
@@ -62,3 +63,45 @@ def test_language_sampler_preserves_english_priority_without_dropping_other_lang
     )
     counts = Counter(next(stream)[0].sample_id for _ in range(120))
     assert counts["en"] > counts["ko"] > 0 and counts["en"] > counts["ja"] > 0
+
+
+def test_backward_only_execution_returns_before_training_and_checkpoint_updates(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from ayaka.training import run_v2
+
+    _, model, tok, backend = build("gemma4")
+    model.cfg = replace(model.cfg, max_seq_len=4096)
+    model.backbone.requires_grad_(False)
+    apply_lora(model)
+    sample = Sample(
+        "Document",
+        [Question.noul("q", "Visible?", 1)],
+        {"media": media(), "task_family": "document", "language": "en"},
+    )
+    monkeypatch.setattr(
+        run_v2, "fresh_image_backend", lambda *args, **kwargs: (model, tok, backend)
+    )
+    monkeypatch.setattr(
+        run_v2.Trainer,
+        "train",
+        lambda *args, **kwargs: pytest.fail("backward-only started training"),
+    )
+    before = {name: p.detach().clone() for name, p in model.named_parameters()}
+    args = SimpleNamespace(
+        device="cpu",
+        allow_weight_downloads=False,
+        steps=1,
+        max_train_seconds=30,
+        out=str(tmp_path / "smoke"),
+        backward_only=True,
+    )
+    result = run_v2.execute_training(
+        args, model.cfg, {"training": {"seed": 7, "bf16": False}}, {"train": [sample]}
+    )
+    assert result["optimizer_steps"] == 0 and result["weights_unchanged"]
+    assert all(torch.equal(before[name], p) for name, p in model.named_parameters())
+    assert (tmp_path / "smoke" / "preflight.json").is_file()
+    assert not (tmp_path / "smoke" / "checkpoint").exists()

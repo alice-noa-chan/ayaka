@@ -12,6 +12,7 @@ def test_native_language_rehearsal_is_balanced_and_split_specific():
         previous |= templates
         assert any("회원" in s.state for s in samples if s.metadata["language"] == "ko")
         assert any("会員" in s.state for s in samples if s.metadata["language"] == "ja")
+        assert len({s.metadata["source_lineage"] for s in samples}) == 24
         for language in ("en", "ko", "ja"):
             group = [s for s in samples if s.metadata["language"] == language]
             assert {s.questions[0].type for s in group} == {"choice", "noul", "score"}
