@@ -7,7 +7,9 @@ import time
 import torch
 
 
-def profile_backward(trainer, stream, *, warmup=1, repeats=3, cold_images=False):
+def profile_backward(
+    trainer, stream, *, warmup=1, repeats=3, cold_images=False, reserve_optimizer_state=False
+):
     from .run_v2 import trainable_digest
 
     if type(warmup) is not int or warmup < 0 or type(repeats) is not int or repeats < 1:
@@ -18,6 +20,19 @@ def profile_backward(trainer, stream, *, warmup=1, repeats=3, cold_images=False)
     rng_cpu = torch.get_rng_state()
     rng_cuda = torch.cuda.get_rng_state_all() if trainer.device.type == "cuda" else None
     timings, batches = [], []
+    state_bytes = (
+        sum(
+            parameter.numel() * parameter.element_size() * 2
+            for group in trainer.opt.param_groups
+            for parameter in group["params"]
+        )
+        if reserve_optimizer_state and trainer.device.type == "cuda"
+        else 0
+    )
+    # AdamW moments are allocated lazily on the first real step. Retain an
+    # equivalent CUDA allocation during backward profiling, so the zero-state
+    # warm-up cannot hide memory pressure that appears after training starts.
+    reservation = torch.empty(state_bytes, dtype=torch.uint8, device=trainer.device)
 
     def synchronize():
         if trainer.device.type == "cuda":
@@ -37,6 +52,16 @@ def profile_backward(trainer, stream, *, warmup=1, repeats=3, cold_images=False)
             seconds = time.perf_counter() - start
             if not losses or any(not torch.isfinite(value).all() for value in losses.values()):
                 raise ValueError("throughput profile produced nonfinite losses")
+            gradients = [
+                parameter.grad
+                for parameter in trainer.model.parameters()
+                if parameter.requires_grad and parameter.grad is not None
+            ]
+            if (
+                not gradients
+                or not torch.stack([torch.isfinite(gradient).all() for gradient in gradients]).all()
+            ):
+                raise ValueError("throughput profile produced missing or nonfinite gradients")
             if iteration >= warmup:
                 timings.append(seconds)
                 batches.append(
@@ -66,8 +91,10 @@ def profile_backward(trainer, stream, *, warmup=1, repeats=3, cold_images=False)
             "weights_unchanged": True,
             "scope": "production forward/backward and input preparation; optimizer/save not timed",
             "cold_image_features": cold_images,
+            "optimizer_state_reserved_bytes": state_bytes,
         }
     finally:
+        del reservation
         trainer.opt.zero_grad(set_to_none=True)
         trainer.model.train(mode)
         torch.set_rng_state(rng_cpu)
@@ -235,7 +262,7 @@ def profile_production(trainer, stream, samples, inventory, prepare):
         }
 
     initial = policy()
-    ordinary = profile_backward(trainer, stream, repeats=6)
+    ordinary = profile_backward(trainer, stream, repeats=6, reserve_optimizer_state=True)
     groups = defaultdict(list)
     for index, sample in enumerate(inventory):
         for position, row in enumerate(sample["rows"]):
@@ -268,10 +295,12 @@ def profile_production(trainer, stream, samples, inventory, prepare):
 
         # Every measured stress batch starts with an empty feature cache; even
         # cached corpora cannot mask cold vision cost or largest-row OOM fallback.
-        measured = profile_backward(trainer, batch(), warmup=0, repeats=1, cold_images=True)
+        measured = profile_backward(
+            trainer, batch(), warmup=0, repeats=1, cold_images=True, reserve_optimizer_state=True
+        )
         stress.append({"stratum": list(key), **measured})
     if policy() != initial:
-        ordinary = profile_backward(trainer, stream, repeats=6)
+        ordinary = profile_backward(trainer, stream, repeats=6, reserve_optimizer_state=True)
     all_seconds = list(itertools.chain(ordinary["seconds"], *(row["seconds"] for row in stress)))
     return {
         **ordinary,

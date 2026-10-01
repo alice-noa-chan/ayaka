@@ -216,3 +216,21 @@ def test_production_profile_covers_cold_image_and_trace_strata_without_gradients
     assert all(row["cold_image_features"] and row["weights_unchanged"] for row in report["stress"])
     assert report["max_seconds"] >= max(row["max_seconds"] for row in report["stress"])
     assert trainer.step_i == 0 and not trainer.opt.state
+
+
+def test_profile_rejects_finite_losses_with_nonfinite_gradients_before_updates(monkeypatch):
+    import itertools
+
+    trainer, rows, _, _ = setup()
+
+    def bad_gradients(_):
+        trainer.model.gate.grad = torch.full_like(trainer.model.gate, float("nan"))
+        return {"total": torch.tensor(1.0)}
+
+    monkeypatch.setattr(trainer, "backward_step", bad_gradients)
+    rng = torch.get_rng_state().clone()
+    with pytest.raises(ValueError, match="nonfinite gradients"):
+        profile_backward(trainer, itertools.repeat(rows), warmup=0, repeats=1)
+    assert trainer.step_i == 0 and not trainer.opt.state
+    assert torch.equal(rng, torch.get_rng_state())
+    assert all(parameter.grad is None for parameter in trainer.model.parameters())
