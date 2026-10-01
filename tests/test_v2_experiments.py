@@ -9,6 +9,7 @@ from ayaka.experiments.v2 import (
     archive_stale_curriculum,
     bounded_run,
     candidate_config,
+    case_representatives,
     load_manifest,
     shipping_regressions,
 )
@@ -43,6 +44,21 @@ def test_pinned_manifest_enforces_license_total_size_and_lora_targets():
     assert "in_proj_qkv" in candidate_config(by_name["qwen35-9b"]).lora_targets
     assert "qkv_proj" in candidate_config(by_name["phi4-mini"]).lora_targets
     assert candidate_config(by_name["granite42-8b"]).version == 2
+
+
+def test_router_case_subset_is_balanced_unique_and_fail_closed():
+    from collections import Counter
+
+    from ayaka.data.reasoning_v2 import curriculum
+
+    samples = [s for s, _ in curriculum("router_train")]
+    subset = case_representatives(samples)
+    assert 20 <= len(subset) <= 24
+    assert len({s.metadata["case_facts_sha256"] for s in subset}) == len(subset)
+    counts = Counter(s.questions[0].type for s in subset)
+    assert max(counts.values()) - min(counts.values()) <= 1
+    with pytest.raises(ValueError, match="20 distinct"):
+        case_representatives(samples[:2])
 
 
 def test_deadline_budget_is_reserved_before_subprocess_and_never_reset(tmp_path, monkeypatch):
@@ -91,12 +107,17 @@ def test_curriculum_refresh_preserves_old_reports_and_budget(tmp_path):
     (tmp_path / "budget.json").write_text('{"elapsed_s": 10800}')
     (tmp_path / "screen").mkdir()
     (tmp_path / "screen/model.json").write_text('{"n":70}')
+    (tmp_path / "sft/stale").mkdir(parents=True)
+    (tmp_path / "sft/stale/meta.json").write_text('{"curriculum_version":1}')
+    (tmp_path / "head_selection.json").write_text('{"candidate":"stale"}')
     archive_stale_curriculum(tmp_path)
     assert (tmp_path / "interrupted-curriculum-v1/screen/model.json").read_text() == '{"n":70}'
     assert (tmp_path / "budget.json").read_text() == '{"elapsed_s": 10800}'
     assert (tmp_path / "interrupted-curriculum-v1/budget.json").read_bytes() == (
         tmp_path / "budget.json"
     ).read_bytes()
+    assert not (tmp_path / "sft").exists() and not (tmp_path / "head_selection.json").exists()
+    assert (tmp_path / "interrupted-curriculum-v1/sft/stale/meta.json").exists()
 
 
 def test_failed_first_sft_candidate_does_not_skip_second(tmp_path, monkeypatch):

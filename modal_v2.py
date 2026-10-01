@@ -64,6 +64,7 @@ def explore_h100(
     recover_screen: bool = False,
     refresh_curriculum: bool = False,
     resume_paired_screen: bool = False,
+    screen_candidates: str = "",
 ):
     from ayaka.experiments.v2 import bounded_run
 
@@ -85,7 +86,11 @@ def explore_h100(
         if resume_paired_screen:
             options = {"stages": ("recover_screen", "heads", "sft", "evaluate")}
         return bounded_run(
-            "/root/candidates.json", "/runs/exploration", scale=budget_scale, **options
+            "/root/candidates.json",
+            "/runs/exploration",
+            scale=budget_scale,
+            screen_candidates=tuple(screen_candidates.split(",")) if screen_candidates else (),
+            **options,
         )
     finally:
         volume.commit()
@@ -113,6 +118,7 @@ def main(
     refresh_curriculum: bool = False,
     resume_paired_screen: bool = False,
     closed_windows: str = "",
+    screen_candidates: str = "",
 ):
     if (not recover_screen and not resume_paired_screen) or refresh_curriculum:
         preparation = prepare_cpu.remote()
@@ -127,7 +133,11 @@ def main(
         print(
             json.dumps(
                 explore_h100.with_options(timeout=remaining).remote(
-                    budget_scale, recover_screen, refresh_curriculum, resume_paired_screen
+                    budget_scale,
+                    recover_screen,
+                    refresh_curriculum,
+                    resume_paired_screen,
+                    screen_candidates,
                 ),
                 indent=2,
             )

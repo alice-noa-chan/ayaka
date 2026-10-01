@@ -66,6 +66,20 @@ def shipping_regressions():
     ]
 
 
+def case_representatives(samples, limit=24):
+    groups = {}
+    for sample in samples:
+        groups.setdefault(sample.metadata["case_facts_sha256"], {}).setdefault(
+            sample.questions[0].type, sample
+        )
+    if len(groups) < 20:
+        raise ValueError("router fitting requires at least 20 distinct underlying cases")
+    return [
+        group[("choice", "noul", "score")[i % 3]]
+        for i, group in enumerate(list(groups.values())[:limit])
+    ]
+
+
 def write_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,8 +225,23 @@ def archive_stale_curriculum(out):
     archive.mkdir(exist_ok=True)
     for path in folder.glob("*.json"):
         shutil.copy2(path, archive / path.name)
-    if (folder / "screen").exists():
-        shutil.copytree(folder / "screen", archive / "screen", dirs_exist_ok=True)
+    for name in ("screen", "sft", "eval"):
+        child = folder / name
+        if child.exists():
+            if child.resolve().parent != folder.resolve():
+                raise ValueError("refuse to archive outputs outside the run directory")
+            shutil.copytree(child, archive / name, dirs_exist_ok=True)
+            shutil.rmtree(child)
+    for name in (
+        "heads.json",
+        "head_selection.json",
+        "reproduction.json",
+        "findings-preview.json",
+        "findings.json",
+    ):
+        (folder / name).unlink(missing_ok=True)
+    for path in [*folder.glob("*_status.json"), *folder.glob("*-failure.json")]:
+        path.unlink()
     write_json(folder / "screen_summary.json", [])
     write_json(folder / "selection.json", {"ranked": [], "status": "stale_curriculum"})
 
@@ -234,7 +263,7 @@ def load_candidate(candidate):
     return model, tok
 
 
-def worker(manifest_path, out, stage, seconds):
+def worker(manifest_path, out, stage, seconds, screen_candidates=()):
     evaluate_efforts = partial(run_efforts, verbose=True)
     gpu = gpu_info()
     start, deadline = time.monotonic(), time.monotonic() + seconds
@@ -277,6 +306,14 @@ def worker(manifest_path, out, stage, seconds):
             [c for c in candidates if c["support"] == "builtin"],
             key=lambda c: c["total_parameters"],
         )
+        if screen_candidates:
+            supported = {c["name"] for c in ready}
+            if (
+                len(set(screen_candidates)) != len(screen_candidates)
+                or not set(screen_candidates) <= supported
+            ):
+                raise ValueError("screen candidates must be unique built-in manifest names")
+            ready = [c for c in ready if c["name"] in screen_candidates]
         ready = [c for c in ready if c["name"] not in completed]
         write_json(
             folder / "selection.json", {"split": "dev", "ranked": [], "status": "incomplete"}
@@ -352,6 +389,13 @@ def worker(manifest_path, out, stage, seconds):
                 "ranked": [r["name"] for r in ranked],
                 "incomplete": [r["name"] for r in reports if r["status"] != "complete"],
                 "survey_only": [c["name"] for c in candidates if c["support"] != "builtin"],
+                "deferred_budget": [
+                    c["name"]
+                    for c in candidates
+                    if c["support"] == "builtin"
+                    and screen_candidates
+                    and c["name"] not in screen_candidates
+                ],
             },
         )
     else:
@@ -494,23 +538,42 @@ def worker(manifest_path, out, stage, seconds):
                             "history_last": history[-1],
                             "status": "incomplete" if trainer.stopped_early else "complete",
                             "gpu": gpu,
+                            "curriculum_version": CURRICULUM_VERSION,
                         },
                     )
                     write_json(folder / "sft" / f"{name}.json", history)
                     trainer = None
                 elif stage == "evaluate":
                     checkpoint = folder / "sft" / name
-                    model = None
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                    model = load_checkpoint(str(checkpoint), device="cuda", merge=False).eval()
-                    decision = controlled_decision(model, tok)
+                    metadata = json.loads((checkpoint / "meta.json").read_text())
+                    if metadata.get("curriculum_version") != CURRICULUM_VERSION:
+                        raise ValueError("checkpoint curriculum differs from prepared evaluation")
                     from ..data.schema import Sample
 
                     natural = [
                         Sample.from_json(s)
                         for s in json.loads((folder / "natural_test.json").read_text())
                     ]
+                    base_decision = controlled_decision(model, tok)
+                    if natural:
+                        write_json(
+                            folder / "eval" / name / "natural_baseline.json",
+                            evaluate_efforts(
+                                base_decision, natural, efforts=(), deadline=sub_deadline
+                            ),
+                        )
+                    write_json(
+                        folder / "eval" / name / "language_baseline.json",
+                        evaluate_efforts(
+                            base_decision, shipping_regressions(), efforts=(), deadline=sub_deadline
+                        ),
+                    )
+                    base_decision = None
+                    model = None
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    model = load_checkpoint(str(checkpoint), device="cuda", merge=False).eval()
+                    decision = controlled_decision(model, tok)
                     if natural:
                         write_json(
                             folder / "eval" / name / "natural_direct.json",
@@ -518,8 +581,16 @@ def worker(manifest_path, out, stage, seconds):
                         )
                     paired = {}
                     for split in ("router_train", "dev", "calibration"):
+                        samples = [s for s, _ in curriculum(split)]
+                        if split == "router_train":
+                            samples = case_representatives(samples)
                         paired[split] = evaluate_efforts(
-                            decision, [s for s, _ in curriculum(split)], deadline=sub_deadline
+                            decision,
+                            samples,
+                            deadline=sub_deadline,
+                            on_progress=partial(
+                                write_json, folder / "eval" / name / f"{split}.json"
+                            ),
                         )
                         write_json(folder / "eval" / name / f"{split}.json", paired[split])
                     if any(r["status"] != "complete" for r in paired.values()):
@@ -556,6 +627,7 @@ def worker(manifest_path, out, stage, seconds):
                             [s for s, _ in curriculum("test")],
                             deadline=sub_deadline,
                             include_auto=True,
+                            on_progress=partial(write_json, folder / "eval" / name / "test.json"),
                         )
                         write_json(folder / "eval" / name / "test.json", test)
                         if test["status"] != "complete":
@@ -620,6 +692,7 @@ def bounded_run(
     stages=("screen", "heads", "sft", "evaluate", "reserve"),
     scale=1.0,
     stage_limits=None,
+    screen_candidates=(),
 ):
     gpu_info()
     if not 0 < scale <= 1:
@@ -698,6 +771,8 @@ def bounded_run(
             "--seconds",
             str(max(1, limit - 10)),
         ]
+        if screen_candidates:
+            command.extend(["--screen-candidates", ",".join(screen_candidates)])
         try:
             result = subprocess.run(command, timeout=limit, check=False)
             entry["status"] = "complete" if result.returncode == 0 else "failed"
@@ -723,13 +798,27 @@ def main(argv=None):
     ap.add_argument("--stage", choices=STAGE_SECONDS, default="screen")
     ap.add_argument("--seconds", type=float, default=60)
     ap.add_argument("--budget-scale", type=float, default=1)
+    ap.add_argument("--screen-candidates", default="")
     args = ap.parse_args(argv)
     if args.command == "prepare":
         prepare(args.manifest, args.out, args.download_weights)
     elif args.command == "run":
-        bounded_run(args.manifest, args.out, scale=args.budget_scale)
+        bounded_run(
+            args.manifest,
+            args.out,
+            scale=args.budget_scale,
+            screen_candidates=tuple(args.screen_candidates.split(","))
+            if args.screen_candidates
+            else (),
+        )
     else:
-        worker(args.manifest, args.out, args.stage, args.seconds)
+        worker(
+            args.manifest,
+            args.out,
+            args.stage,
+            args.seconds,
+            tuple(args.screen_candidates.split(",")) if args.screen_candidates else (),
+        )
 
 
 if __name__ == "__main__":

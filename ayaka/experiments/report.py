@@ -195,6 +195,10 @@ def collect(run):
         samples = (
             split_samples(kind) if kind in ("router_train", "dev", "calibration", "test") else None
         )
+        if kind == "router_train" and dataset_signature(samples) != raw.get("dataset_signature"):
+            from .v2 import case_representatives
+
+            samples = case_representatives(samples)
         candidate[kind] = compact_evaluation(raw, samples)
     result["failures"] = {path.name: read(path) for path in sorted(root.glob("*-failure.json"))}
     result["source_artifact_sha256"] = sources
