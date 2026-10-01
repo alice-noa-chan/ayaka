@@ -99,6 +99,12 @@ class DecisionService:
         if not isinstance(qs, dict) or not qs:
             raise BadRequest("'questions' must be a non-empty object")
         names = list(qs)
+        if any(not isinstance(qs[n], dict) for n in names):
+            raise BadRequest("question must be an object")
+        if any("candidate_generation" in qs[n] for n in names):
+            from .candidates import handle_candidates
+
+            return handle_candidates(self, body)
         parsed = [parse_question(qs[n]) for n in names]
         options = body.get("options", {})
         if not isinstance(options, dict):
