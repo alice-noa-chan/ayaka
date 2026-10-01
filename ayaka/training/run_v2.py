@@ -124,7 +124,7 @@ def fresh_image_backend(cfg, device, *, offline=True):
         cfg.backbone, revision=cfg.backbone_revision, local_files_only=offline
     )
     tok = HFTokenizer(processor.tokenizer, cfg.backbone)
-    backend = ImageBackend(native, processor, model, tok)
+    backend = ImageBackend(native, processor, model, tok, processing_device="cpu")
     native.language_model = model.backbone
     total = sum(
         p.numel() for p in {id(p): p for p in [*native.parameters(), *model.parameters()]}.values()
@@ -134,11 +134,25 @@ def fresh_image_backend(cfg, device, *, offline=True):
     return model, tok, backend
 
 
-def sample_stream(samples, tok, cfg, backend, questions_per_step, seed, language_weights=None):
+def sample_stream(
+    samples,
+    tok,
+    cfg,
+    backend,
+    questions_per_step,
+    seed,
+    language_weights=None,
+    prepared_cache_bytes=256 * 1024 * 1024,
+):
     """Process media lazily; never retain an entire image corpus on GPU or host."""
     if not samples or type(questions_per_step) is not int or questions_per_step < 1:
         raise ValueError("stream requires samples and a positive question count")
     rng, pending = random.Random(seed), []
+    from .prepared_cache import PreparedSampleCache
+
+    prepared = PreparedSampleCache(
+        lambda sample: prepared_items(sample, tok, cfg, backend), prepared_cache_bytes
+    )
     if language_weights is not None:
         pools = {}
         for sample in samples:
@@ -159,7 +173,7 @@ def sample_stream(samples, tok, cfg, backend, questions_per_step, seed, language
                 rng.shuffle(pending_pools[lang])
             order = [pending_pools[lang].pop()]
         for sample in order:
-            pending += prepared_items(sample, tok, cfg, backend)
+            pending += prepared.get(sample)
             while len(pending) >= questions_per_step:
                 yield pending[:questions_per_step]
                 pending = pending[questions_per_step:]
