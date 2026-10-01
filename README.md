@@ -515,3 +515,6 @@ and bounded H100 exploration are documented in [Ayaka v2](docs/experiments/AYAKA
 Published v1 checkpoints keep their existing defaults; v2 results are reported separately.
 The [2026-10-01 exploration findings](docs/experiments/V2_FINDINGS_2026-10-01.md)
 include measured improvements, multilingual regressions and the closed GPU-time audit.
+Native image inputs and opt-in text Choice generation/Other expansion are described
+in [Images and generated candidates](docs/MULTIMODAL_AND_CANDIDATES.md), including
+API examples, probability semantics and the current validation limits.
