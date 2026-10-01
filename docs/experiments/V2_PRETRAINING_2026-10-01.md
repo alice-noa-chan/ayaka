@@ -1,5 +1,10 @@
 # Ayaka v2 readiness before training — 2026-10-01
 
+The subsequent [2026-10-02 training optimization](V2_TRAINING_OPTIMIZATION_2026-10-02.md)
+provides the current recipe and a new source-bound immutable bundle. This dated
+record retains the previous preparation measurements and commands; its bundle
+does not match the current package sources.
+
 The native-image, reasoning and generated-Choice training paths are implemented
 and an immutable local bundle is prepared. **No pretrained optimizer update or
 new GPU job was executed.** The machine has PyTorch `2.14.0+cpu`; a real H100

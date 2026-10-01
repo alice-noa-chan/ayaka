@@ -1,0 +1,544 @@
+{
+  "date": "2026-10-02",
+  "status": "implementation_and_cpu_validation_complete_no_pretrained_training",
+  "implementation_revision": "1436654435a2a9335b1071e56e838fe25ed276bd",
+  "benchmark": {
+    "gpu_seconds": 0,
+    "image_feature_hits": 44,
+    "image_feature_misses": 4,
+    "loss_absolute_deltas": {
+      "brier": 1.1920928955078125e-07,
+      "nll": 0.0,
+      "pointer_nll": 1.1920928955078125e-07,
+      "proposal_ce": 5.960464477539063e-08,
+      "reasoning_ce": 2.384185791015625e-07,
+      "rps": 0.0,
+      "total": 4.76837158203125e-07
+    },
+    "optimized": {
+      "batches": [
+        {
+          "forward_chunks": 5,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 5,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 5,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 5,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 5,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        }
+      ],
+      "device": "cpu",
+      "last_losses": {
+        "brier": 0.6731306910514832,
+        "nll": 1.223734974861145,
+        "pointer_nll": 1.1534663438796997,
+        "proposal_ce": 0.5192851424217224,
+        "reasoning_ce": 2.865328550338745,
+        "rps": 0.11563155055046082,
+        "total": 2.9102671146392822
+      },
+      "max_seconds": 2.2091365000233054,
+      "measured_batches": 5,
+      "median_seconds": 2.127541800029576,
+      "optimizer_steps": 0,
+      "scope": "production forward/backward and input preparation; optimizer/save not timed",
+      "seconds": [
+        2.127541800029576,
+        2.08783040009439,
+        2.110567399999127,
+        2.17964670015499,
+        2.2091365000233054
+      ],
+      "warmup_batches": 1,
+      "weights_unchanged": true
+    },
+    "optimizer_steps": 0,
+    "reference": {
+      "batches": [
+        {
+          "forward_chunks": 10,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 8,
+          "proposal_tokens": 330,
+          "rows": 24,
+          "text_tokens": 15646,
+          "trace_tokens": 711
+        }
+      ],
+      "device": "cpu",
+      "last_losses": {
+        "brier": 0.6731308102607727,
+        "nll": 1.223734974861145,
+        "pointer_nll": 1.1534664630889893,
+        "proposal_ce": 0.5192850828170776,
+        "reasoning_ce": 2.865328311920166,
+        "rps": 0.11563155055046082,
+        "total": 2.910266637802124
+      },
+      "max_seconds": 2.663528500124812,
+      "measured_batches": 5,
+      "median_seconds": 2.6430272001307458,
+      "optimizer_steps": 0,
+      "scope": "production forward/backward and input preparation; optimizer/save not timed",
+      "seconds": [
+        2.659068499924615,
+        2.663528500124812,
+        2.6430272001307458,
+        2.6056343999225646,
+        2.6103980999905616
+      ],
+      "warmup_batches": 1,
+      "weights_unchanged": true
+    },
+    "scope": "random tiny Gemma4 CPU, equal direct/trace/image/proposal work; not H100 or pretrained speed evidence",
+    "speedup": 1.2422915498506324,
+    "supervised_rows_per_batch": 24
+  },
+  "v1_historical_metadata": {
+    "ayaka-base": {
+      "source": "runs/release/ayaka-base/meta.json",
+      "source_sha256": "b80dc4b257c391946a4d1e1b136b29a82977dd5ee84073f64f5127e3c50fa287",
+      "steps": 1200,
+      "questions_per_step": 64,
+      "exposures": 76800,
+      "train_seconds": 11266.1190969944,
+      "stopped_early": false
+    },
+    "ayaka-large": {
+      "source": "runs/release/ayaka-large/meta.json",
+      "source_sha256": "7ff47cf214f2abe0c1e953ca69bc7dd9a2b9e6a6c22905c41be0165e1c614e51",
+      "steps": 860,
+      "questions_per_step": 64,
+      "exposures": 55040,
+      "train_seconds": 18681.723786830902,
+      "stopped_early": false
+    },
+    "ayaka-small": {
+      "source": "runs/release/ayaka-small/meta.json",
+      "source_sha256": "224f74c59756b04bf1f587d3bcdb8be810774e25d1c3e3089b60170d2d38bbe6",
+      "steps": 1200,
+      "questions_per_step": 64,
+      "exposures": 76800,
+      "train_seconds": 5055.327252626419,
+      "stopped_early": false
+    }
+  },
+  "v1_comparison_limit": "different backbones, source mix, generative/image supervision; no matched H100 v1/v2 measurement",
+  "bundle": {
+    "path": "runs/v2-pretraining-20261002-e4b-optimized",
+    "manifest_sha256": "f6fe154c5deeee0a70d82a2523cfeb99d6c03870c68b3099e3e3a57ba444bfd3",
+    "source_code_matches": true,
+    "data": {
+      "train": {
+        "sha256": "bc9198fba99ca2d47cca79e853d95808ece9d7a8040765f8fb30a6f5530e7b11",
+        "byte_identical_to_previous_bundle": true
+      },
+      "router_train": {
+        "sha256": "73b6bf243dd52f6d01d33e495756a51c06d76e5504a46d05ed66146a7c4b5544",
+        "byte_identical_to_previous_bundle": true
+      },
+      "dev": {
+        "sha256": "b8a88f0d25024b8199454fe18295590676c70d73930794c7f63488858c89c82d",
+        "byte_identical_to_previous_bundle": true
+      },
+      "calibration": {
+        "sha256": "6aa70e76d48c70623444ee2931173660ed37b6a6b88a7470941e87cf742e62f5",
+        "byte_identical_to_previous_bundle": true
+      },
+      "test": {
+        "sha256": "353784f727f74633f52544baeab37b50cfa380be65030870cf3459229641a616",
+        "byte_identical_to_previous_bundle": true
+      }
+    },
+    "counts": {
+      "calibration": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "exception": 9,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 512,
+          "ja": 352,
+          "ko": 352
+        },
+        "modalities": {
+          "image": 384,
+          "text": 832
+        },
+        "questions": 1312,
+        "samples": 1216,
+        "types": {
+          "choice": 544,
+          "noul": 448,
+          "score": 320
+        }
+      },
+      "dev": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "exception": 9,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 512,
+          "ja": 352,
+          "ko": 352
+        },
+        "modalities": {
+          "image": 384,
+          "text": 832
+        },
+        "questions": 1312,
+        "samples": 1216,
+        "types": {
+          "choice": 544,
+          "noul": 448,
+          "score": 320
+        }
+      },
+      "router_train": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "exception": 9,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 512,
+          "ja": 352,
+          "ko": 352
+        },
+        "modalities": {
+          "image": 384,
+          "text": 832
+        },
+        "questions": 1312,
+        "samples": 1216,
+        "types": {
+          "choice": 544,
+          "noul": 448,
+          "score": 320
+        }
+      },
+      "test": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "exception": 9,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 512,
+          "ja": 352,
+          "ko": 352
+        },
+        "modalities": {
+          "image": 384,
+          "text": 832
+        },
+        "questions": 1312,
+        "samples": 1216,
+        "types": {
+          "choice": 544,
+          "noul": 448,
+          "score": 320
+        }
+      },
+      "train": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "exception": 9,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 512,
+          "ja": 352,
+          "ko": 352
+        },
+        "modalities": {
+          "image": 384,
+          "text": 832
+        },
+        "questions": 1312,
+        "samples": 1216,
+        "types": {
+          "choice": 544,
+          "noul": 448,
+          "score": 320
+        }
+      }
+    },
+    "training_config": {
+      "completion_target_seconds": 14400,
+      "execution_requires": [
+        "explicit optimizer step count",
+        "explicit GPU time budget",
+        "pinned pretrained weights available",
+        "GPU forward/backward preflight without optimizer update"
+      ],
+      "initialization": "fresh_lora_from_pinned_base",
+      "language_sampling": {
+        "en": 0.6,
+        "ja": 0.2,
+        "ko": 0.2
+      },
+      "model": {
+        "backbone": "google/gemma-4-E4B-it",
+        "backbone_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+        "long_prompt_tokens": 1024,
+        "lora_alpha": 32,
+        "lora_dropout": 0.05,
+        "lora_r": 16,
+        "lora_targets": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "max_label_candidates": 26,
+        "max_seq_len": 4096,
+        "name": "ayaka-v2-pretraining",
+        "pointer_dim": 256,
+        "readout": "hybrid",
+        "reasoning_defaults": {},
+        "serve_max_seq_len": 8192,
+        "set_mixer_heads": 4,
+        "set_mixer_layers": 2,
+        "tiny_overrides": {},
+        "version": 2
+      },
+      "optimizer_steps_executed": 0,
+      "prepared_cache_bytes": 268435456,
+      "promotion_requires": [
+        "independent natural EN/KO/JA regression",
+        "image perception vs reasoning paired evaluation",
+        "candidate semantic and coverage evaluation",
+        "modality/partition-scoped calibration",
+        "dev-only router selection",
+        "single final independent test"
+      ],
+      "training": {
+        "bf16": true,
+        "ce_chunk_tokens": 128,
+        "grad_checkpointing": false,
+        "head_lr": 0.0005,
+        "image_batch_rows": 4,
+        "image_feature_cache_bytes": 134217728,
+        "lr": 0.0001,
+        "micro_batch_tokens": 8192,
+        "proposal_ce_weight": 0.2,
+        "prune_supervised_positions": true,
+        "questions_per_step": 64,
+        "reasoning_ce_weight": 0.3,
+        "seed": 20261001
+      },
+      "version": "ayaka-v2-pretraining-1",
+      "vision_policy": "frozen"
+    },
+    "model_preflight": {
+      "architecture": "gemma4",
+      "base_parameters": 7941100832,
+      "conservative_total_elements": 8034056528,
+      "context_audit": {
+        "calibration": {
+          "max_tokens": 483,
+          "prepared_rows": 2464
+        },
+        "dev": {
+          "max_tokens": 483,
+          "prepared_rows": 2464
+        },
+        "router_train": {
+          "max_tokens": 483,
+          "prepared_rows": 2464
+        },
+        "test": {
+          "max_tokens": 504,
+          "prepared_rows": 2464
+        },
+        "train": {
+          "max_tokens": 483,
+          "prepared_rows": 2464
+        }
+      },
+      "license": "apache-2.0",
+      "license_source": "https://huggingface.co/google/gemma-4-E4B-it",
+      "local_weights_ready": true,
+      "native_context": 131072,
+      "official_weight_elements": 7996156490,
+      "parameter_limit": 14000000000,
+      "processor": "Gemma4Processor",
+      "repo": "google/gemma-4-E4B-it",
+      "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+      "tokenizer": "google/gemma-4-E4B-it",
+      "total_parameters": 7979000870,
+      "trainable_parameters": 37900038,
+      "training_context": 4096,
+      "vision_policy": "frozen",
+      "weight_loading": "not_loaded_meta_only"
+    },
+    "weight_cache": {
+      "bundle_manifest_sha256": "f6fe154c5deeee0a70d82a2523cfeb99d6c03870c68b3099e3e3a57ba444bfd3",
+      "download_and_audit_seconds": 12.202999999979511,
+      "optimizer_steps": 0,
+      "repo": "google/gemma-4-E4B-it",
+      "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+      "shards": {
+        "model.safetensors": {
+          "bytes": 15992595884,
+          "sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503"
+        }
+      },
+      "status": "pinned_native_weights_cached_no_training"
+    }
+  },
+  "validation": {
+    "passed": 421,
+    "skipped": 1,
+    "failures": 0,
+    "errors": 0,
+    "seconds": 53.736,
+    "junit": "runs/v2-training-optimization-20261002-tests.xml",
+    "ruff_lint": "passed",
+    "ruff_format_files": 131
+  },
+  "new_gpu_seconds": 0,
+  "pretrained_optimizer_steps": 0,
+  "actual_h100_throughput": "not_measured",
+  "four_hour_completion": "target_only_not_confirmed",
+  "completion_estimate_limit": "short train-only backward profile; optimizer/save margins assumed; hard timer is emergency guard"
+}

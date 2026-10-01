@@ -192,6 +192,9 @@ Finite source-annotated audits supervise overlap/coverage/sufficiency separately
 they do not validate arbitrary generated prose. The final integrated CPU suite
 passed 395 tests with one existing Beam-SDK skip, and Ruff checked/formatted 123
 Python files. Actual pretrained CUDA backward and quality remain unmeasured here.
+The subsequent [training optimization report](experiments/V2_TRAINING_OPTIMIZATION_2026-10-02.md)
+records the updated bundle, batched image/proposal paths and bounded caches;
+its full CPU suite passes 421 tests with one existing skip.
 
 Windows loopback HTTP intermittently reset connections even for a model-free
 health handler. Process-local idempotency now lets keyed requests replay their

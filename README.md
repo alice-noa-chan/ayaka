@@ -522,3 +522,7 @@ The [pretraining readiness report](docs/experiments/V2_PRETRAINING_2026-10-01.md
 records the prepared native-image/language/proposal data, pinned weight cache,
 zero-step backward entry point, scoped calibration/routing and remaining quality
 checks. No pretrained optimization accompanies that preparation.
+The [2026-10-02 training optimization report](docs/experiments/V2_TRAINING_OPTIMIZATION_2026-10-02.md)
+records equal-work CPU timing, batched losses/images, frozen-feature and CPU
+preparation caches, the updated immutable bundle, and complete-schedule budget
+forecasting. Actual pretrained H100 speed and four-hour completion remain unmeasured.
