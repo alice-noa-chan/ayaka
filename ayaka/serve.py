@@ -138,9 +138,23 @@ class DecisionService:
         except ValueError as exc:
             raise BadRequest(str(exc)) from exc
         state = body.get("state", "")
+        if "media" in body:
+            if not getattr(self.decision, "supports_images", False):
+                raise BadRequest("this server has no image backend; start with --images and --ckpt")
+            try:
+                state = self.decision.prepare_media(state, body["media"])
+            except ValueError as exc:
+                raise BadRequest(str(exc)) from exc
         with self.lock:
             if getattr(self.decision, "supports_reasoning", False):
-                results = self.decision.decide(state, [p[0] for p in parsed], reasoning=settings)
+                try:
+                    results = self.decision.decide(
+                        state, [p[0] for p in parsed], reasoning=settings
+                    )
+                except ValueError as exc:
+                    if "media" in body:
+                        raise BadRequest(str(exc)) from exc
+                    raise
             else:
                 direct = (
                     getattr(self.decision, "original", self.decision) if explicit else self.decision
@@ -204,7 +218,11 @@ def make_handler(service: DecisionService):
                 self._send(404, {"error": "not found"})
                 return
             try:
+                from .multimodal import MAX_HTTP_BYTES
+
                 n = int(self.headers.get("Content-Length", "0"))
+                if not 0 <= n <= MAX_HTTP_BYTES:
+                    raise BadRequest("request exceeds the 24 MiB body limit")
                 body = json.loads(self.rfile.read(n) or b"{}")
                 t0 = time.perf_counter()
                 out = service.handle(body)
@@ -259,6 +277,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--max-reasoning-tokens", type=int)
     ap.add_argument("--reasoning-router", help="promoted v2 router JSON")
     ap.add_argument("--reasoning-calibration", help="v2 path-temperature JSON")
+    ap.add_argument(
+        "--images", action="store_true", help="native Gemma 4 image inputs (--ckpt only)"
+    )
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
@@ -298,11 +319,36 @@ def main(argv: list[str] | None = None) -> None:
         ap.error(str(exc))
     if args.reasoning and (overrides or args.reasoning_router or args.reasoning_calibration):
         ap.error("use either legacy --reasoning or v2 reasoning flags")
+    if args.images and (not args.ckpt or args.reasoning):
+        ap.error("--images requires --ckpt and the v2 reasoning interface")
     if args.threads:
         torch.set_num_threads(args.threads)
     if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
         ap.error("--reasoning with --reasoner-adapter off needs --ckpt (exports are merged)")
-    if args.ckpt:
+    image_decision = None
+    if args.images:
+        from .checkpoint import resolve_checkpoint
+        from .multimodal import load_image_decision
+        from .routing import BenefitRouter
+        from .training.path_calibration import PathCalibration
+
+        args.ckpt = resolve_checkpoint(args.ckpt, args.revision)
+        router = BenefitRouter.load(args.reasoning_router) if args.reasoning_router else None
+        calibration = None
+        if args.reasoning_calibration:
+            with open(args.reasoning_calibration, encoding="utf-8") as f:
+                calibration = PathCalibration(json.load(f))
+        image_decision = load_image_decision(
+            args.ckpt,
+            device=args.device,
+            dtype=getattr(torch, args.dtype),
+            max_seq_len=args.max_seq_len or None,
+            router=router,
+            calibration=calibration,
+        )
+        model, tok = image_decision.model, image_decision.tok
+        name = os.path.basename(os.path.normpath(args.ckpt))
+    elif args.ckpt:
         from .checkpoint import load_checkpoint, resolve_checkpoint
         from .tokenization import HFTokenizer
 
@@ -320,7 +366,9 @@ def main(argv: list[str] | None = None) -> None:
             linear_mode=args.linear_mode,
         )
         name = os.path.basename(os.path.normpath(args.model))
-    if args.reasoning:
+    if image_decision is not None:
+        decision = image_decision
+    elif args.reasoning:
         from .evidence_pipeline import reasoning_decision
 
         decision = reasoning_decision(

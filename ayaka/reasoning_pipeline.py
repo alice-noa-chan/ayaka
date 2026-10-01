@@ -74,15 +74,26 @@ class TraceFailure(EvidenceError):
 
 
 class TraceGenerator:
-    def __init__(self, model, tok, max_context=12288):
+    def __init__(self, model, tok, max_context=12288, apply_temperature=True):
         self.model, self.tok = model, tok
+        self.apply_temperature = apply_temperature
         native_limit = getattr(model.text_config, "max_position_embeddings", max_context)
         self.max_context = min(max_context, native_limit)
         self.eos = PlanGenerator(model, tok, adapter="on").eos
 
+    def messages_for(self, state, spec):
+        return trace_messages(state, spec)
+
+    def prepare(self, messages):
+        return chat_ids(self.tok, messages), None
+
+    def prefill(self, ids, payload):
+        return prefill_last(self.model.text_model(), ids)
+
     @torch.inference_mode()
     def generate_trace(self, messages, budget, reserve=0):
-        trace = Trace(input_ids=chat_ids(self.tok, messages))
+        input_ids, payload = self.prepare(messages)
+        trace = Trace(input_ids=input_ids)
         if len(trace.input_ids) + budget + reserve > self.max_context:
             trace.finish_reason = "context_limit"
             trace.error = "requested reasoning budget and readout do not fit the context"
@@ -92,7 +103,7 @@ class TraceGenerator:
         try:
             trace.prefill_tokens = len(trace.input_ids)
             ids = torch.tensor([trace.input_ids], device=dev)
-            hidden, trace.cache = prefill_last(self.model.text_model(), ids)
+            hidden, trace.cache = self.prefill(ids, payload)
             for _ in range(budget):
                 token = int(self.model.lm_logits(hidden).argmax(-1).item())
                 trace.token_ids.append(token)  # EOS and failed final decode are billable too.
@@ -125,7 +136,9 @@ class TraceGenerator:
             self.model.embed_weight().device
         )
         # The trace's cache already contains every generated token, with the same adapter.
-        out = self.model(batch, past_key_values=trace.cache, apply_temperature=True)
+        out = self.model(
+            batch, past_key_values=trace.cache, apply_temperature=self.apply_temperature
+        )
         p = ragged_softmax(out.logits, out.cand_cu).tolist()
         if large:
             top = sorted(range(len(p)), key=lambda i: -p[i])[: self.model.cfg.max_label_candidates]
@@ -158,6 +171,21 @@ class ControlledDecision:
             {"mode": "auto" if cfg.version >= 2 else "off", **cfg.reasoning_defaults}
         )
 
+    def _input_counts(self, state, questions):
+        if hasattr(self.original, "input_counts"):
+            return self.original.input_counts(state, questions)
+        prefix, items = encode_decision(
+            state,
+            [q.view() for q in questions],
+            self.tok,
+            self.max_seq_len,
+            self.model.cfg.max_label_candidates,
+        )
+        return [
+            len(item.rendered.suffix_ids) + (len(prefix) if j == 0 else 0)
+            for j, item in enumerate(items)
+        ]
+
     def decide(self, state, questions, device=None, reasoning=None):
         settings = reasoning if reasoning is not None else [self._settings()] * len(questions)
         if len(settings) != len(questions) or any(
@@ -174,17 +202,11 @@ class ControlledDecision:
         baselines = dict(zip(indices, direct, strict=True))
         baseline_tokens = {}
         if indices:
-            prefix, items = encode_decision(
-                state,
-                [questions[i].view() for i in indices],
-                self.tok,
-                self.max_seq_len,
-                self.model.cfg.max_label_candidates,
+            baseline_tokens = dict(
+                zip(
+                    indices, self._input_counts(state, [questions[i] for i in indices]), strict=True
+                )
             )
-            baseline_tokens = {
-                i: len(item.rendered.suffix_ids) + (len(prefix) if j == 0 else 0)
-                for j, (i, item) in enumerate(zip(indices, items, strict=True))
-            }
         results = []
         for i, (spec, setting) in enumerate(zip(questions, settings, strict=True)):
             extra = {
@@ -198,7 +220,7 @@ class ControlledDecision:
                 "generation_s": 0.0,
                 "readout_s": 0.0,
             }
-            if i in baselines:
+            if i in baselines and not getattr(state, "is_multimodal", False):
                 from .routing import routing_features
 
                 extra["routing_features"] = routing_features(
@@ -228,7 +250,11 @@ class ControlledDecision:
                         ).suffix_ids
                     )
                     trace = self.generator.generate_trace(
-                        trace_messages(state, spec), setting.budget, reserve=reserve
+                        self.generator.messages_for(state, spec)
+                        if hasattr(self.generator, "messages_for")
+                        else trace_messages(state, spec),
+                        setting.budget,
+                        reserve=reserve,
                     )
                     extra["generation_s"] = perf_counter() - start
                     extra["generated_tokens"] = trace.generated_tokens
@@ -256,10 +282,7 @@ class ControlledDecision:
                     extra["route"] = "fallback"
                     if i not in baselines:
                         baselines[i] = self.original.decide(state, [spec], device=device)[0]
-                        prefix, items = encode_decision(
-                            state, [spec.view()], self.tok, self.max_seq_len
-                        )
-                        extra["input_tokens"] += len(prefix) + len(items[0].rendered.suffix_ids)
+                        extra["input_tokens"] += self._input_counts(state, [spec])[0]
                     result = baselines[i]
             else:
                 result = baselines[i]
