@@ -477,24 +477,38 @@ def worker(manifest_path, out, stage, seconds):
 
 
 def bounded_run(
-    manifest, out, *, stages=("screen", "heads", "sft", "evaluate", "reserve"), scale=1.0
+    manifest,
+    out,
+    *,
+    stages=("screen", "heads", "sft", "evaluate", "reserve"),
+    scale=1.0,
+    stage_limits=None,
 ):
     gpu_info()
     if not 0 < scale <= 1:
         raise ValueError("budget scale must be in (0, 1]")
+    stage_limits = stage_limits or {}
+    for stage, seconds in stage_limits.items():
+        if stage not in STAGE_SECONDS or not 0 < seconds <= STAGE_SECONDS[stage]:
+            raise ValueError("stage limits must be positive and within the planned caps")
     ledger_path = Path(out) / "budget.json"
     ledger = (
         json.loads(ledger_path.read_text())
         if ledger_path.exists()
         else {"elapsed_s": 0, "stages": []}
     )
+    # A new invocation cannot share a live worker. Retain the whole prior
+    # reservation, including interrupted startup and elapsed GPU overhead.
+    for entry in ledger["stages"]:
+        if entry["status"] == "running":
+            entry.update(status="interrupted", reason="previous invocation ended before completion")
     for stage in stages:
         if stage not in STAGE_SECONDS:
             raise ValueError("unknown budget stage")
         remaining = (
             TOTAL_SECONDS - ledger["elapsed_s"] - 120
         )  # container startup/final flush reserve
-        limit = min(STAGE_SECONDS[stage] * scale, remaining)
+        limit = min(stage_limits.get(stage, STAGE_SECONDS[stage]) * scale, remaining)
         if limit <= 0:
             break
         started = time.monotonic()

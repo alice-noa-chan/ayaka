@@ -51,19 +51,30 @@ def prepare_cpu():
 
 
 @app.function(gpu="H100", timeout=8 * 3600, **COMMON)
-def explore_h100(budget_scale: float = 1.0):
+def explore_h100(budget_scale: float = 1.0, recover_screen: bool = False):
     from ayaka.experiments.v2 import bounded_run
 
     volume.reload()
     try:
-        return bounded_run("/root/candidates.json", "/runs/exploration", scale=budget_scale)
+        options = {}
+        if recover_screen:
+            # Use the one-hour recovery allocation to repeat the failed screen;
+            # retain its original two-hour reservation and omit reproduction.
+            options = {
+                "stages": ("screen", "heads", "sft", "evaluate"),
+                "stage_limits": {"screen": 3600},
+            }
+        return bounded_run(
+            "/root/candidates.json", "/runs/exploration", scale=budget_scale, **options
+        )
     finally:
         volume.commit()
 
 
 @app.local_entrypoint()
-def main(prepare_only: bool = False, budget_scale: float = 1.0):
-    preparation = prepare_cpu.remote()
-    print(json.dumps(preparation, indent=2))
+def main(prepare_only: bool = False, budget_scale: float = 1.0, recover_screen: bool = False):
+    if not recover_screen:
+        preparation = prepare_cpu.remote()
+        print(json.dumps(preparation, indent=2))
     if not prepare_only:
-        print(json.dumps(explore_h100.remote(budget_scale), indent=2))
+        print(json.dumps(explore_h100.remote(budget_scale, recover_screen), indent=2))

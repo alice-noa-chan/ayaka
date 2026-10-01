@@ -138,6 +138,12 @@ one container and no retries. The dedicated `ayaka-v2-exploration` volume stores
 prepared data, cached pinned weights, reports, budget ledger and checkpoints.
 Use a fresh volume/output directory for a separately authorized exploration.
 
+After the stopped Decimal-ordinal screen, `modal run modal_v2.py --recover-screen`
+reuses the prepared volume and original ledger. It retains the interrupted 2h
+reservation, spends at most 1h on a replacement screen from the recovery allowance,
+and omits the separate reproduction stage. Other stages retain their caps, subject
+to the remaining total budget. Reserved allocations are not measured GPU runtime.
+
 ## Status on 2026-10-01
 
 - Implementation tests and native CPU cache/logit parity checks have passed.

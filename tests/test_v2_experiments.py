@@ -34,3 +34,25 @@ def test_deadline_budget_is_reserved_before_subprocess_and_never_reset(tmp_path,
     assert len(second["stages"]) == 2 and second["elapsed_s"] <= TOTAL_SECONDS
     with pytest.raises(ValueError, match="scale"):
         bounded_run("manifest", str(tmp_path), scale=2)
+
+
+def test_recovery_keeps_interrupted_reservation_and_caps_new_stage(tmp_path, monkeypatch):
+    import ayaka.experiments.v2 as experiment
+
+    monkeypatch.setattr(experiment, "gpu_info", lambda: {})
+    prior = {
+        "elapsed_s": 7200,
+        "stages": [{"stage": "screen", "allocation_s": 7200, "status": "running"}],
+    }
+    (tmp_path / "budget.json").write_text(json.dumps(prior))
+    monkeypatch.setattr(
+        experiment.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0)
+    )
+    recovered = bounded_run(
+        "manifest", str(tmp_path), stages=("screen",), stage_limits={"screen": 3600}
+    )
+    assert recovered["elapsed_s"] == 10800
+    assert recovered["stages"][0]["status"] == "interrupted"
+    assert recovered["stages"][1]["allocation_s"] == 3600
+    with pytest.raises(ValueError, match="stage limits"):
+        bounded_run("manifest", str(tmp_path), stage_limits={"screen": 7201})
