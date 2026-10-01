@@ -8,7 +8,12 @@ from test_multimodal import build, media
 from ayaka.checkpoint import apply_lora
 from ayaka.data.schema import Question, Sample
 from ayaka.training.multimodal import image_items
-from ayaka.training.throughput import completion_plan, profile_backward
+from ayaka.training.throughput import (
+    completion_plan,
+    profile_backward,
+    profile_overheads,
+    profile_production,
+)
 from ayaka.training.trainer import TrainConfig, Trainer
 
 
@@ -20,7 +25,12 @@ def setup():
     sample = Sample(
         "Document",
         [Question.noul("q", "Visible?", 1)],
-        {"media": media(), "task_family": "document", "language": "en"},
+        {
+            "media": media(),
+            "task_family": "document",
+            "language": "en",
+            "source_lineage": "test-document",
+        },
     )
     trainer = Trainer(model, tok, TrainConfig(bf16=False), "cpu", image_backend=backend)
     return trainer, image_items(sample, backend, {"q": "The document is visible."}), sample, backend
@@ -98,6 +108,7 @@ def test_runner_profiles_or_refuses_an_unfinishable_schedule_before_optimizer(
     if profile_only:
         result = run_v2.execute_training(args, trainer.model.cfg, recipe, {"train": [sample]})
         assert result["optimizer_steps"] == 0 and result["status"] == "throughput_profile_only"
+        assert result["completion_plan"]["available_remaining_seconds"] > args.max_train_seconds
     else:
         with pytest.raises(ValueError, match="no optimizer steps"):
             run_v2.execute_training(args, trainer.model.cfg, recipe, {"train": [sample]})
@@ -150,3 +161,58 @@ def test_admitted_schedule_completes_every_step_and_marks_final_checkpoint(tmp_p
     assert result["complete"] and result["steps"] == 2 and not result["stopped_early"]
     marker = json.loads((tmp_path / "run" / "checkpoint" / "complete.json").read_text())
     assert marker == {"steps": 2, "complete": True}
+
+
+def test_measured_optimizer_and_io_profiles_never_touch_live_weights_state_or_rng(tmp_path):
+    from ayaka.training.run_v2 import trainable_digest
+
+    trainer, _, _, _ = setup()
+    before, rng = trainable_digest(trainer.model), torch.get_rng_state().clone()
+    report = profile_overheads(trainer, tmp_path / "probe", repeats=2)
+    assert report["checkpoint_bytes"] > 0 and report["checkpoint_seconds"] > 0
+    assert report["max_optimizer_seconds"] > 0 and report["disposable_optimizer_steps"] == 3
+    assert report["model_optimizer_steps"] == 0 and not report["probe_is_trained_checkpoint"]
+    assert (
+        trainable_digest(trainer.model) == before and not trainer.opt.state and trainer.step_i == 0
+    )
+    assert torch.equal(rng, torch.get_rng_state())
+    assert all(parameter.grad is None for parameter in trainer.model.parameters())
+    assert not (tmp_path / "probe" / "untrained_io_probe" / "complete.json").exists()
+
+
+def test_measured_completion_counts_all_writes_and_rejects_disk_shortfall():
+    overheads = {
+        "max_optimizer_seconds": 0.5,
+        "checkpoint_seconds": 10,
+        "checkpoint_bytes": 1000,
+        "disk_free_bytes": 1_000_000,
+    }
+    plan = completion_plan(
+        {"max_seconds": 8}, 1200, 14400, overheads=overheads, checkpoint_every=100
+    )
+    assert plan["checkpoint_writes"] == 14 and plan["save_seconds_reserved"] == 140
+    assert plan["estimated_remaining_seconds"] == (8.5 * 1200 + 140) * 1.25
+    assert plan["overheads_measured"] and plan["fits"]
+    daily = completion_plan({"max_seconds": 1}, 2, 1000, overheads=overheads, checkpoint_every=1)
+    assert daily["checkpoint_writes"] == 3
+    no_disk = completion_plan(
+        {"max_seconds": 1}, 2, 1000, overheads={**overheads, "disk_free_bytes": 1}
+    )
+    assert not no_disk["fits"] and not no_disk["disk_fits"]
+
+
+def test_production_profile_covers_cold_image_and_trace_strata_without_gradients():
+    import itertools
+
+    from ayaka.training.workload import describe_rows
+
+    trainer, rows, sample, _ = setup()
+    trainer.cfg.questions_per_step = 2
+    report = profile_production(
+        trainer, itertools.repeat(rows), [sample], [describe_rows(sample, rows)], lambda _: rows
+    )
+    assert report["measured_batches"] == 6
+    assert len(report["stress"]) == 2
+    assert all(row["cold_image_features"] and row["weights_unchanged"] for row in report["stress"])
+    assert report["max_seconds"] >= max(row["max_seconds"] for row in report["stress"])
+    assert trainer.step_i == 0 and not trainer.opt.state

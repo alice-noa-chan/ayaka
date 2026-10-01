@@ -171,6 +171,17 @@ def main(argv=None):
         action="store_true",
         help="time production backward batches without optimizer updates",
     )
+    execution.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="CPU-only complete workload accounting, without weights",
+    )
+    parser.add_argument(
+        "--planned-steps",
+        type=int,
+        default=1200,
+        help="reference schedule for planning/profile only; never starts optimizer updates",
+    )
     parser.add_argument("--steps", type=int)
     parser.add_argument("--max-train-seconds", type=float)
     parser.add_argument("--out")
@@ -188,6 +199,32 @@ def main(argv=None):
     config = dict(recipe["model"])
     config["lora_targets"] = tuple(config["lora_targets"])
     cfg = ElectraConfig(**config)
+    if args.planned_steps < 1:
+        raise ValueError("planned step count must be positive")
+    if args.plan_only:
+        from .workload import finite_workload
+
+        if args.steps is not None or not args.out or Path(args.out).exists():
+            raise ValueError("plan-only needs a new output file and uses --planned-steps")
+        if not source_matches(manifest):
+            raise ValueError("source files changed after bundle preparation; prepare a new bundle")
+        inventory = json.loads(
+            (Path(args.bundle) / "model_preflight.json").read_text(encoding="utf-8")
+        )["train_inventory"]
+        result = finite_workload(
+            inventory,
+            args.planned_steps,
+            recipe["training"]["questions_per_step"],
+            recipe["training"]["seed"],
+            recipe["language_sampling"],
+        )
+        result["bundle_manifest_sha256"] = sha256(
+            (Path(args.bundle) / "manifest.json").read_bytes()
+        )
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_bytes(canonical(result) + b"\n")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return result
     if not args.execute and not args.backward_only and not args.profile_only:
         result = {
             "status": "bundle_verified_no_training",
@@ -257,7 +294,8 @@ def execute_training(args, cfg, recipe, splits):
     if args.backward_only:
         return {"status": "backward_preflight_only", **smoke}
 
-    from .throughput import completion_plan, profile_backward
+    from .throughput import completion_plan, profile_overheads, profile_production
+    from .workload import describe_rows, finite_workload
 
     def stream():
         return sample_stream(
@@ -271,15 +309,62 @@ def execute_training(args, cfg, recipe, splits):
             recipe.get("prepared_cache_bytes", 256 * 1024 * 1024),
         )
 
-    profile = profile_backward(trainer, stream())
-    (root / "throughput.json").write_bytes(canonical(profile) + b"\n")
-    if getattr(args, "profile_only", False):
-        return {"status": "throughput_profile_only", **profile}
-    target_seconds = min(
-        args.max_train_seconds, recipe.get("completion_target_seconds", args.max_train_seconds)
+    # New bundles have the CPU-prepared inventory already. Tests/legacy callers
+    # derive it without changing what enters gradients.
+    inventory = None
+    if getattr(args, "bundle", None):
+        audit_path = Path(args.bundle) / "model_preflight.json"
+        if audit_path.exists():
+            inventory = json.loads(audit_path.read_text(encoding="utf-8")).get("train_inventory")
+    if inventory is None:
+        inventory = [
+            describe_rows(sample, prepared_items(sample, tok, cfg, backend))
+            for sample in splits["train"]
+        ]
+    profile = profile_production(
+        trainer,
+        stream(),
+        splits["train"],
+        inventory,
+        lambda sample: prepared_items(sample, tok, cfg, backend),
     )
-    plan = completion_plan(profile, args.steps, max(0, target_seconds - (time.monotonic() - start)))
+    (root / "throughput.json").write_bytes(canonical(profile) + b"\n")
+    overheads = profile_overheads(trainer, root / "io_profile")
+    (root / "overheads.json").write_bytes(canonical(overheads) + b"\n")
+    planned_steps = (
+        getattr(args, "planned_steps", 1200) if getattr(args, "profile_only", False) else args.steps
+    )
+    workload = finite_workload(
+        inventory,
+        planned_steps,
+        trainer.cfg.questions_per_step,
+        trainer.cfg.seed,
+        recipe["language_sampling"],
+    )
+    (root / "workload.json").write_bytes(canonical(workload) + b"\n")
+    target_seconds = (
+        recipe.get("completion_target_seconds", 14400)
+        if getattr(args, "profile_only", False)
+        else min(
+            args.max_train_seconds, recipe.get("completion_target_seconds", args.max_train_seconds)
+        )
+    )
+    plan = completion_plan(
+        profile,
+        planned_steps,
+        max(0, target_seconds - (time.monotonic() - start)),
+        overheads=overheads,
+        checkpoint_every=getattr(args, "checkpoint_every", 100),
+    )
+    plan["schedule_sha256"] = workload["schedule_sha256"]
     (root / "completion_plan.json").write_bytes(canonical(plan) + b"\n")
+    if getattr(args, "profile_only", False):
+        return {
+            "status": "throughput_profile_only",
+            **profile,
+            "completion_plan": plan,
+            "optimizer_save_overheads": overheads,
+        }
     if not plan["fits"]:
         raise ValueError(
             "complete planned schedule does not fit the measured budget; no optimizer steps executed"
