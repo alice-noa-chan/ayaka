@@ -47,6 +47,17 @@ Worked steps are an internal inference mechanism and are not returned by default
 
 ## Architecture and training
 
+The [Jeeves reference inspected on 2026-10-01](https://github.com/PostHog/jeeves/tree/6151619c14fcffb2406830f09fd4f09fdd22200e)
+combines Qwen3.5-9B LoRA, a pointer head, repeated questions after reasoning,
+SFT/CISPO and an optimized diffusion drafter. Its public benchmark excludes the
+sealed judge tier. This exploration adopts cached trace continuation and repeated
+typed readout while keeping Ayaka's native LM/Set Mixer hybrid alternatives,
+verified concise traces, explicit forced budgets and independently validated
+routing. Jeeves also reports calibration degradation from excessive RL training;
+our bounded experiment checks proper losses and reserved path calibration.
+RL and speculative decoding remain outside this SFT exploration. Native eager
+greedy timing here cannot be compared directly with Jeeves' FP8/drafter timings.
+
 Native output heads are retained even when untied; bias, scaling and softcap are
 applied. Non-Gemma chat turns derive from their native templates. Dense caches
 can batch branch; recurrent caches branch individually when a layer cannot expand.
@@ -87,7 +98,7 @@ bypasses routing entirely. Path calibration fits only the
 reserved calibration split by primitive/actual route/budget band, with scalar
 fallbacks. Load artifacts using `--reasoning-router` and `--reasoning-calibration`.
 Router fitting can combine all three effort pairs, but bootstraps independent
-questions rather than treating repeated efforts as new samples. Each budget also
+fact cases rather than treating repeated efforts as new samples. Each budget also
 requires a positive dev confidence bound; unvalidated budgets stay direct.
 Older single-budget artifacts apply only at their measured budget. Forced `on`
 requests continue to run at every supported explicit budget.
@@ -96,9 +107,11 @@ and forced efforts. Router features use the uncalibrated direct distribution;
 output calibration cannot feed back into the routing inputs. Direct outputs use
 the zero-generation calibration band even when their requested auto budget is 384.
 Confidence intervals cluster all measurements of the same underlying facts,
-including different primitives and repeated efforts. The 96 dev decisions contain
-22 distinct fact cases, and the router-training screen contains 20; these are not
-96 independent cases. Router fitting rejects shared train/dev case identities.
+including different primitives and repeated efforts. Curriculum v3 has 27 distinct
+fact cases in its 96 dev decisions. Router fitting uses up to 24 distinct cases,
+approximately balanced across primitive types, from its separate prepared split;
+at least 20 are required. These are not 96 independent cases. Router fitting
+rejects shared train/dev case identities.
 
 ## Survey and evaluation
 
@@ -133,6 +146,9 @@ baseline. Up to two candidates receive joint SFT, followed by effort/route/
 calibration and an independent test split. Test never selects the model or λ.
 Reports include both repaired and damaged answers and seed-15 paired bootstrap
 intervals. Deadline-incomplete runs are recorded and cannot win screening.
+Repaired/damaged counts describe classification correctness. Continuous Score
+nMAE improvements/worsenings are separate, with a stated 1e-6 count tolerance;
+full differences remain in CC, NLL, RPS and confidence intervals.
 
 ## Bounded execution
 
@@ -177,9 +193,13 @@ After an externally observed container stop, the reservation can be reconciled
 against its complete observed uptime **upper bound**, plus at least 120 seconds
 of overhead per container. Original allocations and closure evidence remain in
 the ledger; unknown/live time and prior overruns are never released. The recorded
-[closed-window evidence](v2_closed_windows.json) bounds the three stopped attempts
+[closed-window evidence](v2_closed_windows.json) bounds the first three stopped attempts
 at 3,242 seconds in total, including overhead. This is a conservative resource
 bound, not a billing invoice or a claim that unused allocations were consumed.
+For a later closed container containing sequential stages, completed subprocess
+durations stay charged to their stages and the entire remaining observed window
+plus overhead stays charged to its final stage. The fourth observed closure brings
+the pre-continuation bound to 7,843 seconds; earlier allocations/evidence remain.
 Paired evaluations can resume stored rows without repeating already measured
 decisions. IDs, targets, types and budgets must match, and only complete 96-item
 results can enter selection.
@@ -196,11 +216,60 @@ checkpoint with a dataset signature. Compiled kernels persist in the volume.
 CPU budget reconciliation precedes allocation; the GPU function's hard timeout
 is reduced to the remaining total allowance, retaining the startup/flush margin.
 
+Curriculum v2's family/index-linked Noul labels and narrow numeric answer positions
+made its post-SFT results vulnerable to shortcuts. Its screens and checkpoints are
+archived under `interrupted-curriculum-v2` and cannot select or evaluate v3 models.
+Curriculum v3 varies plausible distractor contents, mixes both proposition
+polarities within each family, removes visible row-counter clues and varies
+calendar cases. Tests check actual canonical Choice and ordinal Score answer
+positions, both leap outcomes, independent facts and prefix-stable generation.
+These checks reduce obvious shortcuts; the shared procedural algorithms still
+limit any claim about natural-language or sealed-benchmark generalization.
+
+The corrected continuation explicitly screens Gemma E4B, Gemma 12B and Domyn at
+the same 96 questions. Seven other built-in candidates are deferred in the new
+comparison; the two custom architectures still require review. At continuation
+startup, the remaining cumulative screening allowance was about 27.5 minutes,
+rather than a fresh two hours. Only complete compatible results selected the two
+SFT candidates. The historical invocation below used the first four closure
+observations; the current evidence file also includes this completed continuation
+and does not grant a fresh screening allowance on another invocation.
+
+```sh
+modal run modal_v2.py --refresh-curriculum --screen-candidates gemma4-e4b,gemma4-12b,domyn-small --closed-windows docs/experiments/v2_closed_windows.json
+```
+
+Evaluation records the same natural-language and EN/KO/JA direct baselines before
+loading the SFT checkpoint. They diagnose regressions and never select candidates
+or routing coefficients. Every 16 paired questions saves partial progress.
+
+Measured artifacts can be summarized without further model calls:
+
+```sh
+python -m ayaka.experiments.report --run RUN_DIRECTORY --out findings.json
+```
+
+The collector preserves raw probabilities, timings and token counts, hashes its
+sources, and recomputes case-clustered paired intervals where prepared-split
+signatures are available. Early unsigned screens without recorded curriculum
+hashes retain their original point measurements with an explicit provenance
+limitation; no case interval is invented for them. Incomplete status is retained.
+Calibration temperatures remain in `eval/CANDIDATE/calibration.json`; complete
+paired probabilities, timing and raw tokens remain separately in
+`calibration_measurements.json`, verified against the reserved preparation.
+
 ## Status on 2026-10-01
 
-- Implementation tests and native CPU cache/logit parity checks have passed.
+- Ruff lint/format and native CPU cache/logit parity checks passed. The final
+  code integration has 323 passing tests and one Beam SDK-dependent skip.
 - Remote CPU preparation downloaded all ten built-in candidates. The two custom
   architectures remain explicit survey-only entries pending code review.
-- H100 screening/training results will be recorded separately when measured.
-- No v2 weights, official JevBench score, final backbone recommendation or larger
-  training budget is implied by this preparation status.
+- The corrected three-candidate H100 screen, head probe, two 500-step joint SFTs,
+  effort/calibration/router comparisons and both independent tests completed.
+  See [measured findings](V2_FINDINGS_2026-10-01.md) and its machine-readable audit.
+- Closed-container accounting, including interruptions and margins, is
+  13,627 seconds (3h 47m 07s), within the 8h limit. Seven built-in candidates were
+  deferred from the corrected comparison; no official sealed score is claimed.
+- E4B improves on the procedural test, but natural-language/multilingual
+  regressions remain. No v2 weights are published and no larger main-training
+  budget or final public backbone is approved by these results.

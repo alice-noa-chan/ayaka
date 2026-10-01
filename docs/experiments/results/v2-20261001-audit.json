@@ -1,0 +1,627 @@
+{
+  "measured_on": "2026-10-01",
+  "executed_source_commit": "a7fc4e5",
+  "calibration_persistence_commit": "7742e3c",
+  "official_composite": null,
+  "sealed": false,
+  "parameter_audit": {
+    "gemma4-12b": {
+      "official_base_total": 11959730224,
+      "checkpoint_elements": {
+        "head.safetensors": 3673868,
+        "adapter/adapter_model.safetensors": 65568768
+      },
+      "conservative_total": 12028972860
+    },
+    "gemma4-e4b": {
+      "official_base_total": 7996156490,
+      "checkpoint_elements": {
+        "head.safetensors": 3018508,
+        "adapter/adapter_model.safetensors": 34881536
+      },
+      "conservative_total": 8034056534
+    }
+  },
+  "controls": {
+    "eval/gemma4-12b/calibration_measurements.json": {
+      "off": {
+        "n": 96,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "disabled": 96
+        }
+      },
+      "low": {
+        "n": 96,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 3359,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "medium": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 3359,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "high": {
+        "n": 96,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 3359,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      }
+    },
+    "eval/gemma4-12b/dev.json": {
+      "off": {
+        "n": 96,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "disabled": 96
+        }
+      },
+      "low": {
+        "n": 96,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 3364,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "medium": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 3364,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "high": {
+        "n": 96,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 3364,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      }
+    },
+    "eval/gemma4-12b/language_baseline.json": {
+      "off": {
+        "n": 3,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 3
+        },
+        "finish_reasons": {
+          "disabled": 3
+        }
+      }
+    },
+    "eval/gemma4-12b/language_regression.json": {
+      "off": {
+        "n": 3,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 3
+        },
+        "finish_reasons": {
+          "disabled": 3
+        }
+      },
+      "high": {
+        "n": 3,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 47,
+        "routes": {
+          "reasoned": 3
+        },
+        "finish_reasons": {
+          "eos": 3
+        }
+      }
+    },
+    "eval/gemma4-12b/natural_baseline.json": {
+      "off": {
+        "n": 128,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 128
+        },
+        "finish_reasons": {
+          "disabled": 128
+        }
+      }
+    },
+    "eval/gemma4-12b/natural_direct.json": {
+      "off": {
+        "n": 128,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 128
+        },
+        "finish_reasons": {
+          "disabled": 128
+        }
+      }
+    },
+    "eval/gemma4-12b/router_train.json": {
+      "off": {
+        "n": 24,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 24
+        },
+        "finish_reasons": {
+          "disabled": 24
+        }
+      },
+      "low": {
+        "n": 24,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 823,
+        "routes": {
+          "reasoned": 24
+        },
+        "finish_reasons": {
+          "eos": 24
+        }
+      },
+      "medium": {
+        "n": 24,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 823,
+        "routes": {
+          "reasoned": 24
+        },
+        "finish_reasons": {
+          "eos": 24
+        }
+      },
+      "high": {
+        "n": 24,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 823,
+        "routes": {
+          "reasoned": 24
+        },
+        "finish_reasons": {
+          "eos": 24
+        }
+      }
+    },
+    "eval/gemma4-12b/test.json": {
+      "off": {
+        "n": 96,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "disabled": 96
+        }
+      },
+      "low": {
+        "n": 96,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 3331,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "medium": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 3331,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "high": {
+        "n": 96,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 3331,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "auto": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "no_validated_router": 96
+        }
+      }
+    },
+    "eval/gemma4-e4b/calibration_measurements.json": {
+      "off": {
+        "n": 96,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "disabled": 96
+        }
+      },
+      "low": {
+        "n": 96,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 3314,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "medium": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 3314,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "high": {
+        "n": 96,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 3314,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      }
+    },
+    "eval/gemma4-e4b/dev.json": {
+      "off": {
+        "n": 96,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "disabled": 96
+        }
+      },
+      "low": {
+        "n": 96,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 3301,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "medium": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 3301,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "high": {
+        "n": 96,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 3301,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      }
+    },
+    "eval/gemma4-e4b/language_baseline.json": {
+      "off": {
+        "n": 3,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 3
+        },
+        "finish_reasons": {
+          "disabled": 3
+        }
+      }
+    },
+    "eval/gemma4-e4b/language_regression.json": {
+      "off": {
+        "n": 3,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 3
+        },
+        "finish_reasons": {
+          "disabled": 3
+        }
+      },
+      "high": {
+        "n": 3,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 79,
+        "routes": {
+          "reasoned": 3
+        },
+        "finish_reasons": {
+          "eos": 3
+        }
+      }
+    },
+    "eval/gemma4-e4b/natural_baseline.json": {
+      "off": {
+        "n": 128,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 128
+        },
+        "finish_reasons": {
+          "disabled": 128
+        }
+      }
+    },
+    "eval/gemma4-e4b/natural_direct.json": {
+      "off": {
+        "n": 128,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 128
+        },
+        "finish_reasons": {
+          "disabled": 128
+        }
+      }
+    },
+    "eval/gemma4-e4b/router_train.json": {
+      "off": {
+        "n": 24,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 24
+        },
+        "finish_reasons": {
+          "disabled": 24
+        }
+      },
+      "low": {
+        "n": 24,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 822,
+        "routes": {
+          "reasoned": 24
+        },
+        "finish_reasons": {
+          "eos": 24
+        }
+      },
+      "medium": {
+        "n": 24,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 822,
+        "routes": {
+          "reasoned": 24
+        },
+        "finish_reasons": {
+          "eos": 24
+        }
+      },
+      "high": {
+        "n": 24,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 822,
+        "routes": {
+          "reasoned": 24
+        },
+        "finish_reasons": {
+          "eos": 24
+        }
+      }
+    },
+    "eval/gemma4-e4b/test.json": {
+      "off": {
+        "n": 96,
+        "requested_budget": 0,
+        "raw_reasoning_tokens": 0,
+        "routes": {
+          "direct": 96
+        },
+        "finish_reasons": {
+          "disabled": 96
+        }
+      },
+      "low": {
+        "n": 96,
+        "requested_budget": 128,
+        "raw_reasoning_tokens": 3263,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "medium": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 3263,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "high": {
+        "n": 96,
+        "requested_budget": 1024,
+        "raw_reasoning_tokens": 3263,
+        "routes": {
+          "reasoned": 96
+        },
+        "finish_reasons": {
+          "eos": 96
+        }
+      },
+      "auto": {
+        "n": 96,
+        "requested_budget": 384,
+        "raw_reasoning_tokens": 1719,
+        "routes": {
+          "direct": 43,
+          "reasoned": 53
+        },
+        "finish_reasons": {
+          "not_selected": 43,
+          "eos": 53
+        }
+      }
+    }
+  },
+  "closed_gpu_windows": [
+    {
+      "stage_index": 0,
+      "container_id": "ta-01M3TY812KRAS1QGDV9KAFWVSR",
+      "app_id": "ap-0ptnEBg6OkWWRKGEDo0OLY",
+      "closure_evidence": "modal app stop --yes succeeded; later container inventory contained only the next exploration container",
+      "started_at": "2026-10-01T05:15:59+00:00",
+      "ended_before": "2026-10-01T05:29:48+00:00",
+      "startup_shutdown_margin_s": 120
+    },
+    {
+      "stage_index": 1,
+      "container_id": "ta-01M3TZ1A2WF63KEFBWATGM73CR",
+      "app_id": "ap-6LK4FlOSsZVSsOkevPMdzN",
+      "closure_evidence": "modal app stop --yes succeeded; later container inventory contained only the refreshed exploration container",
+      "started_at": "2026-10-01T05:29:48+00:00",
+      "ended_before": "2026-10-01T05:41:00+00:00",
+      "startup_shutdown_margin_s": 120
+    },
+    {
+      "stage_index": 2,
+      "container_id": "ta-01M3TZNVKG7E9K8MTRDCM6GN2R",
+      "app_id": "ap-N17B2iF9NOU0mstjAUmPkk",
+      "closure_evidence": "reports and kernel cache committed; modal app stop --yes returned exit code 0; clock tool immediately returned 2026-10-01 06:04:01 UTC",
+      "started_at": "2026-10-01T05:41:00+00:00",
+      "ended_before": "2026-10-01T06:04:01+00:00",
+      "startup_shutdown_margin_s": 120
+    },
+    {
+      "stage_indices": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "sequential_stages": true,
+      "container_id": "ta-01M3V205QXZTPCM9VJVVWRKG7R",
+      "app_id": "ap-DciAEG3qE9pwTVRYySvjHx",
+      "closure_evidence": "volume.commit succeeded; modal app stop --yes returned exit code 0; clock reported 2026-10-01 07:36:17 UTC; subsequent container inventory was empty. budget.json records completed sequential recover_screen, heads and sft subprocess durations; evaluate was interrupted after detecting curriculum label shortcuts.",
+      "started_at": "2026-10-01T06:21:36+00:00",
+      "ended_before": "2026-10-01T07:36:17+00:00",
+      "startup_shutdown_margin_s": 120
+    },
+    {
+      "stage_indices": [
+        7,
+        8,
+        9,
+        10
+      ],
+      "sequential_stages": true,
+      "container_id": "ta-01M3V7W61K1GW3YCDMDND4M77R",
+      "app_id": "ap-v6cTHQNJO2OTYlB3dc6ehl",
+      "closure_evidence": "modal run returned exit code 0 with complete screen, heads, sft and evaluate stages; its volume.commit completed before return. The stop command reported that the app was already stopped, finished at 2026-10-01 18:38:08+09:00 (exit code 1 because no running app remained). The clock then reported 2026-10-01 09:38:41 UTC and subsequent modal container list --json returned an empty list.",
+      "started_at": "2026-10-01T08:04:17+00:00",
+      "ended_before": "2026-10-01T09:38:41+00:00",
+      "startup_shutdown_margin_s": 120
+    }
+  ],
+  "conservative_gpu_seconds": 13627.0,
+  "stage_charged_seconds": {
+    "screen": 4304.8842340030005,
+    "recover_screen": 2305.733574535,
+    "heads": 108.73266968900043,
+    "sft": 983.2544022520003,
+    "evaluate": 5924.395119520999,
+    "reserve": 0.0
+  },
+  "budget_limit_seconds": 28800,
+  "budget_accounting": "closed container upper bounds plus live/unverified reservations",
+  "verification": {
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "pytest_passed": 323,
+    "pytest_skipped": 1,
+    "skip_reason": "Beam SDK not installed",
+    "checks_after_final_code_change": true
+  },
+  "budget_reconciled_locally": true,
+  "raw_remote_budget_sha256": "417379d1f555a8deb241577644462560474d47ed9dbe3f856a5e29f254da1e26",
+  "report_sha256": "312096d69a034f874b68def5e0eda96766188853c4c0445eb2bd7f3284b7cff9",
+  "note": "Closed-container upper bounds include retained startup/shutdown margins. This is not invoice billing or a claim that reserved allocations were consumed."
+}

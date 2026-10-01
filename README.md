@@ -513,3 +513,5 @@ A checkpoint directory contains `electra_config.json`, the LoRA `adapter/`,
 The experimental v2 controls, native-backbone support, joint reasoning training
 and bounded H100 exploration are documented in [Ayaka v2](docs/experiments/AYAKA_V2.md).
 Published v1 checkpoints keep their existing defaults; v2 results are reported separately.
+The [2026-10-01 exploration findings](docs/experiments/V2_FINDINGS_2026-10-01.md)
+include measured improvements, multilingual regressions and the closed GPU-time audit.
