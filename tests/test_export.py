@@ -9,6 +9,7 @@ import torch
 
 from ayaka.config import tiny_config
 from ayaka.export import export_model, load_exported, parity
+from ayaka.http_transport import request_bytes
 from ayaka.model.electra import ElectraDecisionModel
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.quant import Int8Embedding, dequantize_rows, quantize_rows
@@ -161,24 +162,24 @@ def test_http_server_roundtrip(model):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/systemone",
             data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Idempotency-Key": "roundtrip"},
         )
-        with urllib.request.urlopen(req, timeout=60) as r:
-            out = json.loads(r.read())
+        out = json.loads(request_bytes(req, timeout=60))
         assert out["answers"]["d"]["type"] == "noul"
         assert 0.0 <= out["answers"]["d"]["noul"] <= 1.0
         bad = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/systemone",
             data=b'{"questions": {}}',
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Idempotency-Key": "bad"},
         )
         with pytest.raises(urllib.error.HTTPError) as e:
-            urllib.request.urlopen(bad, timeout=60)
+            request_bytes(bad, timeout=60)
         assert e.value.code == 400
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=10) as r:
-            assert json.loads(r.read())["status"] == "ok"
+        health = urllib.request.Request(f"http://127.0.0.1:{port}/health")
+        assert json.loads(request_bytes(health, timeout=10))["status"] == "ok"
     finally:
         httpd.shutdown()
+        httpd.server_close()
 
 
 def test_endpoint_client_scores_the_http_path_like_the_direct_decision(model):

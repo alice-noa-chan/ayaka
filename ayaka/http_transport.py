@@ -26,9 +26,16 @@ class RequestCache:
     A deployment with multiple workers needs a shared idempotency store.
     """
 
-    def __init__(self, capacity=128, retention=3600, max_response_bytes=2 * 1024 * 1024):
+    def __init__(
+        self,
+        capacity=8192,
+        retention=3600,
+        max_response_bytes=2 * 1024 * 1024,
+        max_bytes=64 * 1024 * 1024,
+    ):
         self.capacity, self.retention = capacity, retention
         self.max_response_bytes = max_response_bytes
+        self.max_bytes = max_bytes
         self.entries = {}
         self.lock = Lock()
 
@@ -48,6 +55,9 @@ class RequestCache:
                 return response
             if len(self.entries) >= self.capacity:
                 raise CacheFull("idempotency cache full; retry later with the same key")
+            used = sum(len(entry[2][1]) for entry in self.entries.values())
+            if used + max(self.max_response_bytes, 128) > self.max_bytes:
+                raise CacheFull("idempotency response memory full; retry later with the same key")
             response = compute()
             if len(response[1]) > self.max_response_bytes:
                 response = (503, b'{"error":"response exceeds idempotency cache limit"}')

@@ -227,7 +227,10 @@ def make_handler(service: DecisionService):
             try:
                 from .multimodal import MAX_HTTP_BYTES
 
-                n = int(self.headers.get("Content-Length", "0"))
+                try:
+                    n = int(self.headers.get("Content-Length", "0"))
+                except ValueError as exc:
+                    raise BadRequest("invalid Content-Length") from exc
                 if not 0 <= n <= MAX_HTTP_BYTES:
                     raise BadRequest("request exceeds the 24 MiB body limit")
                 raw = self.rfile.read(n)
@@ -245,7 +248,16 @@ def make_handler(service: DecisionService):
                         code, out = 400, {"error": str(exc)}
                     except Exception as exc:
                         code, out = 500, {"error": f"internal error: {type(exc).__name__}"}
-                    return code, json.dumps(out, ensure_ascii=False).encode("utf-8")
+                    data = json.dumps(out, ensure_ascii=False).encode("utf-8")
+                    if key is not None and len(data) > cache.max_response_bytes:
+                        code = 503
+                        data = json.dumps(
+                            {
+                                "error": "response exceeds idempotency cache limit",
+                                "usage": out.get("usage", {}),
+                            }
+                        ).encode()
+                    return code, data
 
                 key = self.headers.get("Idempotency-Key")
                 code, data = cache.execute(key, raw, compute) if key is not None else compute()
@@ -254,7 +266,7 @@ def make_handler(service: DecisionService):
                 self._send(409, {"error": str(exc)})
             except CacheFull as exc:
                 self._send(503, {"error": str(exc)})
-            except (BadRequest, json.JSONDecodeError) as e:
+            except (BadRequest, json.JSONDecodeError, UnicodeDecodeError) as e:
                 self._send(400, {"error": str(e)})
             except Exception as e:  # never leak a traceback to the caller
                 self._send(500, {"error": f"internal error: {type(e).__name__}"})
@@ -433,8 +445,9 @@ def main(argv: list[str] | None = None) -> None:
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
     service = DecisionService(decision, name, overrides or None)
     httpd = server_for((args.host, args.port), make_handler(service))
+    display_host = f"[{args.host}]" if ":" in args.host else args.host
     print(
-        f"[serve] {name} on {args.device} at http://{args.host}:{args.port}/v1/systemone",
+        f"[serve] {name} on {args.device} at http://{display_host}:{args.port}/v1/systemone",
         flush=True,
     )
     httpd.serve_forever()
