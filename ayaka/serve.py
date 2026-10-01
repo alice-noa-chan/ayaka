@@ -155,7 +155,9 @@ class DecisionService:
             "model": body.get("model") or self.model_name,
             "answers": answers,
             "usage": {
-                "input_tokens": self._count_tokens(state, parsed),
+                "input_tokens": sum(d["input_tokens"] for d in diagnostics.values())
+                if diagnostics
+                else self._count_tokens(state, parsed),
                 "output_tokens": reasoning_tokens
                 if diagnostics
                 else sum(len(self.decision.tok.encode(g)) for g in generated if g),

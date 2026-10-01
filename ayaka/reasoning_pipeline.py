@@ -7,7 +7,7 @@ from time import perf_counter
 
 import torch
 
-from .collate import EncodedQuestion, suffix_rows
+from .collate import EncodedQuestion, encode_decision, suffix_rows
 from .evidence import EvidenceError
 from .evidence_generation import PlanGenerator, chat_ids
 from .evidence_pipeline import decision_request, gate_passes
@@ -60,6 +60,8 @@ class Trace:
     cache: object = None
     finish_reason: str = "length"
     error: str | None = None
+    prefill_tokens: int = 0
+    readout_tokens: int = 0
 
     @property
     def generated_tokens(self):
@@ -89,6 +91,7 @@ class TraceGenerator:
         dev = self.model.embed_weight().device
         self.model.eval()
         try:
+            trace.prefill_tokens = len(trace.input_ids)
             ids = torch.tensor([trace.input_ids], device=dev)
             hidden, trace.cache = prefill_last(self.model.text_model(), ids)
             for _ in range(budget):
@@ -116,6 +119,7 @@ class TraceGenerator:
         rendered = readout_suffix(self.tok, spec, self.model.cfg.max_label_candidates)
         prefix = trace.input_ids + trace.token_ids
         item = EncodedQuestion(prefix, rendered, PRIMITIVE_INDEX[spec.type])
+        trace.readout_tokens += len(rendered.suffix_ids)
         large = spec.type == "choice" and len(spec.candidates) > self.model.cfg.max_label_candidates
         rerank_cache = copy.deepcopy(trace.cache) if large else None
         batch = suffix_rows([item], len(prefix), self.tok.pad_id).to(
@@ -131,7 +135,9 @@ class TraceGenerator:
             # Each rerank starts at the same trace, never a previous readout.
             cache_trace = copy.copy(trace)
             cache_trace.cache = rerank_cache
+            cache_trace.readout_tokens = 0
             inner = self.readout(cache_trace, sub)
+            trace.readout_tokens += cache_trace.readout_tokens
             mass = sum(p[i] for i in top)
             for j, i in enumerate(top):
                 p[i] = mass * inner[j]
@@ -141,10 +147,11 @@ class TraceGenerator:
 class ControlledDecision:
     supports_reasoning = True
 
-    def __init__(self, original, generator, router=None):
+    def __init__(self, original, generator, router=None, calibration=None):
         self.original, self.generator, self.router = original, generator, router
         self.model, self.tok = original.model, original.tok
         self.max_seq_len = original.max_seq_len
+        self.calibration = calibration
 
     def _settings(self):
         cfg = self.model.cfg
@@ -166,6 +173,19 @@ class ControlledDecision:
             else []
         )
         baselines = dict(zip(indices, direct, strict=True))
+        baseline_tokens = {}
+        if indices:
+            prefix, items = encode_decision(
+                state,
+                [questions[i].view() for i in indices],
+                self.tok,
+                self.max_seq_len,
+                self.model.cfg.max_label_candidates,
+            )
+            baseline_tokens = {
+                i: len(item.rendered.suffix_ids) + (len(prefix) if j == 0 else 0)
+                for j, (i, item) in enumerate(zip(indices, items, strict=True))
+            }
         results = []
         for i, (spec, setting) in enumerate(zip(questions, settings, strict=True)):
             extra = {
@@ -173,6 +193,7 @@ class ControlledDecision:
                 "route": "direct",
                 "budget": setting.budget,
                 "generated_tokens": 0,
+                "input_tokens": baseline_tokens.get(i, 0),
                 "finish_reason": "disabled",
                 "error": None,
                 "generation_s": 0.0,
@@ -228,9 +249,20 @@ class ControlledDecision:
                     extra["route"] = "fallback"
                     if i not in baselines:
                         baselines[i] = self.original.decide(state, [spec], device=device)[0]
+                        prefix, items = encode_decision(
+                            state, [spec.view()], self.tok, self.max_seq_len
+                        )
+                        extra["input_tokens"] += len(prefix) + len(items[0].rendered.suffix_ids)
                     result = baselines[i]
             else:
                 result = baselines[i]
+            if trace is not None:
+                extra["input_tokens"] += trace.prefill_tokens + trace.readout_tokens
+            if self.calibration is not None:
+                result.probs = self.calibration.apply(
+                    result.probs, spec.type, extra["route"], setting.budget
+                )
+                result.distribution = dict(zip(spec.candidates, result.probs, strict=True))
             if spec.type == "noul":
                 result.extras["p_true"] = result.probs[1]
             if spec.type == "score":
@@ -242,5 +274,7 @@ class ControlledDecision:
         return results
 
 
-def controlled_decision(model, tok, max_seq_len=None, router=None):
-    return ControlledDecision(Decision(model, tok, max_seq_len), TraceGenerator(model, tok), router)
+def controlled_decision(model, tok, max_seq_len=None, router=None, calibration=None):
+    return ControlledDecision(
+        Decision(model, tok, max_seq_len), TraceGenerator(model, tok), router, calibration
+    )
