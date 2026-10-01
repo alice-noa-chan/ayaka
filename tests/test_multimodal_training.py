@@ -12,7 +12,10 @@ from ayaka.training.trainer import TrainConfig, Trainer
 
 
 @pytest.mark.parametrize("family", ["gemma4", "gemma4_unified"])
-def test_native_joint_loss_backpropagates_to_adapter_only_and_preserves_weights(family):
+@pytest.mark.parametrize("checkpointed", [False, True])
+def test_native_joint_loss_backpropagates_to_adapter_only_and_preserves_weights(
+    family, checkpointed
+):
     _, model, tok, backend = build(family)
     model.cfg = replace(model.cfg, max_seq_len=4096)
     model.backbone.requires_grad_(False)
@@ -23,11 +26,18 @@ def test_native_joint_loss_backpropagates_to_adapter_only_and_preserves_weights(
         {"media": media()},
     )
     items = image_items(sample, backend, {"q": "The printed total is 10."})
-    trainer = Trainer(model, tok, TrainConfig(bf16=False), "cpu", image_backend=backend)
+    trainer = Trainer(
+        model,
+        tok,
+        TrainConfig(bf16=False, grad_checkpointing=checkpointed),
+        "cpu",
+        image_backend=backend,
+    )
     before = {n: p.detach().clone() for n, p in model.named_parameters()}
     model.train()
     assert [kind for kind, _, _ in trainer._plan(items)] == ["image", "image"]
     for item in items:
+        trainer._set_checkpointing(checkpointed)
         out, tensors = trainer._forward("image", [item])
         loss = decision_loss(out, tensors.targets)["total"] + tensors.reasoning_ce
         assert torch.isfinite(loss)

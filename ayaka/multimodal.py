@@ -87,12 +87,13 @@ def decode_media(state, media):
 
 
 class ImageBackend:
-    def __init__(self, native, processor, model, tok):
+    def __init__(self, native, processor, model, tok, *, processing_device=None):
         if native.config.model_type not in {"gemma4", "gemma4_unified"}:
             raise ValueError("native image backend supports Gemma 4 and Gemma 4 Unified")
         if getattr(native.config, "vision_config", None) is None:
             raise ValueError("checkpoint has no native image components")
         self.native, self.processor, self.model, self.tok = native, processor, model, tok
+        self.processing_device = processing_device
 
     def prepare(self, text, state):
         marker = self.processor.image_token
@@ -100,12 +101,16 @@ class ImageBackend:
         if marker in text:
             raise ValueError("state contains a reserved image token")
         text += "\n" + "\n".join([marker] * len(state.images)) + "\n"
+        return self.process(text, state)
+
+    def process(self, text, state):
         inputs = self.processor(
             text=[text], images=[state.images], add_special_tokens=False, return_tensors="pt"
         )
         if inputs["input_ids"].shape[0] != 1 or not bool(inputs["attention_mask"].all()):
             raise ValueError("image prefix must be one unpadded sequence")
-        dev, dtype = self.model.embed_weight().device, self.model.embed_weight().dtype
+        dev = self.processing_device or self.model.embed_weight().device
+        dtype = self.model.embed_weight().dtype
         return {
             k: v.to(device=dev, dtype=dtype if v.is_floating_point() else v.dtype)
             for k, v in inputs.items()
@@ -224,17 +229,7 @@ class ImageTraceGenerator(TraceGenerator):
         message[0]["content"] += "\n" + "\n".join([marker] * len(state.images))
         text = self.tok.decode(chat_ids(self.tok, message))
         # Markers are already in the chat; processing is otherwise the same native path.
-        processor = self.backend.processor
-        inputs = processor(
-            text=[text], images=[state.images], add_special_tokens=False, return_tensors="pt"
-        )
-        if not bool(inputs["attention_mask"].all()):
-            raise ValueError("image reasoning prefix must be unpadded")
-        dev, dtype = self.model.embed_weight().device, self.model.embed_weight().dtype
-        inputs = {
-            k: v.to(device=dev, dtype=dtype if v.is_floating_point() else v.dtype)
-            for k, v in inputs.items()
-        }
+        inputs = self.backend.process(text, state)
         return inputs["input_ids"][0].tolist(), inputs
 
     def prefill(self, ids, payload):

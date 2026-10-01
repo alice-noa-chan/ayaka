@@ -167,7 +167,9 @@ def partition_diagnostics(sample):
     elif index % 4 == 2:
         memberships["b"] += memberships["a"]
     elif index % 4 == 3:
-        memberships["c"] = parent[2:]
+        memberships["c"] = parent[2:] if index % 8 == 3 else [parent[2]]
+    if index % 8 == 4:
+        memberships["c"] = [domain[0]]
     audit = finite_partition_audit(domain, memberships, parent)
     questions = [
         Question.noul(
@@ -182,6 +184,11 @@ def partition_diagnostics(sample):
             "sufficiency",
             "Does observed evidence uniquely identify an outcome inside the parent?",
             sample.metadata["information_sufficiency"],
+        ),
+        Question.noul(
+            "parent",
+            "Does every listed bucket belong entirely inside the declared parent?",
+            not audit["outside_parent"],
         ),
     ]
     metadata = {
