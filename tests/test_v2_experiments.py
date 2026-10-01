@@ -75,3 +75,58 @@ def test_curriculum_refresh_preserves_old_reports_and_budget(tmp_path):
     assert (tmp_path / "interrupted-curriculum-v1/budget.json").read_bytes() == (
         tmp_path / "budget.json"
     ).read_bytes()
+
+
+def test_failed_first_sft_candidate_does_not_skip_second(tmp_path, monkeypatch):
+    import hashlib
+
+    import torch
+
+    import ayaka.experiments.v2 as experiment
+    from ayaka.config import tiny_config
+    from ayaka.data.reasoning_v2 import CURRICULUM_VERSION
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
+    (tmp_path / "preparation.json").write_text(
+        json.dumps(
+            {
+                "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "curriculum_version": CURRICULUM_VERSION,
+            }
+        )
+    )
+    (tmp_path / "selection.json").write_text('{"ranked": ["broken", "working"]}')
+    monkeypatch.setattr(experiment, "gpu_info", lambda: {})
+    monkeypatch.setattr(
+        experiment,
+        "load_manifest",
+        lambda *args: {"candidates": [{"name": "broken"}, {"name": "working"}]},
+    )
+    calls, saved = [], []
+
+    def load(candidate):
+        calls.append(candidate["name"])
+        if candidate["name"] == "broken":
+            raise RuntimeError("unsupported training kernel")
+        return SimpleNamespace(cfg=tiny_config(readout="lm"), backbone=torch.nn.Linear(1, 1)), None
+
+    class FakeTrainer:
+        stopped_early = False
+
+        def __init__(self, *args):
+            pass
+
+        def train(self, *args):
+            return [{"step": 500}]
+
+    monkeypatch.setattr(experiment, "load_candidate", load)
+    monkeypatch.setattr(experiment, "curriculum", lambda *args: [])
+    monkeypatch.setattr(experiment, "apply_lora", lambda *args: None)
+    monkeypatch.setattr(experiment, "Trainer", FakeTrainer)
+    monkeypatch.setattr(experiment, "save_checkpoint", lambda *args: saved.append(args[1]))
+    experiment.worker(str(manifest), str(tmp_path), "sft", 60)
+    assert calls == ["broken", "working"] and len(saved) == 1
+    status = json.loads((tmp_path / "sft_status.json").read_text())
+    assert status["status"] == "incomplete" and status["failed_candidates"] == ["broken"]
+    assert "unsupported training kernel" in (tmp_path / "sft-broken-failure.json").read_text()

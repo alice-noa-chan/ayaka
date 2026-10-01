@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -19,7 +20,7 @@ from ..checkpoint import apply_lora, load_checkpoint, save_checkpoint
 from ..config import ElectraConfig
 from ..data.decontam import Decontaminator
 from ..data.reasoning_v2 import CURRICULUM_VERSION, SPLITS, curriculum
-from ..eval.reasoning_v2 import evaluate_efforts
+from ..eval.reasoning_v2 import evaluate_efforts as run_efforts
 from ..eval.v2 import assert_isolated, select_candidates
 from ..losses import LossWeights
 from ..model.electra import ElectraDecisionModel
@@ -199,6 +200,7 @@ def gpu_info():
 
 
 def load_candidate(candidate):
+    torch.manual_seed(15)
     cfg = candidate_config(candidate)
     tok = HFTokenizer.for_config(cfg)
     model = ElectraDecisionModel.from_config(cfg, device="cuda", dtype=torch.bfloat16).eval()
@@ -206,10 +208,21 @@ def load_candidate(candidate):
 
 
 def worker(manifest_path, out, stage, seconds):
+    evaluate_efforts = partial(run_efforts, verbose=True)
     gpu = gpu_info()
     start, deadline = time.monotonic(), time.monotonic() + seconds
     manifest = load_manifest(manifest_path)
     folder = Path(out)
+    code_hashes = {
+        name: hashlib.sha256((Path(__file__).parents[1] / name).read_bytes()).hexdigest()
+        for name in (
+            "experiments/v2.py",
+            "routing.py",
+            "data/reasoning_v2.py",
+            "reasoning_pipeline.py",
+            "eval/reasoning_v2.py",
+        )
+    }
     preparation = json.loads((folder / "preparation.json").read_text())
     if (
         preparation["manifest_sha256"]
@@ -218,6 +231,7 @@ def worker(manifest_path, out, stage, seconds):
         raise ValueError("manifest changed since CPU preparation")
     if preparation.get("curriculum_version") != CURRICULUM_VERSION:
         raise ValueError("curriculum changed since CPU preparation; prepare the run again")
+    failed, unfinished = [], []
     if stage == "screen":
         reports = []
         candidates = manifest["candidates"]
@@ -229,13 +243,19 @@ def worker(manifest_path, out, stage, seconds):
             folder / "selection.json", {"split": "dev", "ranked": [], "status": "incomplete"}
         )
         for index, candidate in enumerate(ready):
+            print(f"[screen] candidate={candidate['name']} {index + 1}/{len(ready)}", flush=True)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             # Equal per-candidate slices prevent the first slow model from
             # consuming the entire screen. Loading counts against its slice.
             candidate_deadline = min(deadline, time.monotonic() + remaining / (len(ready) - index))
-            result = {"name": candidate["name"], "status": "incomplete", "gpu": gpu}
+            result = {
+                "name": candidate["name"],
+                "status": "incomplete",
+                "gpu": gpu,
+                "code_sha256": code_hashes,
+            }
             model = tok = decision = None
             try:
                 model, tok = load_candidate(candidate)
@@ -252,7 +272,13 @@ def worker(manifest_path, out, stage, seconds):
                 result["elapsed_s"] = time.monotonic() - start
             except Exception as exc:
                 result["error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
+            print(
+                f"[screen] candidate={candidate['name']} status={result['status']} n={result.get('n', 0)}",
+                flush=True,
+            )
             reports.append(result)
+            if result["status"] != "complete":
+                unfinished.append(candidate["name"])
             write_json(folder / "screen_summary.json", reports)
             write_json(
                 folder / "selection.json",
@@ -290,220 +316,261 @@ def worker(manifest_path, out, stage, seconds):
                 deadline,
                 time.monotonic() + max(0, deadline - time.monotonic()) / (len(names) - index),
             )
-            model, tok = load_candidate(by_name[name])
-            if stage == "heads":
-                comparisons = []
-                for readout, layers, aux in [
-                    ("lm", 0, 0),
-                    ("pointer", 0, 0),
-                    ("hybrid", 2, 0),
-                    ("hybrid", 2, 0.3),
-                ]:
-                    if time.monotonic() >= sub_deadline:
-                        break
-                    cfg = replace(model.cfg, readout=readout, set_mixer_layers=layers)
-                    torch.manual_seed(15)
-                    probe = ElectraDecisionModel(cfg, model.backbone, model.text_config).cuda()
-                    probe.backbone.requires_grad_(False)
-                    train_items = [
+            model = tok = trainer = probe = decision = None
+            try:
+                model, tok = load_candidate(by_name[name])
+                if stage == "heads":
+                    comparisons = []
+                    for readout, layers, aux in [
+                        ("lm", 0, 0),
+                        ("pointer", 0, 0),
+                        ("hybrid", 2, 0),
+                        ("hybrid", 2, 0.3),
+                    ]:
+                        if time.monotonic() >= sub_deadline:
+                            break
+                        cfg = replace(model.cfg, readout=readout, set_mixer_layers=layers)
+                        torch.manual_seed(15)
+                        probe = ElectraDecisionModel(cfg, model.backbone, model.text_config).cuda()
+                        probe.backbone.requires_grad_(False)
+                        train_items = [
+                            it
+                            for sample, _ in curriculum("train", 8)
+                            for it in reasoning_items(sample, tok, cfg, {}, include_direct=True)
+                        ]
+                        trainer = Trainer(
+                            probe,
+                            tok,
+                            TrainConfig(
+                                steps=30,
+                                bf16=True,
+                                max_train_seconds=max(1, (sub_deadline - time.monotonic()) / 4),
+                                loss_weights=LossWeights(pointer_aux=aux),
+                            ),
+                            "cuda",
+                        )
+                        history = (
+                            trainer.train(training_stream(train_items), verbose=False)
+                            if readout != "lm"
+                            else []
+                        )
+                        report = evaluate_efforts(
+                            controlled_decision(probe.eval(), tok),
+                            [s for s, _ in curriculum("dev")],
+                            efforts=(),
+                            deadline=sub_deadline,
+                        )
+                        comparisons.append(
+                            {
+                                "readout": readout,
+                                "set_mixer_layers": layers,
+                                "pointer_aux": aux,
+                                "last_step": history[-1] if history else None,
+                                "evaluation": report,
+                            }
+                        )
+                        write_json(folder / "heads.json", comparisons)
+                        if report["status"] != "complete" or trainer.stopped_early:
+                            unfinished.append(name)
+                        trainer = probe = None
+                    head_reports = [
+                        {
+                            **entry["evaluation"]["reports"].get("off", {}),
+                            "name": str(i),
+                            "status": entry["evaluation"]["status"],
+                        }
+                        for i, entry in enumerate(comparisons)
+                    ]
+                    ranked = select_candidates(head_reports)
+                    if ranked:
+                        best_head = comparisons[int(ranked[0]["name"])]
+                        write_json(
+                            folder / "head_selection.json",
+                            {
+                                "candidate": name,
+                                "readout": best_head["readout"],
+                                "set_mixer_layers": best_head["set_mixer_layers"],
+                                "pointer_aux": best_head["pointer_aux"],
+                                "split": "dev",
+                            },
+                        )
+                elif stage == "sft":
+                    pointer_aux = 0.3
+                    head_choice = folder / "head_selection.json"
+                    if head_choice.exists():
+                        head = json.loads(head_choice.read_text())
+                        if head["candidate"] == name:
+                            pointer_aux = head["pointer_aux"]
+                            cfg = replace(
+                                model.cfg,
+                                readout=head["readout"],
+                                set_mixer_layers=head["set_mixer_layers"],
+                            )
+                            model = ElectraDecisionModel(
+                                cfg, model.backbone, model.text_config
+                            ).cuda()
+                    model.backbone.requires_grad_(False)
+                    apply_lora(model)
+                    items = [
                         it
-                        for sample, _ in curriculum("train", 8)
-                        for it in reasoning_items(sample, tok, cfg, {}, include_direct=True)
+                        for sample, traces in curriculum("train", 128)
+                        for it in reasoning_items(sample, tok, model.cfg, traces)
                     ]
                     trainer = Trainer(
-                        probe,
+                        model,
                         tok,
                         TrainConfig(
-                            steps=30,
+                            steps=500,
                             bf16=True,
-                            max_train_seconds=max(1, (sub_deadline - time.monotonic()) / 4),
-                            loss_weights=LossWeights(pointer_aux=aux),
+                            questions_per_step=8,
+                            loss_weights=LossWeights(
+                                pointer_aux=0 if model.cfg.readout == "lm" else pointer_aux
+                            ),
+                            max_train_seconds=max(1, sub_deadline - time.monotonic() - 30),
                         ),
                         "cuda",
                     )
-                    history = (
-                        trainer.train(training_stream(train_items), verbose=False)
-                        if readout != "lm"
-                        else []
-                    )
-                    report = evaluate_efforts(
-                        controlled_decision(probe.eval(), tok),
-                        [s for s, _ in curriculum("dev")],
-                        efforts=(),
-                        deadline=sub_deadline,
-                    )
-                    comparisons.append(
+                    history = trainer.train(training_stream(items))
+                    if trainer.stopped_early:
+                        unfinished.append(name)
+                    checkpoint = folder / "sft" / name
+                    save_checkpoint(
+                        model,
+                        str(checkpoint),
                         {
-                            "readout": readout,
-                            "set_mixer_layers": layers,
-                            "pointer_aux": aux,
-                            "last_step": history[-1] if history else None,
-                            "evaluation": report,
-                        }
-                    )
-                    write_json(folder / "heads.json", comparisons)
-                    del trainer, probe
-                head_reports = [
-                    {
-                        **entry["evaluation"]["reports"].get("off", {}),
-                        "name": str(i),
-                        "status": entry["evaluation"]["status"],
-                    }
-                    for i, entry in enumerate(comparisons)
-                ]
-                ranked = select_candidates(head_reports)
-                if ranked:
-                    best_head = comparisons[int(ranked[0]["name"])]
-                    write_json(
-                        folder / "head_selection.json",
-                        {
-                            "candidate": name,
-                            "readout": best_head["readout"],
-                            "set_mixer_layers": best_head["set_mixer_layers"],
-                            "pointer_aux": best_head["pointer_aux"],
-                            "split": "dev",
+                            "history_last": history[-1],
+                            "status": "incomplete" if trainer.stopped_early else "complete",
+                            "gpu": gpu,
                         },
                     )
-            elif stage == "sft":
-                pointer_aux = 0.3
-                head_choice = folder / "head_selection.json"
-                if head_choice.exists():
-                    head = json.loads(head_choice.read_text())
-                    if head["candidate"] == name:
-                        pointer_aux = head["pointer_aux"]
-                        cfg = replace(
-                            model.cfg,
-                            readout=head["readout"],
-                            set_mixer_layers=head["set_mixer_layers"],
+                    write_json(folder / "sft" / f"{name}.json", history)
+                    trainer = None
+                elif stage == "evaluate":
+                    checkpoint = folder / "sft" / name
+                    model = None
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    model = load_checkpoint(str(checkpoint), device="cuda", merge=False).eval()
+                    decision = controlled_decision(model, tok)
+                    from ..data.schema import Sample
+
+                    natural = [
+                        Sample.from_json(s)
+                        for s in json.loads((folder / "natural_test.json").read_text())
+                    ]
+                    if natural:
+                        write_json(
+                            folder / "eval" / name / "natural_direct.json",
+                            evaluate_efforts(decision, natural, efforts=(), deadline=sub_deadline),
                         )
-                        model = ElectraDecisionModel(cfg, model.backbone, model.text_config).cuda()
-                model.backbone.requires_grad_(False)
-                apply_lora(model)
-                items = [
-                    it
-                    for sample, traces in curriculum("train", 128)
-                    for it in reasoning_items(sample, tok, model.cfg, traces)
-                ]
-                trainer = Trainer(
-                    model,
-                    tok,
-                    TrainConfig(
-                        steps=500,
-                        bf16=True,
-                        questions_per_step=8,
-                        loss_weights=LossWeights(
-                            pointer_aux=0 if model.cfg.readout == "lm" else pointer_aux
-                        ),
-                        max_train_seconds=max(1, sub_deadline - time.monotonic() - 30),
-                    ),
-                    "cuda",
-                )
-                history = trainer.train(training_stream(items))
-                checkpoint = folder / "sft" / name
-                save_checkpoint(
-                    model,
-                    str(checkpoint),
+                    paired = {}
+                    for split in ("router_train", "dev", "calibration"):
+                        paired[split] = evaluate_efforts(
+                            decision, [s for s, _ in curriculum(split)], deadline=sub_deadline
+                        )
+                        write_json(folder / "eval" / name / f"{split}.json", paired[split])
+                    if any(r["status"] != "complete" for r in paired.values()):
+                        unfinished.append(name)
+                    if all(r["status"] == "complete" for r in paired.values()):
+                        train_pairs = [
+                            row
+                            for effort in ("low", "medium", "high")
+                            for row in paired_training_rows(
+                                paired["router_train"]["rows"]["off"],
+                                paired["router_train"]["rows"][effort],
+                                "router_train",
+                            )
+                        ]
+                        dev_pairs = [
+                            row
+                            for effort in ("low", "medium", "high")
+                            for row in paired_training_rows(
+                                paired["dev"]["rows"]["off"], paired["dev"]["rows"][effort], "dev"
+                            )
+                        ]
+                        router = fit_router(train_pairs, dev_pairs)
+                        router.save(folder / "eval" / name / "router.json")
+                        calibration = PathCalibration.fit(
+                            [r for rs in paired["calibration"]["rows"].values() for r in rs]
+                        )
+                        write_json(
+                            folder / "eval" / name / "calibration.json", calibration.temperatures
+                        )
+                        decision.router = router if router.promoted else None
+                        decision.calibration = calibration
+                        test = evaluate_efforts(
+                            decision,
+                            [s for s, _ in curriculum("test")],
+                            deadline=sub_deadline,
+                            include_auto=True,
+                        )
+                        write_json(folder / "eval" / name / "test.json", test)
+                        if test["status"] != "complete":
+                            unfinished.append(name)
+                        # Basic repository-authored EN/KO/JA semantic regression;
+                        # separate from broad multilingual benchmark claims.
+                        from ..data.schema import Question, Sample
+
+                        regressions = [
+                            Sample(
+                                text,
+                                [Question.noul("greeting", instruction, 1)],
+                                {
+                                    "source_example_id": language,
+                                    "language": language,
+                                    "split": "test",
+                                },
+                            )
+                            for text, instruction, language in [
+                                ("The order has shipped.", "Has the order shipped?", "en"),
+                                ("주문이 발송되었습니다.", "주문이 발송되었나요?", "ko"),
+                                ("注文は発送済みです。", "注文は発送済みですか？", "ja"),
+                            ]
+                        ]
+                        write_json(
+                            folder / "eval" / name / "language_regression.json",
+                            evaluate_efforts(
+                                decision, regressions, efforts=(), deadline=sub_deadline
+                            ),
+                        )
+                    decision = None
+                elif stage == "reserve":
+                    rerun = evaluate_efforts(
+                        controlled_decision(model, tok),
+                        [s for s, _ in curriculum("dev")],
+                        efforts=("low",),
+                        deadline=sub_deadline,
+                    )
+                    write_json(
+                        folder / "reproduction.json", {"candidate": name, "evaluation": rerun}
+                    )
+                    if rerun["status"] != "complete":
+                        unfinished.append(name)
+            except Exception as exc:
+                failed.append(name)
+                write_json(
+                    folder / f"{stage}-{name}-failure.json",
                     {
-                        "history_last": history[-1],
-                        "status": "incomplete" if trainer.stopped_early else "complete",
-                        "gpu": gpu,
+                        "status": "failed",
+                        "candidate": name,
+                        "error": f"{type(exc).__name__}: {str(exc)[:500]}",
                     },
                 )
-                write_json(folder / "sft" / f"{name}.json", history)
-                del trainer
-            elif stage == "evaluate":
-                checkpoint = folder / "sft" / name
-                del model
+            finally:
+                model = tok = trainer = probe = decision = None
                 gc.collect()
                 torch.cuda.empty_cache()
-                model = load_checkpoint(str(checkpoint), device="cuda", merge=False).eval()
-                decision = controlled_decision(model, tok)
-                from ..data.schema import Sample
-
-                natural = [
-                    Sample.from_json(s)
-                    for s in json.loads((folder / "natural_test.json").read_text())
-                ]
-                if natural:
-                    write_json(
-                        folder / "eval" / name / "natural_direct.json",
-                        evaluate_efforts(decision, natural, efforts=(), deadline=sub_deadline),
-                    )
-                paired = {}
-                for split in ("router_train", "dev", "calibration"):
-                    paired[split] = evaluate_efforts(
-                        decision, [s for s, _ in curriculum(split)], deadline=sub_deadline
-                    )
-                    write_json(folder / "eval" / name / f"{split}.json", paired[split])
-                if all(r["status"] == "complete" for r in paired.values()):
-                    train_pairs = [
-                        row
-                        for effort in ("low", "medium", "high")
-                        for row in paired_training_rows(
-                            paired["router_train"]["rows"]["off"],
-                            paired["router_train"]["rows"][effort],
-                            "router_train",
-                        )
-                    ]
-                    dev_pairs = [
-                        row
-                        for effort in ("low", "medium", "high")
-                        for row in paired_training_rows(
-                            paired["dev"]["rows"]["off"], paired["dev"]["rows"][effort], "dev"
-                        )
-                    ]
-                    router = fit_router(train_pairs, dev_pairs)
-                    router.save(folder / "eval" / name / "router.json")
-                    calibration = PathCalibration.fit(
-                        [r for rs in paired["calibration"]["rows"].values() for r in rs]
-                    )
-                    write_json(
-                        folder / "eval" / name / "calibration.json", calibration.temperatures
-                    )
-                    decision.router = router if router.promoted else None
-                    decision.calibration = calibration
-                    test = evaluate_efforts(
-                        decision, [s for s, _ in curriculum("test")], deadline=sub_deadline
-                    )
-                    write_json(folder / "eval" / name / "test.json", test)
-                    # Basic repository-authored EN/KO/JA semantic regression;
-                    # separate from broad multilingual benchmark claims.
-                    from ..data.schema import Question, Sample
-
-                    regressions = [
-                        Sample(
-                            text,
-                            [Question.noul("greeting", instruction, 1)],
-                            {"source_example_id": language, "language": language, "split": "test"},
-                        )
-                        for text, instruction, language in [
-                            ("The order has shipped.", "Has the order shipped?", "en"),
-                            ("주문이 발송되었습니다.", "주문이 발송되었나요?", "ko"),
-                            ("注文は発送済みです。", "注文は発送済みですか？", "ja"),
-                        ]
-                    ]
-                    write_json(
-                        folder / "eval" / name / "language_regression.json",
-                        evaluate_efforts(decision, regressions, efforts=(), deadline=sub_deadline),
-                    )
-                del decision
-            elif stage == "reserve":
-                rerun = evaluate_efforts(
-                    controlled_decision(model, tok),
-                    [s for s, _ in curriculum("dev")],
-                    efforts=("low",),
-                    deadline=sub_deadline,
-                )
-                write_json(folder / "reproduction.json", {"candidate": name, "evaluation": rerun})
-            del model, tok
-            gc.collect()
-            torch.cuda.empty_cache()
     write_json(
         folder / f"{stage}_status.json",
         {
-            "status": "complete" if time.monotonic() < deadline else "incomplete",
+            "status": "complete"
+            if time.monotonic() < deadline and not failed and not unfinished
+            else "incomplete",
+            "failed_candidates": failed,
+            "unfinished_candidates": unfinished,
             "elapsed_s": time.monotonic() - start,
             "gpu": gpu,
+            "code_sha256": code_hashes,
         },
     )
 

@@ -165,6 +165,10 @@ candidate. `--refresh-curriculum` repeats CPU preparation and caps the new scree
 at 50 minutes and head ablations at 10 minutes, preserving both prior reservations
 and the SFT/evaluation caps. Small candidates run first to leave unused time for
 larger candidates; every candidate retains the same 96-question comparison.
+Candidate loading seeds head/adapter initialization reproducibly. Subsequent
+stages isolate each candidate's failure, continue eligible remaining candidates,
+and record failed/unfinished candidates with source hashes. Progress messages
+report question counts and generated tokens without exposing question contents.
 
 ## Status on 2026-10-01
 
