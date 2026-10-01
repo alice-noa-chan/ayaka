@@ -217,6 +217,31 @@ def test_schedule_forecast_retains_stress_bound_and_refuses_different_step_count
         )
 
 
+def test_completion_charges_optimizer_allocation_once_and_every_warm_step():
+    overheads = {
+        "optimizer_seconds": [0.1, 0.005, 0.006, 0.004],
+        "max_optimizer_seconds": 0.1,
+        "checkpoint_seconds": 1,
+        "checkpoint_bytes": 1000,
+        "disk_free_bytes": 1_000_000,
+    }
+    plan = completion_plan({"max_seconds": 6}, 1200, 14400, overheads=overheads)
+    total = 0.1 + 1199 * 0.006
+    assert plan["optimizer_cold_start_seconds"] == 0.1
+    assert plan["optimizer_seconds_allowance_per_step"] == 0.006
+    assert plan["optimizer_total_seconds_reserved"] == total
+    assert plan["estimated_remaining_seconds"] == (6 * 1200 + total + 14) * 1.25
+    single = completion_plan({"max_seconds": 6}, 1, 100, overheads=overheads)
+    assert single["optimizer_total_seconds_reserved"] == 0.1
+    with pytest.raises(ValueError, match="finite"):
+        completion_plan(
+            {"max_seconds": 6},
+            1200,
+            14400,
+            overheads={**overheads, "optimizer_seconds": [0.1, float("nan")]},
+        )
+
+
 def test_production_profile_covers_cold_image_and_trace_strata_without_gradients():
     import itertools
 

@@ -132,13 +132,24 @@ def completion_plan(
         save_seconds = overheads["checkpoint_seconds"] * saves
         if any(not math.isfinite(n) or n < 0 for n in (optimizer_seconds, save_seconds)):
             raise ValueError("measured overheads must be finite and nonnegative")
+    optimizer_cold = optimizer_seconds
+    optimizer_basis = "maximum optimizer allowance repeated per step"
+    if overheads is not None and len(overheads.get("optimizer_seconds", [])) >= 2:
+        timings = overheads["optimizer_seconds"]
+        if any(not math.isfinite(n) or n < 0 for n in timings):
+            raise ValueError("optimizer cold/warm measurements must be finite and nonnegative")
+        # The isolated probe records the first lazy AdamW allocation followed by
+        # steady steps. Charge state allocation once, not once per scheduled step.
+        optimizer_cold, optimizer_seconds = timings[0], max(timings[1:])
+        optimizer_basis = "one cold allocation step plus maximum measured warm steps"
+    optimizer_total = optimizer_cold + optimizer_seconds * (steps - 1)
     schedule = profile.get("schedule")
     if schedule is not None and schedule["planned_steps"] != steps:
         raise ValueError("completion forecast must match the profiled fixed schedule")
     forecast_backward = schedule["max_seconds"] if schedule else profile["max_seconds"]
     if not math.isfinite(forecast_backward) or forecast_backward <= 0:
         raise ValueError("scheduled backward timing must be finite and positive")
-    estimated = (forecast_backward + optimizer_seconds) * steps * safety_factor + save_seconds * (
+    estimated = (forecast_backward * steps + optimizer_total) * safety_factor + save_seconds * (
         safety_factor if overheads else 1
     )
     disk_needed = (overheads["checkpoint_bytes"] * saves * 1.1) if overheads else None
@@ -151,10 +162,13 @@ def completion_plan(
         if schedule
         else "global stress maximum",
         "all_stress_seconds_estimate": (
-            (profile["max_seconds"] + optimizer_seconds) * steps * safety_factor
+            (profile["max_seconds"] * steps + optimizer_total) * safety_factor
             + save_seconds * (safety_factor if overheads else 1)
         ),
         "optimizer_seconds_allowance_per_step": optimizer_seconds,
+        "optimizer_cold_start_seconds": optimizer_cold,
+        "optimizer_total_seconds_reserved": optimizer_total,
+        "optimizer_forecast_basis": optimizer_basis,
         "safety_factor": safety_factor,
         "save_seconds_reserved": save_seconds,
         "estimated_remaining_seconds": estimated,
