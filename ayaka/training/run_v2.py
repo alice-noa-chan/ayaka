@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import math
-import random
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -137,36 +136,20 @@ def sample_stream(
     """Process media lazily; never retain an entire image corpus on GPU or host."""
     if not samples or type(questions_per_step) is not int or questions_per_step < 1:
         raise ValueError("stream requires samples and a positive question count")
-    rng, pending = random.Random(seed), []
+    pending = []
     from .prepared_cache import PreparedSampleCache
+    from .workload import sample_indices
 
     prepared = PreparedSampleCache(
         lambda sample: prepared_items(sample, tok, cfg, backend), prepared_cache_bytes
     )
-    if language_weights is not None:
-        pools = {}
-        for sample in samples:
-            pools.setdefault(sample.metadata["language"], []).append(sample)
-        languages = sorted(pools)
-        weights = [language_weights.get(lang, 0) for lang in languages]
-        if any(not isinstance(w, (int, float)) or not math.isfinite(w) or w <= 0 for w in weights):
-            raise ValueError("each training language needs a finite positive sampling weight")
-        pending_pools = {lang: [] for lang in languages}
-    while True:
-        if language_weights is None:
-            order = list(samples)
-            rng.shuffle(order)
-        else:
-            lang = rng.choices(languages, weights=weights)[0]
-            if not pending_pools[lang]:
-                pending_pools[lang] = list(pools[lang])
-                rng.shuffle(pending_pools[lang])
-            order = [pending_pools[lang].pop()]
-        for sample in order:
-            pending += prepared.get(sample)
-            while len(pending) >= questions_per_step:
-                yield pending[:questions_per_step]
-                pending = pending[questions_per_step:]
+    for index in sample_indices(
+        [sample.metadata.get("language", "unknown") for sample in samples], seed, language_weights
+    ):
+        pending += prepared.get(samples[index])
+        while len(pending) >= questions_per_step:
+            yield pending[:questions_per_step]
+            pending = pending[questions_per_step:]
 
 
 def main(argv=None):

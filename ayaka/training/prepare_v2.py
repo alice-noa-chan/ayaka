@@ -287,11 +287,15 @@ def prepare_bundle(out, cfg, *, offline=True, per_type=32, image_cases=32, candi
         official_weight_elements=candidate["total_parameters"],
         conservative_total_elements=conservative,
     )
-    context = {}
+    from .workload import describe_rows
+
+    context, train_inventory = {}, []
     for split, samples in splits.items():
         max_length, questions = 0, 0
         for sample in samples:
             items = prepared_items(sample, tok, cfg, backend)
+            if split == "train":
+                train_inventory.append(describe_rows(sample, items))
             max_length = max(max_length, *(it.length for it in items))
             questions += len(items)
         if max_length > min(cfg.max_seq_len, audit["native_context"]):
@@ -299,7 +303,10 @@ def prepare_bundle(out, cfg, *, offline=True, per_type=32, image_cases=32, candi
         context[split] = {"prepared_rows": questions, "max_tokens": max_length}
         print(f"[prepare] {split}: {questions} rows, max {max_length} tokens", flush=True)
     audit.update(
-        context_audit=context, license=candidate["license"], license_source=candidate["card_url"]
+        context_audit=context,
+        license=candidate["license"],
+        license_source=candidate["card_url"],
+        train_inventory=train_inventory,
     )
     root.mkdir(parents=True, exist_ok=False)
     for split, samples in splits.items():
