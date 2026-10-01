@@ -27,6 +27,8 @@ def measured():
             rows.append(
                 {
                     **typed_row(spec, target, target),
+                    "target": target,
+                    "probs": target,
                     "id": f"{s.metadata['source_example_id']}/{q.id}",
                     "budget": 0,
                     "reasoning_tokens": 0,
@@ -70,6 +72,19 @@ def test_recompute_rejects_different_preparation_or_case_identity():
     report["rows"]["off"][0]["cluster_id"] = "other"
     with pytest.raises(ValueError, match="identity changed"):
         compact_evaluation(report, samples)
+
+
+def test_unsigned_legacy_requires_curriculum_evidence_and_matching_rows():
+    samples, report = measured()
+    del report["dataset_signature"]
+    with pytest.raises(ValueError, match="prepared split"):
+        compact_evaluation(report, samples)
+    result = compact_evaluation(report, samples, legacy_curriculum_verified=True)
+    assert result["dataset_signature"] is None
+    assert "original input signature unavailable" in result["dataset_verification"]
+    report["rows"]["off"][0]["target"] = [0.3, 0.7]
+    with pytest.raises(ValueError, match="targets or types"):
+        compact_evaluation(report, samples, legacy_curriculum_verified=True)
 
 
 def test_collector_preserves_incomplete_status_and_hashes_sources(tmp_path):

@@ -12,12 +12,27 @@ from ..eval.reasoning_v2 import dataset_signature
 from ..eval.v2 import paired_report, summarize
 
 
-def compact_evaluation(report, samples=None):
+def compact_evaluation(report, samples=None, *, legacy_curriculum_verified=False):
     """Recompute diagnostics from stored rows; never generate or alter raw files."""
     rows = copy.deepcopy(report.get("rows", {}))
+    verification = "recorded artifact; no prepared-split comparison"
     if samples is not None:
-        if report.get("dataset_signature") != dataset_signature(samples):
+        signature = dataset_signature(samples)
+        verification = "measured artifact signature matches prepared split"
+        unsigned = report.get("dataset_signature") is None
+        if report.get("dataset_signature") != signature and not (
+            unsigned and legacy_curriculum_verified
+        ):
             raise ValueError("measured artifact does not match the prepared split")
+        if unsigned:
+            verification = "legacy curriculum code hash and row IDs/types/targets; original input signature unavailable"
+        from ..training.batching import _noul_canonical
+
+        questions = {
+            f"{s.metadata.get('source_example_id')}/{q.id}": _noul_canonical(q)
+            for s in samples
+            for q in s.questions
+        }
         cases = {
             f"{s.metadata.get('source_example_id')}/{q.id}": s.metadata.get(
                 "case_facts_sha256", f"{s.metadata.get('source_example_id')}/{q.id}"
@@ -29,6 +44,10 @@ def compact_evaluation(report, samples=None):
             for row in rs:
                 if row["id"] not in cases:
                     raise ValueError("measured question is absent from the prepared split")
+                q = questions[row["id"]]
+                target = [q.target_distribution.get(c.id, 0) for c in q.candidates]
+                if row["type"] != q.type or row["target"] != target:
+                    raise ValueError("measured targets or types differ from preparation")
                 if row.get("cluster_id", cases[row["id"]]) != cases[row["id"]]:
                     raise ValueError("measured case identity changed")
                 row["cluster_id"] = cases[row["id"]]
@@ -60,6 +79,7 @@ def compact_evaluation(report, samples=None):
     return {
         "status": report["status"],
         "dataset_signature": report.get("dataset_signature"),
+        "dataset_verification": verification,
         "reports": summaries,
         "paired": pairs,
         "diagnostic_recomputation": "stored probabilities, latency and raw tokens; case-clustered CI",
@@ -94,6 +114,7 @@ def collect(run):
         "heads_status",
         "sft_status",
         "evaluate_status",
+        "screen_summary",
     ):
         path = root / f"{name}.json"
         if path.exists():
@@ -102,7 +123,20 @@ def collect(run):
         report = read(path)
         # Interrupted files that never became a measured screen are excluded.
         if "reports" in report:
-            result["screen"][path.stem] = compact_evaluation(report, split_samples("dev"))
+            original = next(
+                (r for r in result.get("screen_summary", []) if r.get("name") == path.stem), {}
+            )
+            curriculum_hash = hashlib.sha256(
+                (Path(__file__).parents[1] / "data/reasoning_v2.py").read_bytes()
+            ).hexdigest()
+            result["screen"][path.stem] = compact_evaluation(
+                report,
+                split_samples("dev"),
+                legacy_curriculum_verified=original.get("code_sha256", {}).get(
+                    "data/reasoning_v2.py"
+                )
+                == curriculum_hash,
+            )
     if (root / "heads.json").exists():
         result["heads"] = [
             {
