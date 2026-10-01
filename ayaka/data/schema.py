@@ -6,6 +6,7 @@ ever sees it — raw dataset formats are never exposed to the model.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -35,9 +36,16 @@ class Question:
         if self.type not in PRIMITIVES:
             raise ValueError(f"unknown primitive type: {self.type}")
         ids = {c.id for c in self.candidates}
+        if len(ids) != len(self.candidates):
+            raise ValueError("candidate ids must be unique")
         unknown = set(self.target_distribution) - ids
         if unknown:
             raise ValueError(f"target references missing candidates: {unknown}")
+        if any(
+            not isinstance(p, (int, float)) or not math.isfinite(p) or p < 0 or p > 1
+            for p in self.target_distribution.values()
+        ):
+            raise ValueError("target probabilities must be finite values in [0, 1]")
         total = sum(self.target_distribution.values())
         if self.target_distribution and abs(total - 1.0) > 1e-3:
             raise ValueError(f"target distribution sums to {total}, not 1")
@@ -45,6 +53,14 @@ class Question:
             ords = [c.ordinal for c in self.candidates]
             if any(o is None for o in ords):
                 raise ValueError("score candidates require ordinal")
+            if any(
+                isinstance(o, bool)
+                or not isinstance(o, (int, float, Decimal))
+                or (isinstance(o, float) and not math.isfinite(o))
+                or (isinstance(o, Decimal) and not o.is_finite())
+                for o in ords
+            ):
+                raise ValueError("score ordinal must be a finite numeric value")
             if len(set(ords)) != len(ords):
                 raise ValueError("score ordinals must be unique")
 

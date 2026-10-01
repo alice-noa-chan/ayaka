@@ -83,8 +83,13 @@ def candidate_curriculum(split, count=32):
                 "other": "Any of " + ", ".join(parent),
             }
             question["candidate_generation"]["other_id"] = "other"
-        possible = universe[i % 4 : i % 4 + 1] if i % 3 else universe
-        state = {"possible_statuses": possible, "domain": universe, "rule": voices[variant]}
+        possible = [parent[i % len(parent)]] if i % 3 else universe
+        state = {
+            "possible_statuses": possible,
+            "domain": universe,
+            "rule": voices[variant],
+            "prior": "Possible statuses are equally likely; condition on the parent domain.",
+        }
         selected = next((k for k, values in memberships.items() if possible == values), "__other__")
         criteria = [
             Candidate(r["id"], r["description"] + "\nExcludes: " + r["excludes"]) for r in rows
