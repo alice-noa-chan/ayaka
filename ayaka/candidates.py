@@ -146,7 +146,7 @@ def handle_candidates(service, body):
                     raise ValueError("candidate generation conflicts with generation disabled")
                 if not getattr(service.decision, "generator", None):
                     raise ValueError("candidate generation needs a v2 generation backend")
-                if body.get("media"):
+                if "media" in body:
                     raise ValueError("candidate generation currently supports text states only")
                 instruction = question.get("instructions", question.get("instruction"))
                 if not isinstance(instruction, str) or not instruction.strip():

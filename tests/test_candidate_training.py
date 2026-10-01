@@ -91,3 +91,15 @@ def test_empty_task_fails_before_scoring_or_proposing():
     with pytest.raises(BadRequest, match="explicit instructions"):
         server.handle(body)
     assert not original.calls and not server.decision.generator.budgets
+
+
+@pytest.mark.parametrize("media", [None, []])
+def test_unsupported_explicit_media_never_spends_proposal_tokens(media):
+    from ayaka.serve import BadRequest
+
+    server, original = service()
+    body = request("open")
+    body["media"] = media
+    with pytest.raises(BadRequest, match="text states only"):
+        server.handle(body)
+    assert not original.calls and not server.decision.generator.budgets
