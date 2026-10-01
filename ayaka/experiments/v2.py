@@ -436,14 +436,22 @@ def worker(manifest_path, out, stage, seconds):
                     )
                     write_json(folder / "eval" / name / f"{split}.json", paired[split])
                 if all(r["status"] == "complete" for r in paired.values()):
-                    train_pairs = paired_training_rows(
-                        paired["router_train"]["rows"]["off"],
-                        paired["router_train"]["rows"]["medium"],
-                        "router_train",
-                    )
-                    dev_pairs = paired_training_rows(
-                        paired["dev"]["rows"]["off"], paired["dev"]["rows"]["medium"], "dev"
-                    )
+                    train_pairs = [
+                        row
+                        for effort in ("low", "medium", "high")
+                        for row in paired_training_rows(
+                            paired["router_train"]["rows"]["off"],
+                            paired["router_train"]["rows"][effort],
+                            "router_train",
+                        )
+                    ]
+                    dev_pairs = [
+                        row
+                        for effort in ("low", "medium", "high")
+                        for row in paired_training_rows(
+                            paired["dev"]["rows"]["off"], paired["dev"]["rows"][effort], "dev"
+                        )
+                    ]
                     router = fit_router(train_pairs, dev_pairs)
                     router.save(folder / "eval" / name / "router.json")
                     calibration = PathCalibration.fit(

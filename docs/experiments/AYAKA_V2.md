@@ -86,6 +86,11 @@ none is loaded. The legacy v1 reasoning flag keeps its original control. `on`
 bypasses routing entirely. Path calibration fits only the
 reserved calibration split by primitive/actual route/budget band, with scalar
 fallbacks. Load artifacts using `--reasoning-router` and `--reasoning-calibration`.
+Router fitting can combine all three effort pairs, but bootstraps independent
+questions rather than treating repeated efforts as new samples. Each budget also
+requires a positive dev confidence bound; unvalidated budgets stay direct.
+Older single-budget artifacts apply only at their measured budget. Forced `on`
+requests continue to run at every supported explicit budget.
 
 ## Survey and evaluation
 

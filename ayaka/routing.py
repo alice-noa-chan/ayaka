@@ -59,10 +59,20 @@ class BenefitRouter:
     def predict(self, features):
         x = [1.0] + [(v - m) / s for v, m, s in zip(features, self.mean, self.scale, strict=True)]
         gain = sum(a * b for a, b in zip(x, self.gain_weights, strict=True))
-        tokens = max(0, sum(a * b for a, b in zip(x, self.token_weights, strict=True)) * 1024)
+        tokens = min(
+            max(0, features[-1] * 1024),
+            max(0, sum(a * b for a, b in zip(x, self.token_weights, strict=True)) * 1024),
+        )
         return gain, tokens
 
     def should_reason(self, state, spec, baseline, tok, budget=384):
+        # Old single-budget artifacts retain only that measured budget. A
+        # constant budget feature cannot establish benefit at other efforts.
+        supported = self.validation.get("validated_budgets")
+        if supported is None:
+            supported = [round(self.mean[-1] * 1024)] if self.scale[-1] <= 1e-6 else []
+        if budget not in supported:
+            return False
         gain, tokens = self.predict(routing_features(state, spec, baseline, tok, budget))
         return self.promoted and gain - self.penalty * tokens > 0
 
@@ -88,14 +98,23 @@ class BenefitRouter:
 
 def fit_router(train, dev):
     if (
-        len(train) < 20
-        or len(dev) < 20
+        len({r["id"] for r in train}) < 20
+        or len({r["id"] for r in dev}) < 20
         or any(r["split"] != "router_train" for r in train)
         or any(r["split"] != "dev" for r in dev)
     ):
         raise ValueError("router needs at least 20 independent router_train and dev rows")
     if {r["id"] for r in train} & {r["id"] for r in dev}:
         raise ValueError("router training/dev item overlap")
+    budgets = sorted({round(r["features"][-1] * 1024) for r in train})
+    if budgets != sorted({round(r["features"][-1] * 1024) for r in dev}):
+        raise ValueError("router training/dev budgets must match")
+    for collection in (train, dev):
+        keys = [(r["id"], round(r["features"][-1] * 1024)) for r in collection]
+        if len(set(keys)) != len(keys) or len(keys) != len({r["id"] for r in collection}) * len(
+            budgets
+        ):
+            raise ValueError("router requires one paired measurement per question and budget")
     raw = torch.tensor([r["features"] for r in train], dtype=torch.float64)
     mean, scale = raw.mean(0), raw.std(0).clamp(min=1e-6)
     x = torch.cat([torch.ones(len(train), 1, dtype=raw.dtype), (raw - mean) / scale], dim=1)
@@ -129,16 +148,41 @@ def fit_router(train, dev):
         key=lambda c: (c["tokens"], -c["gain"], c["lambda"]),
     )
     realized = [r["gain"] if use else 0 for r, use in zip(dev, chosen["selected"], strict=True)]
+    # Repeated effort measurements of one question are one independent unit.
+    groups = {}
+    for row, gain in zip(dev, realized, strict=True):
+        groups.setdefault(row["id"], []).append(gain)
+    question_gains = [sum(values) / len(values) for values in groups.values()]
     rng = random.Random(15)
-    boot = [sum(rng.choice(realized) for _ in realized) / len(realized) for _ in range(2000)]
+    boot = [
+        sum(rng.choice(question_gains) for _ in question_gains) / len(question_gains)
+        for _ in range(2000)
+    ]
     interval = [percentile(boot, 0.025), percentile(boot, 0.975)]
     router.penalty = chosen["lambda"]
     router.promoted = interval[0] > 0
+    validated_budgets = []
+    budget_intervals = {}
+    for budget in budgets:
+        gains = [
+            gain
+            for row, gain in zip(dev, realized, strict=True)
+            if round(row["features"][-1] * 1024) == budget
+        ]
+        boot = [sum(rng.choice(gains) for _ in gains) / len(gains) for _ in range(2000)]
+        bound = [percentile(boot, 0.025), percentile(boot, 0.975)]
+        budget_intervals[str(budget)] = bound
+        if bound[0] > 0:
+            validated_budgets.append(budget)
+    router.promoted = router.promoted and bool(validated_budgets)
     router.validation = {
         "mean_nll_gain": chosen["gain"],
         "mean_tokens": chosen["tokens"],
         "nll_gain_95ci": interval,
         "dev_n": len(dev),
+        "dev_independent_questions": len(groups),
+        "validated_budgets": validated_budgets,
+        "budget_nll_gain_95ci": budget_intervals,
         "dev_ids_sha256": hashlib.sha256(
             json.dumps(sorted(r["id"] for r in dev)).encode()
         ).hexdigest(),
