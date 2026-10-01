@@ -97,8 +97,10 @@ def test_serial_effort_runner_reports_deadline_incomplete_and_never_uses_gold():
         from ayaka.tokenization import ToyTokenizer
 
         tok = ToyTokenizer()
+        calls = []
 
         def decide(self, state, questions, reasoning):
+            self.calls.append(reasoning[0].mode)
             assert not hasattr(questions[0], "target_distribution")
             q = questions[0]
             p = [1 / len(q.candidates)] * len(q.candidates)
@@ -125,3 +127,15 @@ def test_serial_effort_runner_reports_deadline_incomplete_and_never_uses_gold():
     assert report["status"] == "complete" and report["reports"]["off"]["n"] == 3
     stopped = evaluate_efforts(Fake(), samples, deadline=time.monotonic() - 1)
     assert stopped["status"] == "incomplete" and not stopped["reports"]
+    restored = evaluate_efforts(
+        Fake(), samples, efforts=(), deadline=time.monotonic() - 1, resume_rows=report["rows"]
+    )
+    assert restored["status"] == "complete" and restored["rows"] == report["rows"]
+    Fake.calls.clear()
+    partial = {"off": report["rows"]["off"][:2]}
+    continued = evaluate_efforts(Fake(), samples, efforts=(), resume_rows=partial)
+    assert Fake.calls == ["off"] and continued["status"] == "complete"
+    assert continued["rows"]["off"][:2] == partial["off"]
+    bad = {"off": [dict(report["rows"]["off"][0], budget=128)]}
+    with pytest.raises(ValueError, match="budgets"):
+        evaluate_efforts(Fake(), samples, efforts=(), resume_rows=bad)

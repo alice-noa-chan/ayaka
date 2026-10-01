@@ -1,0 +1,29 @@
+[
+  {
+    "stage_index": 0,
+    "container_id": "ta-01M3TY812KRAS1QGDV9KAFWVSR",
+    "app_id": "ap-0ptnEBg6OkWWRKGEDo0OLY",
+    "closure_evidence": "modal app stop --yes succeeded; later container inventory contained only the next exploration container",
+    "started_at": "2026-10-01T05:15:59+00:00",
+    "ended_before": "2026-10-01T05:29:48+00:00",
+    "startup_shutdown_margin_s": 120
+  },
+  {
+    "stage_index": 1,
+    "container_id": "ta-01M3TZ1A2WF63KEFBWATGM73CR",
+    "app_id": "ap-6LK4FlOSsZVSsOkevPMdzN",
+    "closure_evidence": "modal app stop --yes succeeded; later container inventory contained only the refreshed exploration container",
+    "started_at": "2026-10-01T05:29:48+00:00",
+    "ended_before": "2026-10-01T05:41:00+00:00",
+    "startup_shutdown_margin_s": 120
+  },
+  {
+    "stage_index": 2,
+    "container_id": "ta-01M3TZNVKG7E9K8MTRDCM6GN2R",
+    "app_id": "ap-N17B2iF9NOU0mstjAUmPkk",
+    "closure_evidence": "reports and kernel cache committed; modal app stop --yes returned exit code 0; clock tool immediately returned 2026-10-01 06:04:01 UTC",
+    "started_at": "2026-10-01T05:41:00+00:00",
+    "ended_before": "2026-10-01T06:04:01+00:00",
+    "startup_shutdown_margin_s": 120
+  }
+]

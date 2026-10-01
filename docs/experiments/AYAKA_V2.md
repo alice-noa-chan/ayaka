@@ -142,7 +142,7 @@ modal run modal_v2.py
 The run requires exactly one H100 80GB. Stage limits are screen 2h, heads 1h, SFT
 2h, evaluation 2h, reproduction/recovery 1h. Child-process deadlines include
 loading and report writes. A persistent ledger reserves each allocation before
-launch and never refunds it after a crash or resume; a 120-second startup/flush
+launch and retains it after an unverified crash or resume; a 120-second startup/flush
 margin is retained. The Modal GPU function itself has an eight-hour timeout,
 one container and no retries. The dedicated `ayaka-v2-exploration` volume stores
 prepared data, cached pinned weights, reports, budget ledger and checkpoints.
@@ -169,6 +169,17 @@ Candidate loading seeds head/adapter initialization reproducibly. Subsequent
 stages isolate each candidate's failure, continue eligible remaining candidates,
 and record failed/unfinished candidates with source hashes. Progress messages
 report question counts and generated tokens without exposing question contents.
+
+After an externally observed container stop, the reservation can be reconciled
+against its complete observed uptime **upper bound**, plus at least 120 seconds
+of overhead per container. Original allocations and closure evidence remain in
+the ledger; unknown/live time and prior overruns are never released. The recorded
+[closed-window evidence](v2_closed_windows.json) bounds the three stopped attempts
+at 3,242 seconds in total, including overhead. This is a conservative resource
+bound, not a billing invoice or a claim that unused allocations were consumed.
+Paired evaluations can resume stored rows without repeating already measured
+decisions. IDs, targets, types and budgets must match, and only complete 96-item
+results can enter selection.
 
 ## Status on 2026-10-01
 

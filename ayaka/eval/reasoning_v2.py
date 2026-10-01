@@ -1,5 +1,6 @@
 """Serial paired evaluation; targets and family metadata never enter inference."""
 
+import copy
 import time
 
 from ..primitives import QuestionSpec
@@ -16,15 +17,40 @@ def evaluate_efforts(
     deadline=None,
     verbose=False,
     include_auto=False,
+    resume_rows=None,
 ):
+    samples = list(samples)
     modes = {"off": ReasoningSettings(mode="off")}
     modes.update({effort: ReasoningSettings(mode="on", effort=effort) for effort in efforts})
     if include_auto:
         modes["auto"] = ReasoningSettings(mode="auto")
-    rows = {mode: [] for mode in modes}
+    if not set(resume_rows or {}) <= modes.keys():
+        raise ValueError("resume modes must match this evaluation")
+    rows = {mode: copy.deepcopy((resume_rows or {}).get(mode, [])) for mode in modes}
+    expected = {
+        f"{s.metadata.get('source_example_id')}/{q.id}": q for s in samples for q in s.questions
+    }
+    if len(expected) != sum(len(s.questions) for s in samples):
+        raise ValueError("evaluation requires unique question IDs")
+    known = {}
+    for mode, existing in rows.items():
+        known[mode] = {r["id"] for r in existing}
+        if len(known[mode]) != len(existing) or not known[mode] <= expected.keys():
+            raise ValueError("resume rows must have unique IDs from this evaluation")
+        for row in existing:
+            q = _noul_canonical(expected[row["id"]])
+            target = [q.target_distribution.get(c.id, 0) for c in q.candidates]
+            if (
+                row["target"] != target
+                or row["type"] != q.type
+                or row["budget"] != modes[mode].budget
+            ):
+                raise ValueError("resume targets, types and budgets must match")
     complete = True
     for sample in samples:
         for question in sample.questions:
+            question_id = f"{sample.metadata.get('source_example_id')}/{question.id}"
+            new_call = False
             q = _noul_canonical(question)
             spec = QuestionSpec(
                 q.type,
@@ -34,11 +60,14 @@ def evaluate_efforts(
             )
             target = [q.target_distribution.get(c.id, 0) for c in q.candidates]
             for mode, settings in modes.items():
+                if question_id in known[mode]:
+                    continue
                 if deadline is not None and time.monotonic() >= deadline:
                     complete = False
                     break
                 start = time.perf_counter()
                 result = decision.decide(sample.state, [spec], reasoning=[settings])[0]
+                new_call = True
                 row = typed_row(spec, result.probs, target)
                 extra = result.extras["reasoning"]
                 if mode == "off":
@@ -48,7 +77,7 @@ def evaluate_efforts(
                         sample.state, spec, result, decision.tok
                     )
                 row.update(
-                    id=f"{sample.metadata.get('source_example_id')}/{q.id}",
+                    id=question_id,
                     family=sample.metadata.get("task_family", "unknown"),
                     language=sample.metadata.get("language", "en"),
                     split=sample.metadata.get("split"),
@@ -66,13 +95,15 @@ def evaluate_efforts(
                 rows[mode].append(row)
             if not complete:
                 break
-            if verbose and len(rows["off"]) % 16 == 0:
+            if verbose and new_call and min(map(len, rows.values())) % 16 == 0:
                 print(
                     f"[eval] questions={len(rows['off'])} modes={','.join(modes)} reasoning_tokens={sum(r['reasoning_tokens'] for rs in rows.values() for r in rs)}",
                     flush=True,
                 )
         if not complete:
             break
+    positions = {key: index for index, key in enumerate(expected)}
+    rows = {mode: sorted(rs, key=lambda r: positions[r["id"]]) for mode, rs in rows.items()}
     reports = {
         mode: {**summarize(rs), "status": "complete" if complete else "incomplete"}
         for mode, rs in rows.items()
