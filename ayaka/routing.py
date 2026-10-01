@@ -84,6 +84,10 @@ class BenefitRouter:
     def load(cls, path):
         with open(path, encoding="utf-8") as f:
             router = cls(**json.load(f))
+        return router.validate_promoted()
+
+    def validate_promoted(self):
+        router = self
         if not router.promoted or router.penalty not in LAMBDAS:
             raise ValueError("router must have a validated promotion and an allowed lambda")
         arrays = [router.mean, router.scale, router.gain_weights, router.token_weights]

@@ -258,7 +258,16 @@ class ImageDecision:
             return self.text.decide(state, questions, device=device, reasoning=reasoning)
         results = self.images.decide(state, questions, device=device, reasoning=reasoning)
         for result in results:
-            result.extras["reasoning"].update(modality="image", calibration="unvalidated")
+            diagnostic = result.extras["reasoning"]
+            fitted = self.images.calibration is not None and self.images.calibration.covers(
+                result.type,
+                diagnostic["route"],
+                diagnostic["budget"] if diagnostic["route"] != "direct" else 0,
+            )
+            result.extras["reasoning"].update(
+                modality="image",
+                calibration="scoped_temperature" if fitted else "unvalidated",
+            )
             if result.extras["reasoning"]["finish_reason"] == "no_validated_router":
                 result.extras["reasoning"]["finish_reason"] = "no_validated_image_router"
         return results
@@ -273,6 +282,8 @@ def load_image_decision(
     calibration=None,
     *,
     trainable=False,
+    image_calibration=None,
+    image_router=None,
 ):
     """Load native image components and the existing text adapter/head once."""
     import os
@@ -287,6 +298,13 @@ def load_image_decision(
     config = AutoConfig.from_pretrained(cfg.backbone, revision=cfg.backbone_revision)
     if config.model_type not in {"gemma4", "gemma4_unified"} or config.vision_config is None:
         raise ValueError("--images requires a native Gemma 4 image checkpoint")
+    if image_calibration is not None or image_router is not None:
+        from .training.scoped_calibration import checkpoint_fingerprint
+
+        fingerprint = checkpoint_fingerprint(path)
+        for artifact in (image_calibration, image_router):
+            if artifact is not None:
+                artifact.validate_binding(fingerprint, "image", "fixed")
     lm = AutoModelForImageTextToText.from_pretrained(
         cfg.backbone,
         revision=cfg.backbone_revision,
@@ -315,4 +333,9 @@ def load_image_decision(
     )
     if total > 14_000_000_000:
         raise ValueError("native image model and decision adapter exceed the 14B parameter limit")
-    return ImageDecision(controlled_decision(model, tok, max_seq_len, router, calibration), backend)
+    decision = ImageDecision(
+        controlled_decision(model, tok, max_seq_len, router, calibration), backend
+    )
+    decision.images.calibration = image_calibration
+    decision.images.router = image_router
+    return decision

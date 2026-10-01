@@ -303,6 +303,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--max-reasoning-tokens", type=int)
     ap.add_argument("--reasoning-router", help="promoted v2 router JSON")
     ap.add_argument("--reasoning-calibration", help="v2 path-temperature JSON")
+    ap.add_argument("--image-calibration", help="model-bound native image temperature artifact")
+    ap.add_argument("--image-router", help="model-bound, dev-promoted native image router")
     ap.add_argument(
         "--images", action="store_true", help="native Gemma 4 image inputs (--ckpt only)"
     )
@@ -347,6 +349,8 @@ def main(argv: list[str] | None = None) -> None:
         ap.error("use either legacy --reasoning or v2 reasoning flags")
     if args.images and (not args.ckpt or args.reasoning):
         ap.error("--images requires --ckpt and the v2 reasoning interface")
+    if (args.image_calibration or args.image_router) and not args.images:
+        ap.error("--image-calibration/--image-router require --images")
     if args.threads:
         torch.set_num_threads(args.threads)
     if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
@@ -357,6 +361,8 @@ def main(argv: list[str] | None = None) -> None:
         from .multimodal import load_image_decision
         from .routing import BenefitRouter
         from .training.path_calibration import PathCalibration
+        from .training.scoped_calibration import ScopedCalibration
+        from .training.scoped_router import ScopedRouter
 
         args.ckpt = resolve_checkpoint(args.ckpt, args.revision)
         router = BenefitRouter.load(args.reasoning_router) if args.reasoning_router else None
@@ -371,6 +377,10 @@ def main(argv: list[str] | None = None) -> None:
             max_seq_len=args.max_seq_len or None,
             router=router,
             calibration=calibration,
+            image_calibration=ScopedCalibration.load(args.image_calibration)
+            if args.image_calibration
+            else None,
+            image_router=ScopedRouter.load(args.image_router) if args.image_router else None,
         )
         model, tok = image_decision.model, image_decision.tok
         name = os.path.basename(os.path.normpath(args.ckpt))
