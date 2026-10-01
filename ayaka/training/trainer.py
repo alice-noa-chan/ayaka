@@ -82,6 +82,7 @@ class Trainer:
         self.step_i = 0
         self.stopped_early = False
         self.use_amp = cfg.bf16 and self.device.type == "cuda"
+        self.can_share = "linear_attention" not in getattr(model.text_config, "layer_types", [])
 
     def n_trainable(self) -> int:
         return sum(p.numel() for g in self.opt.param_groups for p in g["params"])
@@ -111,7 +112,9 @@ class Trainer:
         thr = self.ckpt_threshold
         plain = items if thr is None else [it for it in items if it.length < thr]
         heavy = [] if thr is None else [it for it in items if it.length >= thr]
-        chunks = [(k, mb, False) for k, mb in plan_chunks(plain, self.micro_tokens)]
+        chunks = [
+            (k, mb, False) for k, mb in plan_chunks(plain, self.micro_tokens, share=self.can_share)
+        ]
         # activation checkpointing drops KV caches inside HF layers: no sharing then
         chunks += [
             (k, mb, True) for k, mb in plan_chunks(heavy, self.micro_ckpt_tokens, share=False)
@@ -289,7 +292,7 @@ class Trainer:
         probs: list[list[float] | None] = [None] * len(items)
         logits: list[list[float] | None] = [None] * len(items)
         index = {id(it): i for i, it in enumerate(items)}
-        for kind, mb in plan_chunks(items, self.cfg.micro_batch_tokens):
+        for kind, mb in plan_chunks(items, self.cfg.micro_batch_tokens, share=self.can_share):
             out, _ = self._forward(kind, mb, apply_temperature=apply_temperature)
             lp = ragged_log_softmax(out.logits.float(), out.cand_cu).exp().tolist()
             lg = out.logits.float().tolist()

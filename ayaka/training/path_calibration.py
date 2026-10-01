@@ -13,7 +13,15 @@ def path_key(kind, route, budget):
 
 class PathCalibration:
     def __init__(self, temperatures=None):
-        self.temperatures = temperatures or {}
+        self.temperatures = temperatures if temperatures is not None else {}
+        if not isinstance(self.temperatures, dict) or any(
+            not isinstance(k, str)
+            or type(t) not in (int, float)
+            or not math.isfinite(t)
+            or not 0.05 <= t <= 20
+            for k, t in self.temperatures.items()
+        ):
+            raise ValueError("path temperatures must be finite scalars in 0.05..20")
 
     @classmethod
     def fit(cls, rows):

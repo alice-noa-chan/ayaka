@@ -79,7 +79,11 @@ class Decision:
         cache = self._prefix_cache(prefix, torch.device(dev))
         # Recurrent/hybrid caches may not implement batch expansion. Branch
         # independent copies instead of assuming a dense-attention KV layout.
-        if not callable(getattr(cache, "batch_repeat_interleave", None)):
+        can_expand = callable(getattr(cache, "batch_repeat_interleave", None)) and all(
+            callable(getattr(layer, "batch_repeat_interleave", None))
+            for layer in getattr(cache, "layers", [])
+        )
+        if not can_expand:
             result = []
             for item in items:
                 batch = suffix_rows([item], len(prefix), self.tok.pad_id).to(dev)

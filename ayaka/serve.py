@@ -336,7 +336,8 @@ def main(argv: list[str] | None = None) -> None:
         decision = controlled_decision(
             model, tok, max_seq_len=args.max_seq_len or None, router=router, calibration=calibration
         )
-        overrides = {"mode": "auto", **overrides}
+        if model.cfg.version < 2:
+            overrides = {"mode": "auto", **overrides}
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])

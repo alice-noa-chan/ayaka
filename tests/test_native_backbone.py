@@ -8,10 +8,14 @@ from ayaka.primitives import Decision, QuestionSpec
 from ayaka.tokenization import ToyTokenizer
 
 
-@pytest.mark.parametrize("family", ["granite", "qwen3_5", "gemma4_text"])
+@pytest.mark.parametrize(
+    "family", ["granite", "qwen3_5", "qwen3_5_hybrid", "gemma4_text", "gemma4_unified_text"]
+)
 def test_native_output_logits_and_cache_match(family):
     from transformers import (
         Gemma4ForCausalLM,
+        Gemma4UnifiedForCausalLM,
+        Gemma4UnifiedTextConfig,
         GraniteConfig,
         GraniteForCausalLM,
         Qwen3_5ForCausalLM,
@@ -33,7 +37,7 @@ def test_native_output_logits_and_cache_match(family):
             tie_word_embeddings=False,
         )
         lm = GraniteForCausalLM(cfg).eval()
-    elif family == "qwen3_5":
+    elif family.startswith("qwen3_5"):
         cfg = Qwen3_5TextConfig(
             vocab_size=512,
             hidden_size=64,
@@ -42,10 +46,29 @@ def test_native_output_logits_and_cache_match(family):
             num_attention_heads=4,
             num_key_value_heads=2,
             head_dim=16,
-            layer_types=["full_attention"] * 2,
+            layer_types=["linear_attention", "full_attention"]
+            if family.endswith("hybrid")
+            else ["full_attention"] * 2,
+            linear_num_key_heads=4,
+            linear_num_value_heads=4,
+            linear_key_head_dim=16,
+            linear_value_head_dim=16,
             tie_word_embeddings=False,
         )
         lm = Qwen3_5ForCausalLM(cfg).eval()
+    elif family == "gemma4_unified_text":
+        cfg = Gemma4UnifiedTextConfig(
+            vocab_size=512,
+            hidden_size=64,
+            intermediate_size=128,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            head_dim=16,
+            layer_types=["full_attention"] * 2,
+            final_logit_softcapping=30.0,
+        )
+        lm = Gemma4UnifiedForCausalLM(cfg).eval()
     else:
         cfg = tiny_text_config()
         lm = Gemma4ForCausalLM(cfg).eval()

@@ -68,7 +68,12 @@ class PlanGenerator:
         hf = getattr(tok, "hf", None)
         self.eos = {tok.eos_id} if getattr(tok, "eos_id", None) is not None else set()
         if hf is not None:
-            self.eos |= {hf.eos_token_id, hf.convert_tokens_to_ids("<turn|>")}
+            self.eos.add(hf.eos_token_id)
+            turn = hf.convert_tokens_to_ids("<turn|>")
+            if turn is not None and turn != getattr(hf, "unk_token_id", None):
+                self.eos.add(turn)
+        configured = getattr(model.text_config, "eos_token_id", None)
+        self.eos.update(configured if isinstance(configured, list) else [configured])
         self.eos.discard(None)
 
     def __call__(self, messages) -> str:

@@ -95,8 +95,12 @@ def export_model(
     bb_dir = os.path.join(out_dir, "backbone")
     os.makedirs(bb_dir, exist_ok=True)
     text = model.text_model()
-    if model.text_config.model_type != "gemma4_text":
+    if model.text_config.model_type not in ("gemma4_text", "gemma4_unified_text"):
         raise ValueError("standalone exports currently support Gemma 4 only; use v2 checkpoints")
+    if quantize and model.text_config.model_type != "gemma4_text":
+        raise ValueError(
+            "int8 exports require the Gemma 4 E-series text layout; use bf16 or checkpoints"
+        )
     tcfg = model.text_config
     tcfg.save_pretrained(bb_dir)
     state = quantized_state(text) if quantize else text.state_dict()

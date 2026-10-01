@@ -162,7 +162,9 @@ class ElectraDecisionModel(nn.Module):
         # exact speed-up on KV-shared backbones (E2B/E4B); see model/fastpath.py
         # option spans are read below the KV-shared layers (all of them on
         # backbones without KV sharing); the answer position from the top
-        self.span_layer = kv_shared_start(text_config)
+        self.span_layer = (
+            kv_shared_start(text_config) if text_config.model_type == "gemma4_text" else None
+        )
         self.prune_shared_positions = self.span_layer is not None
 
     @classmethod
