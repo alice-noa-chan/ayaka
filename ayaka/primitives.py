@@ -60,6 +60,7 @@ class Decision:
         # inference budget; checkpoints saved before the field default to 8192
         self.max_seq_len = max_seq_len or max(cfg.serve_max_seq_len, cfg.max_seq_len)
         self.max_labels = model.cfg.max_label_candidates
+        self.apply_temperature = True
         self.reuse_head = True  # encode the constant prompt head once
         self._head: tuple[list[int], object, torch.device] | None = None
 
@@ -88,13 +89,15 @@ class Decision:
             for item in items:
                 batch = suffix_rows([item], len(prefix), self.tok.pad_id).to(dev)
                 out = self.model(
-                    batch, apply_temperature=True, past_key_values=copy.deepcopy(cache)
+                    batch,
+                    apply_temperature=self.apply_temperature,
+                    past_key_values=copy.deepcopy(cache),
                 )
                 result.append(ragged_softmax(out.logits, out.cand_cu).tolist())
             return result
         cache.batch_repeat_interleave(len(items))
         batch = suffix_rows(items, len(prefix), self.tok.pad_id).to(dev)
-        out = self.model(batch, apply_temperature=True, past_key_values=cache)
+        out = self.model(batch, apply_temperature=self.apply_temperature, past_key_values=cache)
         p = ragged_softmax(out.logits, out.cand_cu).tolist()
         cu = out.cand_cu.tolist()
         return [p[cu[i] : cu[i + 1]] for i in range(len(items))]

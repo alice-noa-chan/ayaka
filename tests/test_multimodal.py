@@ -294,6 +294,40 @@ def test_image_rejects_invalid_media_and_context_without_silent_truncation():
     assert exc.value.trace.finish_reason == "context_limit"
 
 
+def test_large_image_choices_encode_media_once_and_count_rerank(monkeypatch):
+    _, model, _, backend = build("gemma4_unified")
+    decision = NativeImageDecision(backend)
+    calls = []
+    readouts = []
+    native = backend.prefill
+    forward = model.forward
+
+    def prefill(inputs):
+        calls.append(inputs["input_ids"].shape[1])
+        return native(inputs)
+
+    monkeypatch.setattr(backend, "prefill", prefill)
+
+    def count_forward(batch, **kwargs):
+        readouts.append(batch.input_ids.numel())
+        return forward(batch, **kwargs)
+
+    monkeypatch.setattr(model, "forward", count_forward)
+    state = decode_media("Image", media())
+    spec = QuestionSpec("choice", "Which?", [f"option {i}" for i in range(28)])
+    result = decision.decide(state, [spec])[0]
+    assert len(calls) == 1 and len(result.probs) == 28
+    assert sum(result.probs) == pytest.approx(1)
+    assert len(readouts) == 2
+    count = calls[0] + sum(readouts)
+    assert decision.input_counts(state, [spec]) == [count]
+    assert decision._context is None
+    # Text head temperatures must not change this image readout.
+    with torch.no_grad():
+        model.temperature.fill_(7)
+    assert decision.decide(state, [spec])[0].probs == pytest.approx(result.probs)
+
+
 @pytest.mark.parametrize("family", ["gemma4", "gemma4_unified"])
 def test_saved_native_processor_and_adapter_load_end_to_end(tmp_path, family):
     from dataclasses import asdict, replace

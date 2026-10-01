@@ -53,6 +53,11 @@ def policy_for(question):
             raise ValueError("open mode uses the reserved __other__ residual")
     elif not isinstance(criteria, dict) or policy.get("other_id") not in criteria:
         raise ValueError("expand mode needs criteria and an existing other_id")
+    elif not isinstance(policy["other_id"], str) or any(
+        not isinstance(k, str) or not isinstance(v, str) or not v.strip()
+        for k, v in criteria.items()
+    ):
+        raise ValueError("expand candidates require string ids and explicit string definitions")
     return {"max_new": 4, "max_tokens": 384, **policy}
 
 
@@ -84,6 +89,10 @@ def split_parent(parent, children, parent_id):
         raise ValueError("invalid probability")
     if not math.isclose(sum(children.values()), 1.0, abs_tol=1e-5):
         raise ValueError("child conditional probabilities must sum to one")
+    if not math.isclose(sum(parent.values()), 1.0, abs_tol=1e-5):
+        raise ValueError("parent probabilities must sum to one")
+    if (set(parent) - {parent_id}) & set(children):
+        raise ValueError("child ids cannot replace original siblings")
     mass = parent[parent_id]
     return {
         **{k: v for k, v in parent.items() if k != parent_id},
@@ -129,6 +138,15 @@ def handle_candidates(service, body):
     except (ValueError, TypeError) as exc:
         raise BadRequest(str(exc)) from exc
 
+    if all(policy["mode"] == "fixed" for policy in policies.values()):
+        request = copy.deepcopy(body)
+        for question in request["questions"].values():
+            question.pop("candidate_generation", None)
+        result = service.handle(request)
+        result["usage"]["candidate_tokens"] = 0
+        result["candidate_generation"] = {}
+        return result
+
     response = {
         "model": body.get("model") or service.model_name,
         "answers": {},
@@ -142,12 +160,21 @@ def handle_candidates(service, body):
         "reasoning": {},
     }
 
-    def score(name, question):
+    stages = {name: [] for name in policies}
+
+    def score(name, question, generated=False):
         request = {**body, "questions": {name: question}}
-        result = service.handle(request)
+        result = service.handle(request, candidate_partition=generated)
         for key in ("input_tokens", "output_tokens", "reasoning_tokens"):
             response["usage"][key] += result["usage"][key]
         response["reasoning"].update(result.get("reasoning", {}))
+        stages[name].append(
+            {
+                "stage": "generated_partition" if generated else "original",
+                "reasoning": result.get("reasoning", {}).get(name),
+                "usage": result["usage"],
+            }
+        )
         return result["answers"][name]
 
     for name, policy in policies.items():
@@ -180,6 +207,8 @@ def handle_candidates(service, body):
             "probability_semantics": "conditional_on_frozen_candidate_partition",
             "scope": policy["scope"],
             "generated_tokens": 0,
+            "coverage": "not_estimated",
+            "information_sufficiency": "not_estimated",
         }
         try:
             with service.lock:
@@ -199,13 +228,21 @@ def handle_candidates(service, body):
                 + "\nRestrict this classification to: "
                 + policy["scope"]
                 + (
-                    "\nCondition on this parent outcome: " + str(original[residual])
+                    "\nCondition on this parent outcome: "
+                    + str(original[residual])
+                    + "\nExclude all original sibling outcomes: "
+                    + json.dumps(
+                        {k: v for k, v in original.items() if k != residual},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
                     if parent
                     else ""
                 )
             )
-            scored = score(name, child)
+            scored = score(name, child, generated=True)
             if parent:
+                metadata["parent_candidates"] = original
                 metadata["parent_probabilities"] = parent["probabilities"]
                 metadata["conditional_probabilities"] = scored["probabilities"]
                 scored["probabilities"] = split_parent(
@@ -220,7 +257,11 @@ def handle_candidates(service, body):
                 proposals=rows,
                 residual_id=residual,
                 version=hashlib.sha256(
-                    json.dumps(frozen, sort_keys=True, ensure_ascii=False).encode()
+                    json.dumps(
+                        {"candidates": frozen, "scope": policy["scope"], "parent": original},
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    ).encode()
                 ).hexdigest(),
             )
             response["answers"][name] = scored
@@ -239,4 +280,5 @@ def handle_candidates(service, body):
                 response["usage"]["output_tokens"] += trace.generated_tokens
                 response["usage"]["input_tokens"] += trace.prefill_tokens
             response["candidate_generation"][name] = metadata
+            metadata["judgments"] = stages[name]
     return response

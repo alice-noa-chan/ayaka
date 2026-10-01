@@ -74,6 +74,8 @@ def test_expand_preserves_siblings_and_mass_and_uses_clean_scoring():
         {"refund": 0.7, "delivery": 0.21, "address": 0.06, "other": 0.03}
     )
     assert len(original.calls) == 2  # Neither scoring branch uses proposal cache.
+    assert "Exclude all original sibling outcomes" in original.calls[1][0].instruction
+    assert "Refund request" in original.calls[1][0].instruction
     assert original.calls[0][0].candidates == list(body["questions"]["intent"]["criteria"].values())
     assert result["usage"]["candidate_tokens"] == 3
     assert result["usage"]["reasoning_tokens"] == 0
@@ -133,3 +135,71 @@ def test_fixed_unchanged_and_settings_do_not_leak():
     result = server.handle(body)
     assert result["answers"]["intent"]["probabilities"] == {"refund": 0.7, "other": 0.3}
     assert result["usage"]["candidate_tokens"] == 0
+    second = copy.deepcopy(q)
+    body["questions"]["second"] = second
+    original = server.decision.original
+    original.calls.clear()
+    batched = server.handle(body)
+    assert len(original.calls) == 1 and len(original.calls[0]) == 2
+    assert batched["answers"]["intent"] == batched["answers"]["second"]
+
+
+def test_generated_partition_cannot_use_fixed_calibration_or_router():
+    class Forbidden:
+        def apply(self, *args, **kwargs):
+            pytest.fail("fixed calibration on generated candidates")
+
+        def should_reason(self, *args, **kwargs):
+            pytest.fail("fixed router on generated candidates")
+
+    server, _ = service()
+    server.decision.calibration = Forbidden()
+    server.decision.router = Forbidden()
+    result = server.handle(request("open"))
+    assert result["candidate_generation"]["intent"]["status"] == "completed"
+    assert server.decision.calibration is not None and server.decision.router is not None
+    assert getattr(server.decision.original, "apply_temperature", True) is True
+
+
+def test_unvalidated_partition_bypasses_native_text_temperature():
+    import torch
+    from test_reasoning_pipeline import Tok
+
+    from ayaka.config import tiny_config
+    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.primitives import QuestionSpec
+    from ayaka.reasoning import ReasoningSettings
+    from ayaka.reasoning_pipeline import controlled_decision
+
+    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    ordinary = controlled_decision(model, Tok())
+    experimental = ordinary.for_unvalidated_partition()
+    spec = [QuestionSpec("noul", "A request?", ["no", "yes"])]
+    settings = [ReasoningSettings(mode="off")]
+    before = experimental.decide("Hello", spec, reasoning=settings)[0].probs
+    with torch.no_grad():
+        model.temperature.fill_(7)
+    after = experimental.decide("Hello", spec, reasoning=settings)[0].probs
+    assert before == pytest.approx(after)
+    assert ordinary.original.apply_temperature is True
+    assert ordinary.generator.apply_temperature is True
+
+
+def test_forced_high_preserved_separately_from_proposal_budget():
+    class ForcedProposer(Proposer):
+        def readout(self, trace, spec):
+            return [0.7, 0.3] if len(spec.candidates) == 2 else [0.7, 0.2, 0.1]
+
+    proposer = ForcedProposer()
+    server, original = service(proposer)
+    body = request()
+    body["questions"]["intent"].pop("reasoning")
+    body["options"] = {"reasoning": {"mode": "on", "effort": "high"}}
+    result = server.handle(body)
+    assert proposer.budgets == [1024, 384, 1024]
+    assert not original.calls
+    assert result["usage"]["reasoning_tokens"] == 6
+    assert result["usage"]["candidate_tokens"] == 3
+    assert result["usage"]["output_tokens"] == 9
+    judgments = result["candidate_generation"]["intent"]["judgments"]
+    assert [j["reasoning"]["budget"] for j in judgments] == [1024, 1024]

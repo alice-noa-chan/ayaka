@@ -45,7 +45,11 @@ def decode_media(state, media):
     for item in media:
         if not isinstance(item, dict) or set(item) != {"type", "mime_type", "data"}:
             raise ValueError("media needs exactly type, mime_type, and base64 data")
-        if item["type"] != "image" or item["mime_type"] not in formats:
+        if (
+            item["type"] != "image"
+            or not isinstance(item["mime_type"], str)
+            or item["mime_type"] not in formats
+        ):
             raise ValueError("only PNG, JPEG and WebP images are supported")
         data = item["data"]
         if not isinstance(data, str) or len(data) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
@@ -119,6 +123,9 @@ class NativeImageDecision(Decision):
     def __init__(self, backend, max_seq_len=None):
         super().__init__(backend.model, backend.tok, max_seq_len)
         self.backend = backend
+        self.max_seq_len = min(self.max_seq_len, backend.model.text_config.max_position_embeddings)
+        self._context = None
+        self._last_inputs = None
 
     def encode(self, state, views):
         text = self.tok.decode(render_prefix(state.state, self.tok))
@@ -137,6 +144,9 @@ class NativeImageDecision(Decision):
         return inputs, prefix, items
 
     def input_counts(self, state, questions):
+        key = (id(state), tuple(id(q) for q in questions))
+        if self._last_inputs is not None and self._last_inputs[0] == key:
+            return self._last_inputs[1]
         _, prefix, items = self.encode(state, [q.view() for q in questions])
         return [
             len(it.rendered.suffix_ids) + (len(prefix) if j == 0 else 0)
@@ -145,14 +155,53 @@ class NativeImageDecision(Decision):
 
     @torch.no_grad()
     def _run(self, state, views, device):
-        inputs, prefix, items = self.encode(state, views)
-        cache = self.backend.prefill(inputs).past_key_values
+        context = self._context if self._context is not None else {"cache": None, "calls": []}
+        first = context["cache"] is None
+        if first:
+            inputs, prefix, items = self.encode(state, views)
+            context["prefix"] = prefix
+            context["cache"] = self.backend.prefill(inputs).past_key_values
+        else:
+            prefix = context["prefix"]
+            items = [
+                EncodedQuestion(
+                    prefix, render_question(v, self.tok, self.max_labels), PRIMITIVE_INDEX[v.type]
+                )
+                for v in views
+            ]
+            if any(len(prefix) + len(it.rendered.suffix_ids) > self.max_seq_len for it in items):
+                raise ValueError("image readout exceeds context budget")
+        context["calls"].append(
+            [
+                len(it.rendered.suffix_ids) + (len(prefix) if first and j == 0 else 0)
+                for j, it in enumerate(items)
+            ]
+        )
+        cache = context["cache"]
         results = []
         for item in items:
             batch = suffix_rows([item], len(prefix), self.tok.pad_id).to(self._device(device))
             out = self.model(batch, past_key_values=copy.deepcopy(cache), apply_temperature=False)
             results.append(ragged_softmax(out.logits, out.cand_cu).tolist())
         return results
+
+    def decide(self, state, questions, device=None):
+        self._context = {"cache": None, "calls": []}
+        try:
+            results = super().decide(state, questions, device)
+            calls = self._context["calls"]
+            counts = list(calls[0])
+            large = [
+                i
+                for i, q in enumerate(questions)
+                if q.type == "choice" and len(q.candidates) > self.max_labels
+            ]
+            for i, rerank in zip(large, calls[1:], strict=True):
+                counts[i] += rerank[0]
+            self._last_inputs = ((id(state), tuple(id(q) for q in questions)), counts)
+            return results
+        finally:
+            self._context = None
 
 
 class ImageTraceGenerator(TraceGenerator):
@@ -215,6 +264,8 @@ class ImageDecision:
         results = self.images.decide(state, questions, device=device, reasoning=reasoning)
         for result in results:
             result.extras["reasoning"].update(modality="image", calibration="unvalidated")
+            if result.extras["reasoning"]["finish_reason"] == "no_validated_router":
+                result.extras["reasoning"]["finish_reason"] = "no_validated_image_router"
         return results
 
 

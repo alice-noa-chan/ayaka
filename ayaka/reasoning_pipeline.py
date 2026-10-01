@@ -171,6 +171,12 @@ class ControlledDecision:
             {"mode": "auto" if cfg.version >= 2 else "off", **cfg.reasoning_defaults}
         )
 
+    def for_unvalidated_partition(self):
+        original, generator = copy.copy(self.original), copy.copy(self.generator)
+        original.apply_temperature = False
+        generator.apply_temperature = False
+        return ControlledDecision(original, generator)
+
     def _input_counts(self, state, questions):
         if hasattr(self.original, "input_counts"):
             return self.original.input_counts(state, questions)

@@ -92,7 +92,7 @@ class DecisionService:
         self.reasoning_defaults = reasoning_defaults
         self.lock = Lock()  # one forward at a time: predictable latency, no VRAM spikes
 
-    def handle(self, body: dict) -> dict:
+    def handle(self, body: dict, *, candidate_partition=False) -> dict:
         if not isinstance(body, dict) or "questions" not in body:
             raise BadRequest("body needs 'state' and 'questions'")
         qs = body["questions"]
@@ -138,6 +138,9 @@ class DecisionService:
         except ValueError as exc:
             raise BadRequest(str(exc)) from exc
         state = body.get("state", "")
+        decision = self.decision
+        if candidate_partition:
+            decision = getattr(decision, "text", decision).for_unvalidated_partition()
         if "media" in body:
             if not getattr(self.decision, "supports_images", False):
                 raise BadRequest("this server has no image backend; start with --images and --ckpt")
@@ -148,9 +151,7 @@ class DecisionService:
         with self.lock:
             if getattr(self.decision, "supports_reasoning", False):
                 try:
-                    results = self.decision.decide(
-                        state, [p[0] for p in parsed], reasoning=settings
-                    )
+                    results = decision.decide(state, [p[0] for p in parsed], reasoning=settings)
                 except ValueError as exc:
                     if "media" in body:
                         raise BadRequest(str(exc)) from exc
