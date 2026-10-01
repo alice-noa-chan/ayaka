@@ -313,7 +313,9 @@ class EndpointDecision:
 
     def decide(self, state, questions, device=None):
         import urllib.request
+        import uuid
 
+        from ..http_transport import request_bytes
         from ..primitives import DecisionResult
 
         body = {
@@ -323,10 +325,9 @@ class EndpointDecision:
         req = urllib.request.Request(
             self.url,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Idempotency-Key": uuid.uuid4().hex},
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            out = json.loads(resp.read())
+        out = json.loads(request_bytes(req, timeout=self.timeout))
         results = []
         for i, spec in enumerate(questions):
             ans = out["answers"][f"q{i}"]

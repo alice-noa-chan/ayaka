@@ -28,6 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 
+from .http_transport import CacheFull, RequestCache, RequestConflict, server_for
 from .primitives import Decision, QuestionSpec
 from .reasoning import resolve_settings
 
@@ -197,9 +198,14 @@ class DecisionService:
 
 
 def make_handler(service: DecisionService):
+    cache = RequestCache()
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, obj: dict) -> None:
             data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self._send_bytes(code, data)
+
+        def _send_bytes(self, code, data):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
@@ -224,11 +230,30 @@ def make_handler(service: DecisionService):
                 n = int(self.headers.get("Content-Length", "0"))
                 if not 0 <= n <= MAX_HTTP_BYTES:
                     raise BadRequest("request exceeds the 24 MiB body limit")
-                body = json.loads(self.rfile.read(n) or b"{}")
-                t0 = time.perf_counter()
-                out = service.handle(body)
-                out["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-                self._send(200, out)
+                raw = self.rfile.read(n)
+                if len(raw) != n:
+                    raise BadRequest("incomplete request body")
+                body = json.loads(raw or b"{}")
+
+                def compute():
+                    t0 = time.perf_counter()
+                    try:
+                        out = service.handle(body)
+                        out["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+                        code = 200
+                    except BadRequest as exc:
+                        code, out = 400, {"error": str(exc)}
+                    except Exception as exc:
+                        code, out = 500, {"error": f"internal error: {type(exc).__name__}"}
+                    return code, json.dumps(out, ensure_ascii=False).encode("utf-8")
+
+                key = self.headers.get("Idempotency-Key")
+                code, data = cache.execute(key, raw, compute) if key is not None else compute()
+                self._send_bytes(code, data)
+            except RequestConflict as exc:
+                self._send(409, {"error": str(exc)})
+            except CacheFull as exc:
+                self._send(503, {"error": str(exc)})
             except (BadRequest, json.JSONDecodeError) as e:
                 self._send(400, {"error": str(e)})
             except Exception as e:  # never leak a traceback to the caller
@@ -243,7 +268,7 @@ def make_handler(service: DecisionService):
 def serve(
     decision: Decision, model_name: str, host: str = "0.0.0.0", port: int = 8000
 ) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(DecisionService(decision, model_name)))
+    return server_for((host, port), make_handler(DecisionService(decision, model_name)))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -397,7 +422,7 @@ def main(argv: list[str] | None = None) -> None:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
     service = DecisionService(decision, name, overrides or None)
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(service))
+    httpd = server_for((args.host, args.port), make_handler(service))
     print(
         f"[serve] {name} on {args.device} at http://{args.host}:{args.port}/v1/systemone",
         flush=True,
