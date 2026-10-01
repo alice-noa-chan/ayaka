@@ -140,7 +140,14 @@ def render_question(
     if q.type == "score":
         ords = q.ordinals if q.ordinals is not None else list(range(n))
         order = sorted(range(n), key=lambda i: ords[i])
-        if all(0 <= o <= 9 for o in ords):
+        single_digits = all(0 <= o <= 9 for o in ords)
+        if single_digits:
+            try:
+                for o in ords:
+                    tok.single_token_id(str(o))
+            except ValueError:
+                single_digits = False
+        if single_digits:
             names = [str(ords[i]) for i in order]
         elif n <= max_label_candidates:
             names = LETTERS[:n]

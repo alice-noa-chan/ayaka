@@ -1,0 +1,312 @@
+{
+  "measured_on": "2026-10-01",
+  "total_parameter_limit": 14000000000,
+  "parameter_basis": "official Hub safetensors total including multimodal weights; active/effective size is not substituted",
+  "candidates": [
+    {
+      "repo": "google/gemma-4-E4B-it",
+      "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+      "license": "apache-2.0",
+      "total_parameters": 7996156490,
+      "model_type": "gemma4_text",
+      "tie_word_embeddings": true,
+      "layers": 42,
+      "hidden_size": 2560,
+      "name": "gemma4-e4b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/google/gemma-4-E4B-it",
+      "config_url": "https://huggingface.co/google/gemma-4-E4B-it/blob/ee0ef6023621cff504d758262d4e04895a5af4a2/config.json"
+    },
+    {
+      "repo": "google/gemma-4-12B-it",
+      "revision": "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
+      "license": "apache-2.0",
+      "total_parameters": 11959730224,
+      "model_type": "gemma4_unified_text",
+      "tie_word_embeddings": true,
+      "layers": 48,
+      "hidden_size": 3840,
+      "name": "gemma4-12b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/google/gemma-4-12B-it",
+      "config_url": "https://huggingface.co/google/gemma-4-12B-it/blob/707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7/config.json"
+    },
+    {
+      "repo": "Qwen/Qwen3.5-4B",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "license": "apache-2.0",
+      "total_parameters": 4659865088,
+      "model_type": "qwen3_5_text",
+      "tie_word_embeddings": true,
+      "layers": 32,
+      "hidden_size": 2560,
+      "name": "qwen35-4b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+        "in_proj_qkv",
+        "in_proj_z",
+        "in_proj_b",
+        "in_proj_a",
+        "out_proj"
+      ],
+      "card_url": "https://huggingface.co/Qwen/Qwen3.5-4B",
+      "config_url": "https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/config.json"
+    },
+    {
+      "repo": "Qwen/Qwen3.5-9B",
+      "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "license": "apache-2.0",
+      "total_parameters": 9653104368,
+      "model_type": "qwen3_5_text",
+      "tie_word_embeddings": false,
+      "layers": 32,
+      "hidden_size": 4096,
+      "name": "qwen35-9b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+        "in_proj_qkv",
+        "in_proj_z",
+        "in_proj_b",
+        "in_proj_a",
+        "out_proj"
+      ],
+      "card_url": "https://huggingface.co/Qwen/Qwen3.5-9B",
+      "config_url": "https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/config.json"
+    },
+    {
+      "repo": "XHToken/Spark-X2.5-4B",
+      "revision": "0bcb35678590218655dff3765b9e61c83b35e9c4",
+      "license": "apache-2.0",
+      "total_parameters": 4112079360,
+      "model_type": "spark2_5",
+      "tie_word_embeddings": true,
+      "layers": 36,
+      "hidden_size": 2560,
+      "name": "spark25-4b",
+      "support": "needs_custom_code_review",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/XHToken/Spark-X2.5-4B",
+      "config_url": "https://huggingface.co/XHToken/Spark-X2.5-4B/blob/0bcb35678590218655dff3765b9e61c83b35e9c4/config.json"
+    },
+    {
+      "repo": "ibm-granite/granite-4.2-3b",
+      "revision": "e459acceac81e5fe67c07d9cfc72329a332e7eb1",
+      "license": "apache-2.0",
+      "total_parameters": 3659737600,
+      "model_type": "granite",
+      "tie_word_embeddings": false,
+      "layers": 40,
+      "hidden_size": 2560,
+      "name": "granite42-3b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/ibm-granite/granite-4.2-3b",
+      "config_url": "https://huggingface.co/ibm-granite/granite-4.2-3b/blob/e459acceac81e5fe67c07d9cfc72329a332e7eb1/config.json"
+    },
+    {
+      "repo": "ibm-granite/granite-4.2-8b",
+      "revision": "f8de16cdcdbc6c779ca517604e050d82cc119e44",
+      "license": "apache-2.0",
+      "total_parameters": 8791592960,
+      "model_type": "granite",
+      "tie_word_embeddings": false,
+      "layers": 40,
+      "hidden_size": 4096,
+      "name": "granite42-8b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/ibm-granite/granite-4.2-8b",
+      "config_url": "https://huggingface.co/ibm-granite/granite-4.2-8b/blob/f8de16cdcdbc6c779ca517604e050d82cc119e44/config.json"
+    },
+    {
+      "repo": "openbmb/MiniCPM5-2B",
+      "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+      "license": "apache-2.0",
+      "total_parameters": 2516756480,
+      "model_type": "llama",
+      "tie_word_embeddings": false,
+      "layers": 42,
+      "hidden_size": 2048,
+      "name": "minicpm5-2b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/openbmb/MiniCPM5-2B",
+      "config_url": "https://huggingface.co/openbmb/MiniCPM5-2B/blob/f97400052a43d642bbc6e9975e2397e3ae6a6b52/config.json"
+    },
+    {
+      "repo": "Nanbeige/Nanbeige4.2-3B",
+      "revision": "b82e54bd609793562a75cbf9337970a93369eab5",
+      "license": "apache-2.0",
+      "total_parameters": 4169800704,
+      "model_type": "nanbeige",
+      "tie_word_embeddings": false,
+      "layers": 22,
+      "hidden_size": 3072,
+      "name": "nanbeige42-3b",
+      "support": "needs_custom_code_review",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/Nanbeige/Nanbeige4.2-3B",
+      "config_url": "https://huggingface.co/Nanbeige/Nanbeige4.2-3B/blob/b82e54bd609793562a75cbf9337970a93369eab5/config.json"
+    },
+    {
+      "repo": "mistralai/Ministral-3-8B-Reasoning-2512",
+      "revision": "81eaece1948f3875421d9a45bc55487d10e2d894",
+      "license": "apache-2.0",
+      "total_parameters": 8918026240,
+      "model_type": "ministral3",
+      "tie_word_embeddings": null,
+      "layers": 34,
+      "hidden_size": 4096,
+      "name": "ministral3-8b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/mistralai/Ministral-3-8B-Reasoning-2512",
+      "config_url": "https://huggingface.co/mistralai/Ministral-3-8B-Reasoning-2512/blob/81eaece1948f3875421d9a45bc55487d10e2d894/config.json"
+    },
+    {
+      "repo": "domyn/Domyn-Small-v1.0",
+      "revision": "5e1071ad685b8e7bc1fb9fa5637b377b817a1730",
+      "license": "mit",
+      "total_parameters": 9815334912,
+      "model_type": "nemotron",
+      "tie_word_embeddings": false,
+      "layers": 40,
+      "hidden_size": 4096,
+      "name": "domyn-small",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/domyn/Domyn-Small-v1.0",
+      "config_url": "https://huggingface.co/domyn/Domyn-Small-v1.0/blob/5e1071ad685b8e7bc1fb9fa5637b377b817a1730/config.json",
+      "license_metadata": "other; license_name=mit",
+      "license_source": "https://www.domyn.com/legal/software-licenses/domyn-small"
+    },
+    {
+      "repo": "microsoft/Phi-4-mini-reasoning",
+      "revision": "0e3b1e2d02ee478a3743abe3f629e9c0cb722e0a",
+      "license": "mit",
+      "total_parameters": 3836021760,
+      "model_type": "phi3",
+      "tie_word_embeddings": true,
+      "layers": 32,
+      "hidden_size": 3072,
+      "name": "phi4-mini",
+      "support": "builtin",
+      "lora_targets": [
+        "qkv_proj",
+        "o_proj",
+        "gate_up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/microsoft/Phi-4-mini-reasoning",
+      "config_url": "https://huggingface.co/microsoft/Phi-4-mini-reasoning/blob/0e3b1e2d02ee478a3743abe3f629e9c0cb722e0a/config.json"
+    }
+  ],
+  "external_references": [
+    {
+      "source": "https://benchmarkheaven.com/jev-models",
+      "version": "v1.5.4",
+      "mode": "typed serial; headline A/equal types",
+      "use": "method and architecture context; no base-model-only rank inferred"
+    },
+    {
+      "source": "https://arena.ai/leaderboard/text",
+      "version": "snapshot 2026-10-01",
+      "mode": "general text preference",
+      "use": "sparse comparable small-model coverage; no missing score treated as zero"
+    },
+    {
+      "source": "https://artificialanalysis.ai/models",
+      "version": "v4.3.2",
+      "mode": "provider/model reasoning mode specific",
+      "use": "many index values not publicly rendered; do not combine older index scores"
+    }
+  ]
+}

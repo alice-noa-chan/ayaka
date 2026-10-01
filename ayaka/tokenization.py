@@ -52,7 +52,12 @@ class HFTokenizer:
     def from_pretrained(cls, repo: str, revision: str | None = None) -> HFTokenizer:
         from transformers import AutoTokenizer
 
-        return cls(AutoTokenizer.from_pretrained(repo, revision=revision), repo)
+        kwargs = (
+            {"fix_mistral_regex": True}
+            if "mistral" in repo.lower() or "ministral" in repo.lower()
+            else {}
+        )
+        return cls(AutoTokenizer.from_pretrained(repo, revision=revision, **kwargs), repo)
 
     @classmethod
     def for_config(cls, cfg) -> HFTokenizer:

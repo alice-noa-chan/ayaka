@@ -127,3 +127,18 @@ def test_native_template_does_not_add_a_missing_bos_or_gemma_markers():
     assert head.startswith("USER:")
     assert ":ASSISTANT:The answer is (" in tail
     assert "<|turn>" not in head + tail
+
+
+def test_score_falls_back_to_letters_when_native_digits_are_not_single_tokens():
+    from ayaka.prompt import render_question
+
+    class SplitDigits(ToyTokenizer):
+        def single_token_id(self, text):
+            if text.isdigit():
+                raise ValueError("native tokenizer splits bare digits")
+            return super().single_token_id(text)
+
+    tok = SplitDigits()
+    spec = QuestionSpec("score", "Rating?", ["low", "high"], [0, 1])
+    rendered = render_question(spec.view(), tok)
+    assert rendered.label_ids == [tok.single_token_id("A"), tok.single_token_id("B")]

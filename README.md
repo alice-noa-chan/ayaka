@@ -507,3 +507,9 @@ for example `b.pipeline_4090.remote(["eval", "--model", "electra-small", "--zero
 A checkpoint directory contains `electra_config.json`, the LoRA `adapter/`,
 `head.pt` (pointer head, gate, temperatures), `meta.json`, and alongside it
 `report.json` and `jevbench_report.json`.
+
+## Ayaka v2 development
+
+The experimental v2 controls, native-backbone support, joint reasoning training
+and bounded H100 exploration are documented in [Ayaka v2](docs/experiments/AYAKA_V2.md).
+Published v1 checkpoints keep their existing defaults; v2 results are reported separately.
