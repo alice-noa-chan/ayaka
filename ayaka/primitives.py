@@ -77,6 +77,17 @@ class Decision:
     ) -> list[list[float]]:
         dev = self._device(device)
         cache = self._prefix_cache(prefix, torch.device(dev))
+        # Recurrent/hybrid caches may not implement batch expansion. Branch
+        # independent copies instead of assuming a dense-attention KV layout.
+        if not callable(getattr(cache, "batch_repeat_interleave", None)):
+            result = []
+            for item in items:
+                batch = suffix_rows([item], len(prefix), self.tok.pad_id).to(dev)
+                out = self.model(
+                    batch, apply_temperature=True, past_key_values=copy.deepcopy(cache)
+                )
+                result.append(ragged_softmax(out.logits, out.cand_cu).tolist())
+            return result
         cache.batch_repeat_interleave(len(items))
         batch = suffix_rows(items, len(prefix), self.tok.pad_id).to(dev)
         out = self.model(batch, apply_temperature=True, past_key_values=cache)

@@ -21,7 +21,7 @@ from dataclasses import dataclass, fields, replace
 import torch
 import torch.nn as nn
 
-from ..backbone import embedding_rows, label_logits, load_text_backbone
+from ..backbone import load_text_backbone, native_logits, output_rows
 from ..config import ElectraConfig
 from .attention import enable_windowed_attention
 from .fastpath import forward_kept, kv_shared_start, prefix_cache
@@ -147,8 +147,9 @@ class ElectraDecisionModel(nn.Module):
         self.backbone = backbone
         self.text_config = text_config
         self.softcap = getattr(text_config, "final_logit_softcapping", None)
-        for c in {id(text_config): text_config, id(backbone.config): backbone.config}.values():
-            enable_windowed_attention(c)  # exact; skips masked-out key blocks
+        if text_config.model_type == "gemma4_text":
+            for c in {id(text_config): text_config, id(backbone.config): backbone.config}.values():
+                enable_windowed_attention(c)  # exact; skips masked-out key blocks
         self.head = PointerHead(
             text_config.hidden_size, cfg.pointer_dim, cfg.set_mixer_layers, cfg.set_mixer_heads
         )
@@ -186,10 +187,13 @@ class ElectraDecisionModel(nn.Module):
         return m
 
     def embed_weight(self) -> torch.Tensor:
-        return self.text_model().embed_tokens.weight
+        return self.text_model().get_input_embeddings().weight
 
     def label_rows(self, ids: torch.Tensor) -> torch.Tensor:
-        return embedding_rows(self.text_model().embed_tokens, ids)
+        return output_rows(self.text_model(), ids)
+
+    def lm_logits(self, hidden, ids=None):
+        return native_logits(self.text_model(), hidden, ids)
 
     def encode(
         self, batch: DecisionBatch, past_key_values=None, *, sparse_spans: bool = False
@@ -252,7 +256,7 @@ class ElectraDecisionModel(nn.Module):
         prim_c = batch.primitive[cq]
         bucket = length_bucket(batch.seq_len, self.cfg.long_prompt_tokens, n_q, q.device)
         gate = self.gate[prim_c, bucket[cq]]
-        lab = label_logits(q[cq], self.label_rows(batch.label_ids), self.softcap)
+        lab = self.lm_logits(q[cq], batch.label_ids)
         lab = torch.where(has_label_c, lab, torch.zeros_like(lab))
         # Training must retain pointer auxiliary losses and gate gradients,
         # even at initialization. In no-grad eval, an all-zero active gate

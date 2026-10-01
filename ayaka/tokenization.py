@@ -27,10 +27,26 @@ class HFTokenizer:
     def __init__(self, hf_tokenizer, name: str):
         self.hf = hf_tokenizer
         self.name = name
-        self.bos_id = int(hf_tokenizer.bos_token_id)
+        bos = hf_tokenizer.bos_token_id
+        self.bos_id = int(bos) if bos is not None else None
         pad = hf_tokenizer.pad_token_id
         self.pad_id = int(pad if pad is not None else 0)
         self._single: dict[str, int] = {}
+        self.decision_chat = None
+        if (
+            getattr(hf_tokenizer, "chat_template", None)
+            and "<|turn>" not in hf_tokenizer.get_vocab()
+        ):
+            marker = "AYAKA_CONTENT_BOUNDARY"
+            rendered = hf_tokenizer.apply_chat_template(
+                [{"role": "user", "content": marker}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            if rendered.count(marker) != 1:
+                raise ValueError("chat template must preserve user content exactly once")
+            self.decision_chat = tuple(rendered.split(marker))
 
     @classmethod
     def from_pretrained(cls, repo: str, revision: str | None = None) -> HFTokenizer:

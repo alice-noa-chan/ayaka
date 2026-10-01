@@ -96,13 +96,12 @@ class PlanGenerator:
         mask = torch.tensor([[0] * (longest - len(s)) + [1] * len(s) for s in seqs], device=device)
         positions = (mask.cumsum(-1) - 1).clamp(min=0)
         text = self.model.text_model()
-        embed = self.model.embed_weight()
         generated: list[list[int]] = [[] for _ in range(n)]
         done = [False] * n
         with self._adapter_off():
             hidden, cache = prefill_last(text, ids, mask, positions)
             for step in range(self.max_new_tokens):
-                logits = torch.nn.functional.linear(hidden.to(embed.dtype), embed)
+                logits = self.model.lm_logits(hidden)
                 tokens = logits.argmax(-1).tolist()
                 for j, token in enumerate(tokens):
                     if done[j]:

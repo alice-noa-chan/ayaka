@@ -51,7 +51,7 @@ def load_text_backbone(
     checkpoint (hub repo) has its text weights remapped out; a text-only
     directory (an Electra export) loads directly.
     """
-    from transformers import AutoConfig, Gemma4ForCausalLM
+    from transformers import AutoConfig, AutoModelForCausalLM, Gemma4ForCausalLM
 
     if repo == "tiny":
         torch.manual_seed(seed)
@@ -59,12 +59,14 @@ def load_text_backbone(
         lm = Gemma4ForCausalLM(cfg).to(dtype)
     else:
         any_cfg = AutoConfig.from_pretrained(repo, revision=revision)
-        text_only = any_cfg.model_type == "gemma4_text"
-        cfg = any_cfg if text_only else any_cfg.text_config
-        kwargs = {} if text_only else {"key_mapping": TEXT_KEY_MAPPING}
+        cfg = getattr(any_cfg, "text_config", any_cfg)
+        gemma = cfg.model_type == "gemma4_text"
+        mapping = TEXT_KEY_MAPPING if gemma else {r"^model\.language_model\.": "model."}
+        kwargs = {} if cfg is any_cfg else {"key_mapping": mapping}
         # load straight onto the target device: no full CPU copy of the weights
         dev = torch.device(device)
-        lm = Gemma4ForCausalLM.from_pretrained(
+        loader = Gemma4ForCausalLM if gemma else AutoModelForCausalLM
+        lm = loader.from_pretrained(
             repo,
             config=cfg,
             dtype=dtype,
@@ -73,9 +75,43 @@ def load_text_backbone(
             device_map={"": dev.index or 0} if dev.type == "cuda" else None,
             **kwargs,
         )
-    text = lm.model  # Gemma4TextModel; lm_head is tied to text.embed_tokens
+    text = detach_text_backbone(lm)
     del lm
     return text.to(device), cfg
+
+
+def detach_text_backbone(lm):
+    """Keep an untied native output head; never substitute input embeddings."""
+    text = lm.base_model
+    head = lm.get_output_embeddings()
+    embedding = text.get_input_embeddings()
+    if head.weight is not embedding.weight:
+        text.add_module("_ayaka_lm_head", head)
+    return text
+
+
+def output_rows(text, ids):
+    head = getattr(text, "_ayaka_lm_head", None)
+    return embedding_rows(head if head is not None else text.get_input_embeddings(), ids)
+
+
+def native_logits(text, hidden, ids=None):
+    """Restricted or full logits including native bias, scaling and softcap."""
+    head = getattr(text, "_ayaka_lm_head", None)
+    if ids is None:
+        embed = text.get_input_embeddings()
+        logits = (
+            head(hidden.to(head.weight.dtype))
+            if head is not None
+            else torch.nn.functional.linear(hidden.to(embed.weight.dtype), embed.weight)
+        )
+    else:
+        rows = output_rows(text, ids)
+        logits = (hidden.float() * rows.float()).sum(-1)
+        if head is not None and getattr(head, "bias", None) is not None:
+            logits = logits + head.bias[ids]
+    logits = logits / getattr(text.config, "logits_scaling", 1.0)
+    return softcap(logits, getattr(text.config, "final_logit_softcapping", None))
 
 
 def softcap(logits: torch.Tensor, cap: float | None) -> torch.Tensor:

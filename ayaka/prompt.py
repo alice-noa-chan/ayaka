@@ -69,7 +69,17 @@ def render_state(state) -> str:
 def prefix_head(tok: Tokenizer) -> list[int]:
     """The constant start of every prefix ([bos] + instructions + <state>).
     Its KV cache does not depend on what follows, so servers encode it once."""
-    return [tok.bos_id] + tok.encode(USER_OPEN + SYSTEM + "\n\n<state>\n")
+    native = getattr(tok, "decision_chat", None)
+    if native is not None:
+        return tok.encode(native[0] + SYSTEM + "\n\n<state>\n")
+    return ([tok.bos_id] if tok.bos_id is not None else []) + tok.encode(
+        USER_OPEN + SYSTEM + "\n\n<state>\n"
+    )
+
+
+def model_open(tok):
+    native = getattr(tok, "decision_chat", None)
+    return native[1] if native is not None else MODEL_OPEN
 
 
 def render_prefix(state, tok: Tokenizer, max_state_tokens: int | None = None) -> list[int]:
@@ -123,7 +133,7 @@ def render_question(
         spans[1] = b.add("Answer Yes if: " + yes.strip() + "\n")
         spans[0] = b.add("Answer No if: " + no.strip() + "\n")
         b.add("\nAnswer Yes or No.")
-        b.add(MODEL_OPEN + NOUL_CUE)
+        b.add(model_open(tok) + NOUL_CUE)
         labels = [tok.single_token_id(" No"), tok.single_token_id(" Yes")]
         return RenderedQuestion(b.ids, spans, labels, [1, 0])
 
@@ -151,7 +161,7 @@ def render_question(
         else:
             spans[i] = b.add(f"({names[k]}) {desc}\n")
     b.add("\nPick the single best " + ("level." if q.type == "score" else "option."))
-    b.add(MODEL_OPEN + (CHOICE_CUE if names is not None else "The answer is:"))
+    b.add(model_open(tok) + (CHOICE_CUE if names is not None else "The answer is:"))
 
     label_ids = None
     if names is not None:
