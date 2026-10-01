@@ -193,6 +193,7 @@ def assert_isolated(splits):
         "source_example_id",
         "translation_of",
         "derived_from",
+        "case_facts_sha256",
     )
     hashes = {}
     for split, samples in splits.items():

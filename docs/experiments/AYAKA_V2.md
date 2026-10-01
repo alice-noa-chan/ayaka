@@ -145,6 +145,18 @@ reservation, spends at most 1h on a replacement screen from the recovery allowan
 and omits the separate reproduction stage. Other stages retain their caps, subject
 to the remaining total budget. Reserved allocations are not measured GPU runtime.
 
+Curriculum version 2 also hashes the underlying facts separately from their
+document voice. Identical facts cannot cross splits even under paraphrased
+wrappers. Timezone parameters, override authorization, rubric weights, bag sizes
+and missing-evidence domains now differ across splits. The component algorithms
+remain shared; this is a mechanics/generalization probe, not a new natural benchmark.
+CPU preparation records the curriculum version and stale preparation is rejected.
+The interrupted version-1 screen is archived separately and cannot select a v2
+candidate. `--refresh-curriculum` repeats CPU preparation and caps the new screen
+at 50 minutes and head ablations at 10 minutes, preserving both prior reservations
+and the SFT/evaluation caps. Small candidates run first to leave unused time for
+larger candidates; every candidate retains the same 96-question comparison.
+
 ## Status on 2026-10-01
 
 - Implementation tests and native CPU cache/logit parity checks have passed.

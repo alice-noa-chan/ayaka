@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import subprocess
 import sys
 import time
@@ -17,7 +18,7 @@ import torch
 from ..checkpoint import apply_lora, load_checkpoint, save_checkpoint
 from ..config import ElectraConfig
 from ..data.decontam import Decontaminator
-from ..data.reasoning_v2 import SPLITS, curriculum
+from ..data.reasoning_v2 import CURRICULUM_VERSION, SPLITS, curriculum
 from ..eval.reasoning_v2 import evaluate_efforts
 from ..eval.v2 import assert_isolated, select_candidates
 from ..losses import LossWeights
@@ -84,6 +85,7 @@ def prepare(manifest_path, out, download_weights=False):
     from huggingface_hub import snapshot_download
 
     manifest = load_manifest(manifest_path)
+    archive_stale_curriculum(out)
     records = {split: curriculum(split, 128 if split == "train" else 32) for split in SPLITS}
     assert_isolated({s: [sample for sample, _ in rows] for s, rows in records.items()})
     decon = Decontaminator.from_jevbench()
@@ -165,9 +167,26 @@ def prepare(manifest_path, out, download_weights=False):
             "cuda_available": torch.cuda.is_available(),
             "manifest_sha256": hashlib.sha256(Path(manifest_path).read_bytes()).hexdigest(),
             "splits_isolated": True,
+            "curriculum_version": CURRICULUM_VERSION,
         },
     )
     return statuses
+
+
+def archive_stale_curriculum(out):
+    folder = Path(out)
+    previous = folder / "preparation.json"
+    if not previous.exists():
+        return
+    version = json.loads(previous.read_text()).get("curriculum_version", 1)
+    if version == CURRICULUM_VERSION:
+        return
+    archive = folder / f"interrupted-curriculum-v{version}"
+    archive.mkdir(exist_ok=True)
+    for path in folder.glob("*.json"):
+        shutil.copy2(path, archive / path.name)
+    if (folder / "screen").exists():
+        shutil.copytree(folder / "screen", archive / "screen", dirs_exist_ok=True)
 
 
 def gpu_info():
@@ -197,10 +216,15 @@ def worker(manifest_path, out, stage, seconds):
         != hashlib.sha256(Path(manifest_path).read_bytes()).hexdigest()
     ):
         raise ValueError("manifest changed since CPU preparation")
+    if preparation.get("curriculum_version") != CURRICULUM_VERSION:
+        raise ValueError("curriculum changed since CPU preparation; prepare the run again")
     if stage == "screen":
         reports = []
         candidates = manifest["candidates"]
-        ready = [c for c in candidates if c["support"] == "builtin"]
+        ready = sorted(
+            [c for c in candidates if c["support"] == "builtin"],
+            key=lambda c: c["total_parameters"],
+        )
         write_json(
             folder / "selection.json", {"split": "dev", "ranked": [], "status": "incomplete"}
         )

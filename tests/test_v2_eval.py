@@ -53,6 +53,16 @@ def test_curriculum_splits_do_not_overlap_and_detect_shared_templates():
         assert_isolated(splits)
 
 
+def test_case_isolation_checks_facts_even_when_document_voice_differs():
+    splits = {split: [s for s, _ in curriculum(split, 128)] for split in SPLITS}
+    assert_isolated(splits)
+    splits["test"][0].metadata["case_facts_sha256"] = splits["train"][0].metadata[
+        "case_facts_sha256"
+    ]
+    with pytest.raises(ValueError, match="case_facts"):
+        assert_isolated(splits)
+
+
 def test_calibration_does_not_fit_dev_or_test_and_preserves_permutation():
     with pytest.raises(ValueError, match="reserved"):
         PathCalibration.fit([{"split": "dev"}])

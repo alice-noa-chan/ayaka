@@ -51,7 +51,9 @@ def prepare_cpu():
 
 
 @app.function(gpu="H100", timeout=8 * 3600, **COMMON)
-def explore_h100(budget_scale: float = 1.0, recover_screen: bool = False):
+def explore_h100(
+    budget_scale: float = 1.0, recover_screen: bool = False, refresh_curriculum: bool = False
+):
     from ayaka.experiments.v2 import bounded_run
 
     volume.reload()
@@ -64,6 +66,11 @@ def explore_h100(budget_scale: float = 1.0, recover_screen: bool = False):
                 "stages": ("screen", "heads", "sft", "evaluate"),
                 "stage_limits": {"screen": 3600},
             }
+        if refresh_curriculum:
+            options = {
+                "stages": ("screen", "heads", "sft", "evaluate"),
+                "stage_limits": {"screen": 3000, "heads": 600},
+            }
         return bounded_run(
             "/root/candidates.json", "/runs/exploration", scale=budget_scale, **options
         )
@@ -72,9 +79,18 @@ def explore_h100(budget_scale: float = 1.0, recover_screen: bool = False):
 
 
 @app.local_entrypoint()
-def main(prepare_only: bool = False, budget_scale: float = 1.0, recover_screen: bool = False):
-    if not recover_screen:
+def main(
+    prepare_only: bool = False,
+    budget_scale: float = 1.0,
+    recover_screen: bool = False,
+    refresh_curriculum: bool = False,
+):
+    if not recover_screen or refresh_curriculum:
         preparation = prepare_cpu.remote()
         print(json.dumps(preparation, indent=2))
     if not prepare_only:
-        print(json.dumps(explore_h100.remote(budget_scale, recover_screen), indent=2))
+        print(
+            json.dumps(
+                explore_h100.remote(budget_scale, recover_screen, refresh_curriculum), indent=2
+            )
+        )

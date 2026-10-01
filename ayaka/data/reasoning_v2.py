@@ -4,6 +4,7 @@ This curriculum checks training mechanics. Its procedural families are not
 evidence of performance on independent natural language or JevBench items.
 """
 
+import hashlib
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -11,6 +12,7 @@ from ..evidence import add_months, business_days
 from .schema import Candidate, Question, Sample
 
 SPLITS = ("train", "router_train", "dev", "calibration", "test")
+CURRICULUM_VERSION = 2
 VOICES = {
     "train": "Record {i}. {facts} Determine the requested value.",
     "router_train": "Case file {i}: {facts} Apply the stated rule to this case.",
@@ -52,12 +54,15 @@ def _case(op, i, split):
             12,
         )
     if op == "timezone":
-        local = datetime(2026, 3, 1, 0, 30, tzinfo=timezone(timedelta(hours=9)))
-        result = local.astimezone(timezone.utc).day
+        local = datetime(
+            2026 + variant, 3 + variant, 1, 0, 30, tzinfo=timezone(timedelta(hours=9 + variant))
+        )
+        utc = local.astimezone(timezone.utc)
+        result = utc.day
         return (
-            "Timestamp 2026-03-01 00:30 UTC+09:00. Convert to UTC and report the day of month.",
+            f"Timestamp {local.isoformat()}. Convert to UTC and report the day of month.",
             result,
-            "Subtract nine hours: 2026-02-28 15:30 UTC. The day of month is 28.",
+            f"Subtract {9 + variant} hours: {utc.isoformat()}. The day of month is {result}.",
             31,
         )
     if op == "rounding":
@@ -82,34 +87,49 @@ def _case(op, i, split):
         )
     if op == "exception":
         exception, override = i % 2 == 0, i % 3 == 0
-        result = int(not exception or override)
+        required, credential = variant + 1, i % 5 + 1
+        result = int(not exception or (override and credential >= required))
         return (
-            f"Approval is normally allowed. An exception blocks approval. An override defeats the exception. Exception present: {exception}; override present: {override}. Report 1 if allowed, otherwise 0.",
+            f"Approval is normally allowed. An exception blocks approval. An override defeats the exception only with credential level at least {required}. Exception present: {exception}; override present: {override}; credential level: {credential}. Report 1 if allowed, otherwise 0.",
             result,
-            f"Approval is allowed when no exception applies or an override defeats it. Evaluate not {exception} or {override}: {result}.",
+            f"An override is authorized when {credential} >= {required}. Evaluate not {exception} or ({override} and {credential} >= {required}): {result}.",
             1,
         )
     if op == "probability":
-        red = a % 7 + 1
-        blue = 10 - red
-        result = red * 10
+        multiplier = variant + 1
+        red = (a % 7 + 1) * multiplier
+        total = 10 * multiplier
+        blue = total - red
+        result = red * 100 // total
         return (
             f"A bag holds {red} red and {blue} blue balls. Draw uniformly. Report the integer percentage probability of red.",
             result,
-            f"Total balls: {red}+{blue}=10. Probability red is {red}/10, or {result} percent.",
+            f"Total balls: {red}+{blue}={total}. Probability red is {red}/{total}, or {result} percent.",
             100,
         )
     if op == "rubric":
-        points = i % 4
+        checks = [
+            "acknowledge",
+            "explain",
+            "resolve",
+            "verify",
+            "summarize",
+            "confirm",
+            "follow up",
+        ][: 3 + variant]
+        completed = checks[: i % (len(checks) + 1)]
+        weight = variant + 1
+        points = len(completed) * weight
         return (
-            f"The rubric awards one point for each completed check: acknowledge, explain, resolve. Completed checks: {['acknowledge', 'explain', 'resolve'][:points]}. Report total points; no other criterion contributes.",
+            f"The rubric awards {weight} points for each completed check from {checks}. Completed checks: {completed}. Report total points; no other criterion contributes.",
             points,
-            f"Count the explicitly completed checks: {points}. Each contributes one point. Total {points}.",
-            3,
+            f"Count the explicitly completed checks: {len(completed)}. Each contributes {weight} points. Total {points}.",
+            len(checks) * weight,
         )
     # Unknown evidence is a proposition about what is established, not a guess.
+    action = ("Delivery", "Payment", "Repair", "Cancellation", "Refund")[variant]
     return (
-        "Delivery was requested. No delivery completion or timestamp is recorded. Report 1 only if completion is established, otherwise 0.",
+        f"{action} was requested. No {action.lower()} completion or timestamp is recorded. Report 1 only if completion is established, otherwise 0.",
         0,
         "A request does not establish completion. The record supplies no completion evidence, so the established-completion indicator is 0.",
         1,
@@ -175,6 +195,8 @@ def curriculum(split, per_type=32):
                     "rule_combination": f"{op}/variant-{SPLITS.index(split)}",
                     "document_voice": split,
                     "trace_validator": "ayaka.data.reasoning_v2._case",
+                    "curriculum_version": CURRICULUM_VERSION,
+                    "case_facts_sha256": hashlib.sha256(facts.encode()).hexdigest(),
                 },
             )
             result.append((sample, {"q": trace}))
