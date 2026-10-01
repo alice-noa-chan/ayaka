@@ -69,3 +69,13 @@ def test_multiple_efforts_do_not_inflate_independent_sample_count():
     with pytest.raises(ValueError, match="one paired"):
         fit_router(train + [train[0]], dev)
     assert router.predict(rows("dev")[0]["features"])[1] <= 384
+
+
+def test_repeated_cases_cannot_be_counted_as_independent_or_cross_splits():
+    train = [dict(row, cluster_id="repeated") for row in rows("router_train")]
+    with pytest.raises(ValueError, match="independent"):
+        fit_router(train, rows("dev"))
+    train = [dict(row, cluster_id=f"case/{i}") for i, row in enumerate(rows("router_train"))]
+    dev = [dict(row, cluster_id=f"case/{i}") for i, row in enumerate(rows("dev"))]
+    with pytest.raises(ValueError, match="underlying case"):
+        fit_router(train, dev)

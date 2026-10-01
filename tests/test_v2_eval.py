@@ -43,6 +43,26 @@ def test_type_balancing_paired_fixes_and_invalid_probabilities():
         paired_report(direct, list(reversed(reasoned)))
 
 
+def test_paired_uncertainty_clusters_repeated_underlying_cases():
+    spec = QuestionSpec("choice", "Pick?", ["a", "b"])
+    direct, reasoned = [], []
+    for case in range(3):
+        target = [0, 1] if case == 0 else [1, 0]
+        for copy in range(10):
+            metadata = {"id": f"{case}/{copy}", "cluster_id": f"case/{case}"}
+            direct.append(dict(typed_row(spec, [0.9, 0.1], target), **metadata))
+            reasoned.append(
+                dict(typed_row(spec, [0.1, 0.9] if case < 2 else [0.9, 0.1], target), **metadata)
+            )
+    clustered = paired_report(direct, reasoned)
+    naive = paired_report(
+        [{k: v for k, v in row.items() if k != "cluster_id"} for row in direct], reasoned
+    )
+    assert clustered["independent_cases"] == 3
+    assert naive["independent_cases"] == 30
+    assert clustered["cc_delta_95ci"][1] > naive["cc_delta_95ci"][1]
+
+
 def test_curriculum_splits_do_not_overlap_and_detect_shared_templates():
     splits = {split: [s for s, _ in curriculum(split)] for split in SPLITS}
     assert_isolated(splits)

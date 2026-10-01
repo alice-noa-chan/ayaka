@@ -231,6 +231,7 @@ def worker(manifest_path, out, stage, seconds):
             "data/reasoning_v2.py",
             "reasoning_pipeline.py",
             "eval/reasoning_v2.py",
+            "eval/v2.py",
             "training/batching.py",
         )
     }

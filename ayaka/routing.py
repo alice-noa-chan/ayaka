@@ -3,12 +3,11 @@
 import hashlib
 import json
 import math
-import random
 from dataclasses import asdict, dataclass
 
 import torch
 
-from .eval.v2 import nll, percentile
+from .eval.v2 import clustered_mean_interval, nll
 from .prompt import render_state
 
 LAMBDAS = (0.0, 0.0005, 0.001, 0.002)
@@ -38,6 +37,7 @@ def paired_training_rows(direct, reasoned, split):
         {
             "id": a["id"],
             "split": split,
+            "cluster_id": a.get("cluster_id", a["id"]),
             "features": a["routing_features"][:-1] + [b["budget"] / 1024],
             "gain": nll(a["probs"], a["target"]) - nll(b["probs"], b["target"]),
             "tokens": b["reasoning_tokens"],
@@ -98,14 +98,16 @@ class BenefitRouter:
 
 def fit_router(train, dev):
     if (
-        len({r["id"] for r in train}) < 20
-        or len({r["id"] for r in dev}) < 20
+        len({r.get("cluster_id", r["id"]) for r in train}) < 20
+        or len({r.get("cluster_id", r["id"]) for r in dev}) < 20
         or any(r["split"] != "router_train" for r in train)
         or any(r["split"] != "dev" for r in dev)
     ):
         raise ValueError("router needs at least 20 independent router_train and dev rows")
     if {r["id"] for r in train} & {r["id"] for r in dev}:
         raise ValueError("router training/dev item overlap")
+    if {r.get("cluster_id", r["id"]) for r in train} & {r.get("cluster_id", r["id"]) for r in dev}:
+        raise ValueError("router training/dev underlying case overlap")
     budgets = sorted({round(r["features"][-1] * 1024) for r in train})
     if budgets != sorted({round(r["features"][-1] * 1024) for r in dev}):
         raise ValueError("router training/dev budgets must match")
@@ -149,28 +151,16 @@ def fit_router(train, dev):
     )
     realized = [r["gain"] if use else 0 for r, use in zip(dev, chosen["selected"], strict=True)]
     # Repeated effort measurements of one question are one independent unit.
-    groups = {}
-    for row, gain in zip(dev, realized, strict=True):
-        groups.setdefault(row["id"], []).append(gain)
-    question_gains = [sum(values) / len(values) for values in groups.values()]
-    rng = random.Random(15)
-    boot = [
-        sum(rng.choice(question_gains) for _ in question_gains) / len(question_gains)
-        for _ in range(2000)
-    ]
-    interval = [percentile(boot, 0.025), percentile(boot, 0.975)]
+    interval, independent_cases = clustered_mean_interval(dev, realized)
     router.penalty = chosen["lambda"]
     router.promoted = interval[0] > 0
     validated_budgets = []
     budget_intervals = {}
     for budget in budgets:
-        gains = [
-            gain
-            for row, gain in zip(dev, realized, strict=True)
-            if round(row["features"][-1] * 1024) == budget
-        ]
-        boot = [sum(rng.choice(gains) for _ in gains) / len(gains) for _ in range(2000)]
-        bound = [percentile(boot, 0.025), percentile(boot, 0.975)]
+        indices = [i for i, row in enumerate(dev) if round(row["features"][-1] * 1024) == budget]
+        bound, _ = clustered_mean_interval(
+            [dev[i] for i in indices], [realized[i] for i in indices]
+        )
         budget_intervals[str(budget)] = bound
         if bound[0] > 0:
             validated_budgets.append(budget)
@@ -180,7 +170,8 @@ def fit_router(train, dev):
         "mean_tokens": chosen["tokens"],
         "nll_gain_95ci": interval,
         "dev_n": len(dev),
-        "dev_independent_questions": len(groups),
+        "dev_independent_questions": len({r["id"] for r in dev}),
+        "dev_independent_cases": independent_cases,
         "validated_budgets": validated_budgets,
         "budget_nll_gain_95ci": budget_intervals,
         "dev_ids_sha256": hashlib.sha256(

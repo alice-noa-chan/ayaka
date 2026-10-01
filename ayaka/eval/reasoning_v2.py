@@ -34,6 +34,13 @@ def evaluate_efforts(
     expected = {
         f"{s.metadata.get('source_example_id')}/{q.id}": q for s in samples for q in s.questions
     }
+    cases = {
+        f"{s.metadata.get('source_example_id')}/{q.id}": s.metadata.get(
+            "case_facts_sha256", f"{s.metadata.get('source_example_id')}/{q.id}"
+        )
+        for s in samples
+        for q in s.questions
+    }
     if len(expected) != sum(len(s.questions) for s in samples):
         raise ValueError("evaluation requires unique question IDs")
     known = {}
@@ -50,6 +57,9 @@ def evaluate_efforts(
                 or row["budget"] != modes[mode].budget
             ):
                 raise ValueError("resume targets, types and budgets must match")
+            if row.get("cluster_id", cases[row["id"]]) != cases[row["id"]]:
+                raise ValueError("resume underlying cases must match")
+            row["cluster_id"] = cases[row["id"]]
     complete = True
     for sample in samples:
         for question in sample.questions:
@@ -82,6 +92,7 @@ def evaluate_efforts(
                     )
                 row.update(
                     id=question_id,
+                    cluster_id=cases[question_id],
                     family=sample.metadata.get("task_family", "unknown"),
                     language=sample.metadata.get("language", "en"),
                     split=sample.metadata.get("split"),

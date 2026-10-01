@@ -133,13 +133,18 @@ def summarize(rows):
 def paired_report(direct, reasoned, replicates=2000):
     if [r["id"] for r in direct] != [r["id"] for r in reasoned]:
         raise ValueError("paired results must have identical item order")
-    strata = defaultdict(list)
+    clusters = defaultdict(list)
     for i, row in enumerate(direct):
-        strata[(row["type"], row.get("tier", "standard"))].append(i)
+        clusters[row.get("cluster_id", row["id"])].append(i)
+    strata = defaultdict(list)
+    for indices in clusters.values():
+        composition = tuple(sorted({direct[i]["type"] for i in indices}))
+        tiers = tuple(sorted({direct[i].get("tier", "standard") for i in indices}))
+        strata[(composition, tiers)].append(indices)
     rng = random.Random(15)
     diffs = []
     for _ in range(replicates):
-        indices = [rng.choice(group) for group in strata.values() for _ in group]
+        indices = [i for group in strata.values() for _ in group for i in rng.choice(group)]
         diffs.append(
             summarize([reasoned[i] for i in indices])["cc_equal_types"]
             - summarize([direct[i] for i in indices])["cc_equal_types"]
@@ -158,7 +163,22 @@ def paired_report(direct, reasoned, replicates=2000):
         "cc_delta_95ci": [percentile(diffs, 0.025), percentile(diffs, 0.975)],
         "bootstrap_seed": 15,
         "bootstrap_replicates": replicates,
+        "bootstrap_unit": "underlying_case",
+        "independent_cases": len(clusters),
     }
+
+
+def clustered_mean_interval(rows, values, replicates=2000, seed=15):
+    groups = defaultdict(list)
+    for row, value in zip(rows, values, strict=True):
+        groups[row.get("cluster_id", row["id"])].append(value)
+    units = list(groups.values())
+    rng = random.Random(seed)
+    boot = []
+    for _ in range(replicates):
+        selected = [rng.choice(units) for _ in units]
+        boot.append(sum(map(sum, selected)) / sum(map(len, selected)))
+    return [percentile(boot, 0.025), percentile(boot, 0.975)], len(units)
 
 
 def select_candidates(reports):

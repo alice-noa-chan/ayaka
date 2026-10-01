@@ -95,6 +95,10 @@ The independent test also measures actual `auto/medium` decisions alongside off
 and forced efforts. Router features use the uncalibrated direct distribution;
 output calibration cannot feed back into the routing inputs. Direct outputs use
 the zero-generation calibration band even when their requested auto budget is 384.
+Confidence intervals cluster all measurements of the same underlying facts,
+including different primitives and repeated efforts. The 96 dev decisions contain
+22 distinct fact cases, and the router-training screen contains 20; these are not
+96 independent cases. Router fitting rejects shared train/dev case identities.
 
 ## Survey and evaluation
 
