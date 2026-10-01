@@ -56,11 +56,25 @@ class TrainConfig:
 
 
 class Trainer:
-    def __init__(self, model: ElectraDecisionModel, tok: Tokenizer, cfg: TrainConfig, device):
+    def __init__(
+        self,
+        model: ElectraDecisionModel,
+        tok: Tokenizer,
+        cfg: TrainConfig,
+        device,
+        image_backend=None,
+    ):
         self.model = model
         self.tok = tok
         self.cfg = cfg
         self.device = torch.device(device)
+        self.image_backend = image_backend
+        if image_backend is not None:
+            if image_backend.model is not model:
+                raise ValueError("training and image backend must share the exact decision model")
+            from .multimodal import freeze_image_components
+
+            freeze_image_components(image_backend)
         torch.manual_seed(cfg.seed)
         self.micro_tokens = cfg.micro_batch_tokens  # chunks without checkpointing
         self.micro_ckpt_tokens = cfg.micro_batch_tokens  # checkpointed chunks
@@ -109,6 +123,8 @@ class Trainer:
 
     def _plan(self, items: list[TrainItem]) -> list[tuple[str, list[TrainItem], bool]]:
         """Forward chunks as (kind, items, checkpointed)."""
+        images = [it for it in items if it.native_inputs is not None]
+        items = [it for it in items if it.native_inputs is None]
         thr = self.ckpt_threshold
         plain = items if thr is None else [it for it in items if it.length < thr]
         heavy = [] if thr is None else [it for it in items if it.length >= thr]
@@ -119,6 +135,9 @@ class Trainer:
         chunks += [
             (k, mb, True) for k, mb in plan_chunks(heavy, self.micro_ckpt_tokens, share=False)
         ]
+        # Native processors use architecture-specific patch layouts. Single rows
+        # avoid cross-question media mixing and keep their exact bidirectional masks.
+        chunks += [("image", [it], thr is not None and it.length >= thr) for it in images]
         return chunks
 
     def train_step(self, items: list[TrainItem]) -> dict:
@@ -159,6 +178,21 @@ class Trainer:
 
     def _forward(self, kind: str, mb: list[TrainItem], apply_temperature: bool = False):
         """One planned chunk -> (DecisionOutput, TrainTensors)."""
+        if any(it.native_inputs is not None for it in mb):
+            if self.image_backend is None or len(mb) != 1 or kind != "image":
+                raise ValueError(
+                    "native image training requires an image backend and isolated rows"
+                )
+            from .multimodal import image_forward
+
+            t = collate_items(mb, self.tok.pad_id).to(self.device)
+            with self._autocast():
+                hidden, spans, norm = image_forward(self.image_backend, mb[0], t.batch)
+                out = self.model.decide(
+                    hidden, t.batch, apply_temperature, span_hidden=spans, span_norm=norm
+                )
+                t.reasoning_ce = trace_ce(self.model, hidden, mb)
+            return out, t
         if any(it.reasoning_labels for it in mb):
             t = collate_items(mb, self.tok.pad_id).to(self.device)
             with self._autocast():
@@ -292,7 +326,7 @@ class Trainer:
         probs: list[list[float] | None] = [None] * len(items)
         logits: list[list[float] | None] = [None] * len(items)
         index = {id(it): i for i, it in enumerate(items)}
-        for kind, mb in plan_chunks(items, self.cfg.micro_batch_tokens, share=self.can_share):
+        for kind, mb, _ in self._plan(items):
             out, _ = self._forward(kind, mb, apply_temperature=apply_temperature)
             lp = ragged_log_softmax(out.logits.float(), out.cand_cu).exp().tolist()
             lg = out.logits.float().tolist()

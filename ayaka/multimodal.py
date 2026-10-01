@@ -270,7 +270,14 @@ class ImageDecision:
 
 
 def load_image_decision(
-    path, device="cpu", dtype=torch.bfloat16, max_seq_len=None, router=None, calibration=None
+    path,
+    device="cpu",
+    dtype=torch.bfloat16,
+    max_seq_len=None,
+    router=None,
+    calibration=None,
+    *,
+    trainable=False,
 ):
     """Load native image components and the existing text adapter/head once."""
     import os
@@ -301,7 +308,9 @@ def load_image_decision(
     if os.path.isdir(adapter):
         from peft import PeftModel
 
-        model.backbone = PeftModel.from_pretrained(model.backbone, adapter).eval()
+        model.backbone = PeftModel.from_pretrained(
+            model.backbone, adapter, is_trainable=trainable
+        ).eval()
     model.load_head_state_dict(load_head(path, device))
     processor = AutoProcessor.from_pretrained(cfg.backbone, revision=cfg.backbone_revision)
     tok = HFTokenizer(processor.tokenizer, cfg.backbone)

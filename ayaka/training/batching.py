@@ -36,6 +36,7 @@ class TrainItem:
     source: str = "unknown"
     reasoning_positions: list[int] | None = None  # prediction positions, never prompt tokens
     reasoning_labels: list[int] | None = None
+    native_inputs: dict[str, torch.Tensor] | None = None  # CPU image prefix, never a KV cache
 
     @property
     def length(self) -> int:
