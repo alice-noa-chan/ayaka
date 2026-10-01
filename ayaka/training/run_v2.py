@@ -15,7 +15,6 @@ import torch
 
 from ..checkpoint import apply_lora, save_checkpoint
 from ..config import ElectraConfig
-from ..losses import decision_loss
 from ..model.electra import ElectraDecisionModel
 from ..multimodal import ImageBackend
 from ..tokenization import HFTokenizer
@@ -67,22 +66,12 @@ def backward_preflight(trainer, items):
     trainer.opt.zero_grad(set_to_none=True)
     losses = []
     try:
-        for kind, group, checkpointed in trainer._plan(items):
-            trainer._set_checkpointing(checkpointed)
-            output, tensors = trainer._forward(kind, group)
-            loss = decision_loss(
-                output,
-                tensors.targets,
-                ordinals=tensors.ordinals,
-                missing_mask=tensors.flagged,
-                weights=trainer.cfg.loss_weights,
-            )["total"]
-            loss += trainer.cfg.reasoning_ce_weight * getattr(tensors, "reasoning_ce", 0)
-            loss += trainer.cfg.proposal_ce_weight * getattr(tensors, "proposal_ce", 0)
-            if not torch.isfinite(loss):
-                raise ValueError("preflight produced nonfinite loss")
-            loss.backward()
-            losses.append(float(loss.detach()))
+        components = trainer.backward_step(items)
+        if not components:
+            raise ValueError("preflight produced missing losses")
+        if any(not torch.isfinite(loss) for loss in components.values()):
+            raise ValueError("preflight produced nonfinite loss")
+        losses.append(float(components["total"]))
         grads = [
             p.grad for p in trainer.model.parameters() if p.requires_grad and p.grad is not None
         ]
@@ -97,6 +86,7 @@ def backward_preflight(trainer, items):
             "finite_gradients": True,
             "weights_unchanged": True,
             "optimizer_steps": 0,
+            "loss_components": {key: float(value) for key, value in components.items()},
         }
     finally:
         trainer.opt.zero_grad(set_to_none=True)
@@ -193,6 +183,11 @@ def main(argv=None):
         action="store_true",
         help="CUDA loss/gradient preflight only; never call an optimizer step",
     )
+    execution.add_argument(
+        "--profile-only",
+        action="store_true",
+        help="time production backward batches without optimizer updates",
+    )
     parser.add_argument("--steps", type=int)
     parser.add_argument("--max-train-seconds", type=float)
     parser.add_argument("--out")
@@ -210,7 +205,7 @@ def main(argv=None):
     config = dict(recipe["model"])
     config["lora_targets"] = tuple(config["lora_targets"])
     cfg = ElectraConfig(**config)
-    if not args.execute and not args.backward_only:
+    if not args.execute and not args.backward_only and not args.profile_only:
         result = {
             "status": "bundle_verified_no_training",
             "source_code_matches": source_matches(manifest),
@@ -221,9 +216,9 @@ def main(argv=None):
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return result
-    if args.backward_only:
+    if args.backward_only or args.profile_only:
         if args.steps is not None:
-            raise ValueError("backward-only preflight does not accept optimizer steps")
+            raise ValueError("zero-step preflight/profile does not accept optimizer steps")
         args.steps = 1  # scheduler construction only; the optimizer is never executed
     if (
         args.steps is None
@@ -273,12 +268,42 @@ def execute_training(args, cfg, recipe, splits):
             representative += prepared_items(sample, tok, cfg, backend)
             seen.add(signature)
     smoke = backward_preflight(trainer, representative)
-    trainer.cfg.max_train_seconds = max(0.001, args.max_train_seconds - (time.monotonic() - start))
     root = Path(args.out)
     root.mkdir(parents=True, exist_ok=False)
     (root / "preflight.json").write_bytes(canonical(smoke) + b"\n")
     if args.backward_only:
         return {"status": "backward_preflight_only", **smoke}
+
+    from .throughput import completion_plan, profile_backward
+
+    def stream():
+        return sample_stream(
+            splits["train"],
+            tok,
+            cfg,
+            backend,
+            trainer.cfg.questions_per_step,
+            trainer.cfg.seed,
+            recipe["language_sampling"],
+            recipe.get("prepared_cache_bytes", 256 * 1024 * 1024),
+        )
+
+    profile = profile_backward(trainer, stream())
+    (root / "throughput.json").write_bytes(canonical(profile) + b"\n")
+    if getattr(args, "profile_only", False):
+        return {"status": "throughput_profile_only", **profile}
+    target_seconds = min(
+        args.max_train_seconds, recipe.get("completion_target_seconds", args.max_train_seconds)
+    )
+    plan = completion_plan(profile, args.steps, max(0, target_seconds - (time.monotonic() - start)))
+    (root / "completion_plan.json").write_bytes(canonical(plan) + b"\n")
+    if not plan["fits"]:
+        raise ValueError(
+            "complete planned schedule does not fit the measured budget; no optimizer steps executed"
+        )
+    # Normal completion follows the fixed step/LR schedule. The outer deadline
+    # remains an emergency process cap, never the intended training endpoint.
+    trainer.cfg.max_train_seconds = 0
 
     def save_progress(step, record):
         if step != 1 and step % args.checkpoint_every:
@@ -310,15 +335,7 @@ def execute_training(args, cfg, recipe, splits):
         )
 
     history = trainer.train(
-        sample_stream(
-            splits["train"],
-            tok,
-            cfg,
-            backend,
-            trainer.cfg.questions_per_step,
-            trainer.cfg.seed,
-            recipe["language_sampling"],
-        ),
+        stream(),
         on_step=save_progress,
     )
     meta = {
@@ -330,8 +347,13 @@ def execute_training(args, cfg, recipe, splits):
         "router": "not_promoted",
         "test": "not_used",
         "initialization": recipe["initialization"],
+        "completion_plan": plan,
+        "complete": trainer.step_i == args.steps and not trainer.stopped_early,
     }
     save_checkpoint(model, str(root / "checkpoint"), meta)
+    (root / "checkpoint" / "complete.json").write_bytes(
+        canonical({"steps": trainer.step_i, "complete": meta["complete"]}) + b"\n"
+    )
     (root / "history.json").write_bytes(canonical(history) + b"\n")
     return meta
 

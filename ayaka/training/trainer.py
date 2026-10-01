@@ -174,10 +174,17 @@ class Trainer:
         uncheckpointed micro-batch, then checkpoints shorter questions too.
         An OOM in a checkpointed chunk halves that chunk kind's micro-batch.
         """
+        return self._retry_oom(lambda: self._train_step(items))
+
+    def backward_step(self, items: list[TrainItem]):
+        """Production gradient pass with the same OOM policy, never an optimizer step."""
+        return self._retry_oom(lambda: self._backward(items))
+
+    def _retry_oom(self, operation):
         floor = self.cfg.min_micro_batch_tokens
         while True:
             try:
-                return self._train_step(items)
+                return operation()
             except torch.cuda.OutOfMemoryError:
                 self.opt.zero_grad(set_to_none=True)
                 torch.cuda.empty_cache()
@@ -323,7 +330,7 @@ class Trainer:
         self.step_i += 1
         # One host transfer per step instead of a CUDA synchronization for every
         # loss component in every micro-batch. Public history remains floats.
-        values = torch.stack(list(agg.values())).float().tolist()
+        values = torch.stack(list(agg.values())).tolist()
         agg = dict(zip(agg, values, strict=True))
         agg.update(
             step=self.step_i,

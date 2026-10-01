@@ -329,6 +329,7 @@ def prepare_bundle(out, cfg, *, offline=True, per_type=32, image_cases=32, candi
             "seed": 20261001,
         },
         "prepared_cache_bytes": 256 * 1024 * 1024,
+        "completion_target_seconds": 14400,
         "execution_requires": [
             "explicit optimizer step count",
             "explicit GPU time budget",
