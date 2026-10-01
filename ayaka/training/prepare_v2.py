@@ -96,7 +96,12 @@ def audit_splits(splits):
         typed, languages, modalities, families = Counter(), Counter(), Counter(), Counter()
         for sample in samples:
             m = sample.metadata
-            if m.get("split") != split or m.get("license") != "MIT":
+            natural = m.get("data_kind") == "natural"
+            from ..data.natural_training_v2 import valid_provenance
+
+            if m.get("split") != split or (
+                not valid_provenance(m) if natural else m.get("license") != "MIT"
+            ):
                 raise ValueError("split/provenance license mismatch")
             if not sample.questions or len({q.id for q in sample.questions}) != len(
                 sample.questions
@@ -111,7 +116,7 @@ def audit_splits(splits):
             languages[m.get("language", "unknown")] += 1
             modalities[m.get("modality", "text")] += 1
             families[m.get("task_family", "unknown")] += 1
-            values = {key: m.get(key) for key in LINEAGE_KEYS}
+            values = {key: m.get(key) for key in (("source_lineage",) if natural else LINEAGE_KEYS)}
             # Exclude gold targets: changed labels cannot conceal evidence leakage.
             values["content"] = sha256(
                 canonical(
@@ -256,7 +261,17 @@ def inspect_model(cfg, *, offline=True):
     )
 
 
-def prepare_bundle(out, cfg, *, offline=True, per_type=32, image_cases=32, candidate_cases=32):
+def prepare_bundle(
+    out,
+    cfg,
+    *,
+    offline=True,
+    per_type=32,
+    image_cases=32,
+    candidate_cases=32,
+    natural_data=False,
+    reserved_evaluation=None,
+):
     survey_path = (
         Path(__file__).resolve().parents[2] / "docs" / "experiments" / "v2_candidates.json"
     )
@@ -275,8 +290,38 @@ def prepare_bundle(out, cfg, *, offline=True, per_type=32, image_cases=32, candi
     if root.exists():
         raise ValueError("prepare into a new directory; never overwrite an audited bundle")
     splits = build_splits(per_type, image_cases, candidate_cases)
-    counts = audit_splits(splits)
     audit, tok, backend = inspect_model(cfg, offline=offline)
+    if natural_data:
+        from ..data.natural_training_v2 import local_sources, partition_sources
+
+        if reserved_evaluation is None:
+            raise ValueError("natural rehearsal requires the previous reserved evaluation file")
+        reserved_raw = Path(reserved_evaluation).read_bytes()
+        reserved = [Sample.from_json(row) for row in json.loads(reserved_raw)]
+        if not reserved:
+            raise ValueError("reserved natural evaluation must not be empty")
+
+        def fits(sample):
+            try:
+                return all(
+                    item.length <= cfg.max_seq_len
+                    for item in prepared_items(sample, tok, cfg, backend)
+                )
+            except ValueError as exc:
+                if "fit" in str(exc) or "overflow" in str(exc) or "truncate" in str(exc):
+                    return False
+                raise
+
+        sources, provenance = local_sources()
+        additions, natural_audit = partition_sources(sources, reserved, fits=fits)
+        for split in SPLITS:
+            splits[split].extend(additions[split])
+        audit["natural_data"] = {
+            **natural_audit,
+            "sources": provenance,
+            "reserved_evaluation_sha256": sha256(reserved_raw),
+        }
+    counts = audit_splits(splits)
     conservative = max(
         audit["total_parameters"],
         candidate["total_parameters"] + audit["total_parameters"] - audit["base_parameters"],
@@ -376,7 +421,11 @@ def prepare_bundle(out, cfg, *, offline=True, per_type=32, image_cases=32, candi
         },
         "status": "data_and_meta_preflight_complete_no_training",
         "optimizer_steps_executed": 0,
-        "data_scope": "repository-authored mechanics curriculum; not natural-data performance evidence",
+        "data_scope": (
+            "authored mechanics plus pinned human-labelled natural rehearsal; quality unmeasured"
+            if natural_data
+            else "repository-authored mechanics curriculum; not natural-data performance evidence"
+        ),
     }
     (root / "manifest.json").write_bytes(canonical(manifest) + b"\n")
     validate_bundle(root)
@@ -399,6 +448,13 @@ def main(argv=None):
     parser.add_argument("--per-type", type=int, default=32)
     parser.add_argument("--image-cases", type=int, default=32)
     parser.add_argument("--candidate-cases", type=int, default=32)
+    parser.add_argument(
+        "--natural-data", action="store_true", help="include pinned cached human-labelled sources"
+    )
+    parser.add_argument(
+        "--reserved-evaluation",
+        help="previous evaluation-only natural JSON; never used for training",
+    )
     args = parser.parse_args(argv)
     cfg = replace(load_config(args.checkpoint), name="ayaka-v2-pretraining", version=2)
     manifest = prepare_bundle(
@@ -408,6 +464,8 @@ def main(argv=None):
         per_type=args.per_type,
         image_cases=args.image_cases,
         candidate_cases=args.candidate_cases,
+        natural_data=args.natural_data,
+        reserved_evaluation=args.reserved_evaluation,
     )
     print(
         json.dumps(
