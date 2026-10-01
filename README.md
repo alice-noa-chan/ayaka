@@ -34,9 +34,9 @@ candidates, per-primitive calibration, the pointer head) and puts it on
 backbone. The learned pointer gate stays near 0 (0.001-0.04 on 12B), and it
 is kept for candidate sets larger than the 26-letter label alphabet.
 
-Ayaka is **text-only**. Gemma 4 is multimodal, but only its text stack is
-loaded. The vision and audio towers never reach memory, and states are
-text or JSON.
+Published Ayaka v1 checkpoints are **text-only**: only the Gemma 4 text stack
+is loaded, and states are text or JSON. Experimental v2 native image support
+loads the pinned vision components separately; see the development notes below.
 
 ## Results (JevBench public tiers)
 
@@ -518,3 +518,7 @@ include measured improvements, multilingual regressions and the closed GPU-time 
 Native image inputs and opt-in text Choice generation/Other expansion are described
 in [Images and generated candidates](docs/MULTIMODAL_AND_CANDIDATES.md), including
 API examples, probability semantics and the current validation limits.
+The [pretraining readiness report](docs/experiments/V2_PRETRAINING_2026-10-01.md)
+records the prepared native-image/language/proposal data, pinned weight cache,
+zero-step backward entry point, scoped calibration/routing and remaining quality
+checks. No pretrained optimization accompanies that preparation.

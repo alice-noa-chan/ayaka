@@ -1,0 +1,304 @@
+{
+  "date": "2026-10-01",
+  "status": "prepared_until_pretrained_cuda_backward_no_training",
+  "implementation_revision": "69cce1160283d20fceaafd8c0e3e8c04a5478d02",
+  "bundle": "runs/v2-pretraining-20261001-e4b-validated",
+  "manifest_sha256": "49900660f761c6509d9123ef3ba14f7e6c6f3666f60c28fc699029bd057b4330",
+  "source_code_matches": true,
+  "model_preflight": {
+    "architecture": "gemma4",
+    "base_parameters": 7941100832,
+    "conservative_total_elements": 8034056528,
+    "context_audit": {
+      "calibration": {
+        "max_tokens": 483,
+        "prepared_rows": 2464
+      },
+      "dev": {
+        "max_tokens": 483,
+        "prepared_rows": 2464
+      },
+      "router_train": {
+        "max_tokens": 483,
+        "prepared_rows": 2464
+      },
+      "test": {
+        "max_tokens": 504,
+        "prepared_rows": 2464
+      },
+      "train": {
+        "max_tokens": 483,
+        "prepared_rows": 2464
+      }
+    },
+    "license": "apache-2.0",
+    "license_source": "https://huggingface.co/google/gemma-4-E4B-it",
+    "local_weights_ready": true,
+    "native_context": 131072,
+    "official_weight_elements": 7996156490,
+    "parameter_limit": 14000000000,
+    "processor": "Gemma4Processor",
+    "repo": "google/gemma-4-E4B-it",
+    "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "tokenizer": "google/gemma-4-E4B-it",
+    "total_parameters": 7979000870,
+    "trainable_parameters": 37900038,
+    "training_context": 4096,
+    "vision_policy": "frozen",
+    "weight_loading": "not_loaded_meta_only"
+  },
+  "weight_cache": {
+    "bundle_manifest_sha256": "49900660f761c6509d9123ef3ba14f7e6c6f3666f60c28fc699029bd057b4330",
+    "download_and_audit_seconds": 12.094000000040978,
+    "optimizer_steps": 0,
+    "repo": "google/gemma-4-E4B-it",
+    "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "shards": {
+      "model.safetensors": {
+        "bytes": 15992595884,
+        "sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503"
+      }
+    },
+    "status": "pinned_native_weights_cached_no_training"
+  },
+  "bundle_file_sha256": {
+    "calibration.jsonl": "6aa70e76d48c70623444ee2931173660ed37b6a6b88a7470941e87cf742e62f5",
+    "dev.jsonl": "b8a88f0d25024b8199454fe18295590676c70d73930794c7f63488858c89c82d",
+    "model_preflight.json": "5d365904eab83e6ef65501b70addcacde51985bb97f396d098d0d04c8f7dd7e5",
+    "router_train.jsonl": "73b6bf243dd52f6d01d33e495756a51c06d76e5504a46d05ed66146a7c4b5544",
+    "test.jsonl": "353784f727f74633f52544baeab37b50cfa380be65030870cf3459229641a616",
+    "train.jsonl": "bc9198fba99ca2d47cca79e853d95808ece9d7a8040765f8fb30a6f5530e7b11",
+    "training_config.json": "89ce82c9f855545cdb139fa1c4771d5f43698915eb90818bb07ef1501fba644d"
+  },
+  "counts": {
+    "calibration": {
+      "families": {
+        "business": 9,
+        "calendar": 192,
+        "candidate_partition": 32,
+        "chart": 192,
+        "exception": 9,
+        "leap": 12,
+        "missing": 9,
+        "month_end": 12,
+        "native_language": 288,
+        "partition_diagnostics": 32,
+        "probability": 9,
+        "receipt": 192,
+        "rounding": 9,
+        "rubric": 9,
+        "rule": 192,
+        "rule_revision": 9,
+        "timezone": 9
+      },
+      "languages": {
+        "en": 512,
+        "ja": 352,
+        "ko": 352
+      },
+      "modalities": {
+        "image": 384,
+        "text": 832
+      },
+      "questions": 1312,
+      "samples": 1216,
+      "types": {
+        "choice": 544,
+        "noul": 448,
+        "score": 320
+      }
+    },
+    "dev": {
+      "families": {
+        "business": 9,
+        "calendar": 192,
+        "candidate_partition": 32,
+        "chart": 192,
+        "exception": 9,
+        "leap": 12,
+        "missing": 9,
+        "month_end": 12,
+        "native_language": 288,
+        "partition_diagnostics": 32,
+        "probability": 9,
+        "receipt": 192,
+        "rounding": 9,
+        "rubric": 9,
+        "rule": 192,
+        "rule_revision": 9,
+        "timezone": 9
+      },
+      "languages": {
+        "en": 512,
+        "ja": 352,
+        "ko": 352
+      },
+      "modalities": {
+        "image": 384,
+        "text": 832
+      },
+      "questions": 1312,
+      "samples": 1216,
+      "types": {
+        "choice": 544,
+        "noul": 448,
+        "score": 320
+      }
+    },
+    "router_train": {
+      "families": {
+        "business": 9,
+        "calendar": 192,
+        "candidate_partition": 32,
+        "chart": 192,
+        "exception": 9,
+        "leap": 12,
+        "missing": 9,
+        "month_end": 12,
+        "native_language": 288,
+        "partition_diagnostics": 32,
+        "probability": 9,
+        "receipt": 192,
+        "rounding": 9,
+        "rubric": 9,
+        "rule": 192,
+        "rule_revision": 9,
+        "timezone": 9
+      },
+      "languages": {
+        "en": 512,
+        "ja": 352,
+        "ko": 352
+      },
+      "modalities": {
+        "image": 384,
+        "text": 832
+      },
+      "questions": 1312,
+      "samples": 1216,
+      "types": {
+        "choice": 544,
+        "noul": 448,
+        "score": 320
+      }
+    },
+    "test": {
+      "families": {
+        "business": 9,
+        "calendar": 192,
+        "candidate_partition": 32,
+        "chart": 192,
+        "exception": 9,
+        "leap": 12,
+        "missing": 9,
+        "month_end": 12,
+        "native_language": 288,
+        "partition_diagnostics": 32,
+        "probability": 9,
+        "receipt": 192,
+        "rounding": 9,
+        "rubric": 9,
+        "rule": 192,
+        "rule_revision": 9,
+        "timezone": 9
+      },
+      "languages": {
+        "en": 512,
+        "ja": 352,
+        "ko": 352
+      },
+      "modalities": {
+        "image": 384,
+        "text": 832
+      },
+      "questions": 1312,
+      "samples": 1216,
+      "types": {
+        "choice": 544,
+        "noul": 448,
+        "score": 320
+      }
+    },
+    "train": {
+      "families": {
+        "business": 9,
+        "calendar": 192,
+        "candidate_partition": 32,
+        "chart": 192,
+        "exception": 9,
+        "leap": 12,
+        "missing": 9,
+        "month_end": 12,
+        "native_language": 288,
+        "partition_diagnostics": 32,
+        "probability": 9,
+        "receipt": 192,
+        "rounding": 9,
+        "rubric": 9,
+        "rule": 192,
+        "rule_revision": 9,
+        "timezone": 9
+      },
+      "languages": {
+        "en": 512,
+        "ja": 352,
+        "ko": 352
+      },
+      "modalities": {
+        "image": 384,
+        "text": 832
+      },
+      "questions": 1312,
+      "samples": 1216,
+      "types": {
+        "choice": 544,
+        "noul": 448,
+        "score": 320
+      }
+    }
+  },
+  "independent_source_clusters": {
+    "train": 270,
+    "router_train": 269,
+    "dev": 271,
+    "calibration": 271,
+    "test": 271
+  },
+  "total_samples": 6080,
+  "total_questions": 6560,
+  "total_prepared_rows": 12320,
+  "dependencies": {
+    "peft": "0.21.0",
+    "pillow": "12.3.0",
+    "safetensors": "0.8.0",
+    "torch": "2.14.0",
+    "torchvision": "0.29.1",
+    "transformers": "5.17.0"
+  },
+  "validation": {
+    "ruff_lint": "passed",
+    "ruff_format_check": "123 Python files passed",
+    "pytest_passed": 395,
+    "pytest_skipped": 1,
+    "pytest_seconds": 41.372,
+    "junit_sha256": "81485e5d98b49832d2f5499724d53364cc051ac4ac5c1b7750de3f420d4415e4",
+    "pretrained_gpu_backward": "not_run_cpu_only_runtime",
+    "torch_runtime": "2.14.0+cpu",
+    "cuda_available": false
+  },
+  "pretrained_optimizer_steps_executed": 0,
+  "new_gpu_seconds": 0,
+  "prior_exploration_gpu_bound_seconds": 13627,
+  "prior_exploration_limit_seconds": 28800,
+  "calibration": "not_fitted_requires_real_reserved_measurements",
+  "image_router": "not_promoted_requires_positive_dev_confidence_bound",
+  "official_composite": null,
+  "data_scope": "repository-authored mechanics curriculum; not natural-data performance evidence",
+  "remaining_validation": [
+    "Pinned-weight CUDA backward-only check before any optimizer step",
+    "Real trained checkpoint quality on untouched natural EN/KO/JA probes",
+    "Native image/text paired metrics and scoped calibration",
+    "Free-form generated candidate semantic overlap, coverage and sufficiency",
+    "Single final independent test after dev-only selection"
+  ]
+}

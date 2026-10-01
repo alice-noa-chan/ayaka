@@ -59,11 +59,15 @@ may finish early. Context failure does not silently truncate an image or downgra
 the requested budget; the response reports the fallback/error. Expanded media
 tokens and large-choice reranking count toward input usage.
 
-Image `auto` currently returns direct judgments with
+Without a promoted image router, `auto` returns direct judgments with
 `finish_reason: "no_validated_image_router"`. Text router, path calibration and
-head temperatures are ineligible for images. Diagnostics include
-`modality: "image"` and `calibration: "unvalidated"`. These markers describe a
-validation gap, rather than an estimate of the probability that evidence is missing.
+head temperatures are ineligible for images. An independently measured image
+artifact can be attached with `--image-router` or `--image-calibration`;
+the exact checkpoint fingerprint, image modality and fixed partition must match.
+Unfitted type/route/budget paths stay unvalidated. Diagnostics report
+`modality: "image"` and `calibration: "unvalidated"` or `"scoped_temperature"`
+for a fitted path. These markers describe validation status, rather than the
+probability that evidence is missing. Forced `on + high` bypasses any image router.
 
 ## Generate or expand text Choice candidates
 
@@ -179,8 +183,17 @@ normalization. Keep fixed JevBench evaluation unchanged and use an opt-in evalua
 track for candidate generation. No new GPU training or public release accompanies
 this implementation.
 
-The final integrated CPU suite passed 345 tests with one existing Beam-SDK skip,
-and Ruff checked/formatted 104 Python files. During validation, Windows loopback
-HTTP intermittently reset connections, including a model-free health handler.
-The final suite rerun passed; the transport intermittency remains unresolved and
-is not a measured model or calibration failure.
+Training and preparation paths are now implemented for native images, concise
+traces, isolated candidate proposals and native EN/KO/JA rehearsal. An immutable
+local bundle and pinned weight cache were prepared without pretrained optimizer
+updates. See [pretraining readiness](experiments/V2_PRETRAINING_2026-10-01.md) for
+measured counts, checksums, zero-step CUDA preflight and remaining quality checks.
+Finite source-annotated audits supervise overlap/coverage/sufficiency separately;
+they do not validate arbitrary generated prose. The final integrated CPU suite
+passed 395 tests with one existing Beam-SDK skip, and Ruff checked/formatted 123
+Python files. Actual pretrained CUDA backward and quality remain unmeasured here.
+
+Windows loopback HTTP intermittently reset connections even for a model-free
+health handler. Process-local idempotency now lets keyed requests replay their
+result and usage after response loss, with bounded memory and no live-key eviction.
+It does not fix the OS cause or guarantee replay across restarts/multiple workers.
