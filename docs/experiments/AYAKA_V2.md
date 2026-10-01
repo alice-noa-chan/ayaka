@@ -81,8 +81,9 @@ direct-result/input features. It compares only λ=0/0.0005/0.001/0.002. Dev sele
 uses NLL gain, then fewer tokens within 0.01 nats, and requires the paired bootstrap
 lower bound to exceed zero before promotion. This small cost-tie rule makes the
 otherwise underspecified λ selection reproducible. No promoted router is shipped
-without real paired outcomes; the fallback is explicitly labeled the unvalidated
-legacy calculation control. `on` bypasses both. Path calibration fits only the
+without real paired outcomes; `auto` stays direct with `no_validated_router` when
+none is loaded. The legacy v1 reasoning flag keeps its original control. `on`
+bypasses routing entirely. Path calibration fits only the
 reserved calibration split by primitive/actual route/budget band, with scalar
 fallbacks. Load artifacts using `--reasoning-router` and `--reasoning-calibration`.
 

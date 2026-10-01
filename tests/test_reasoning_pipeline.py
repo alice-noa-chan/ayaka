@@ -191,3 +191,18 @@ def test_auto_router_receives_requested_budget_and_never_changes_it():
     )
     assert seen == [([0.99, 0.01], 1000)]
     assert g.budgets == [1000]
+
+
+def test_auto_without_validated_router_stays_direct_even_for_uncertain_calculation(monkeypatch):
+    original, generator = Original(), Generator()
+    spec = QuestionSpec("noul", "Does 1 + 1 equal 2?", ["no", "yes"])
+    monkeypatch.setattr(
+        original,
+        "decide",
+        lambda *args, **kwargs: [DecisionResult("noul", [0.5, 0.5], {"no": 0.5, "yes": 0.5})],
+    )
+    result = ControlledDecision(original, generator).decide("Calculate 1 + 1.", [spec])[0]
+    assert generator.budgets == []
+    assert result.extras["reasoning"]["budget"] == 384
+    assert result.extras["reasoning"]["route"] == "direct"
+    assert result.extras["reasoning"]["finish_reason"] == "no_validated_router"

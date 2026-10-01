@@ -10,8 +10,7 @@ import torch
 from .collate import EncodedQuestion, encode_decision, suffix_rows
 from .evidence import EvidenceError
 from .evidence_generation import PlanGenerator, chat_ids
-from .evidence_pipeline import decision_request, gate_passes
-from .evidence_policy import EvidencePolicy
+from .evidence_pipeline import decision_request
 from .model.electra import PRIMITIVE_INDEX
 from .model.fastpath import prefill_last
 from .model.ragged import ragged_softmax
@@ -208,11 +207,11 @@ class ControlledDecision:
                     )
                     extra["router"] = "learned"
                 else:
-                    use = max(baseline.probs) <= 0.9 and gate_passes(
-                        EvidencePolicy(gate="calculation"), decision_request(state, spec)
-                    )
-                    extra["router"] = "unvalidated_legacy_control"
+                    use = False
+                    extra["router"] = "unavailable"
                 extra["finish_reason"] = "not_selected"
+                if self.router is None:
+                    extra["finish_reason"] = "no_validated_router"
             trace = None
             if use:
                 start = perf_counter()
