@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 
 from .primitives import Decision, QuestionSpec
+from .reasoning import resolve_settings
 
 
 class BadRequest(ValueError):
@@ -85,9 +86,10 @@ def answer(spec: QuestionSpec, labels: list[str], probs: list[float]) -> dict:
 
 
 class DecisionService:
-    def __init__(self, decision: Decision, model_name: str):
+    def __init__(self, decision: Decision, model_name: str, reasoning_defaults=None):
         self.decision = decision
         self.model_name = model_name
+        self.reasoning_defaults = reasoning_defaults
         self.lock = Lock()  # one forward at a time: predictable latency, no VRAM spikes
 
     def handle(self, body: dict) -> dict:
@@ -98,9 +100,43 @@ class DecisionService:
             raise BadRequest("'questions' must be a non-empty object")
         names = list(qs)
         parsed = [parse_question(qs[n]) for n in names]
+        options = body.get("options", {})
+        if not isinstance(options, dict):
+            raise BadRequest("options must be an object")
+        explicit = "reasoning" in options or any("reasoning" in qs[n] for n in names)
+        cfg = getattr(getattr(self.decision, "model", None), "cfg", None)
+        checkpoint = getattr(cfg, "reasoning_defaults", {})
+        if getattr(cfg, "version", 1) < 2:
+            checkpoint = {"mode": "off", **checkpoint}
+        try:
+            settings = [
+                resolve_settings(
+                    checkpoint,
+                    self.reasoning_defaults,
+                    options.get("reasoning"),
+                    qs[n].get("reasoning"),
+                )
+                for n in names
+            ]
+            if explicit:
+                if ("reasoning" in options and options["reasoning"] is None) or any(
+                    "reasoning" in qs[n] and qs[n]["reasoning"] is None for n in names
+                ):
+                    raise ValueError("reasoning settings must be an object")
+                if not getattr(self.decision, "supports_reasoning", False) and any(
+                    s.budget for s in settings
+                ):
+                    raise ValueError(
+                        "this server does not support reasoning; enable a reasoning backend"
+                    )
+        except ValueError as exc:
+            raise BadRequest(str(exc)) from exc
         state = body.get("state", "")
         with self.lock:
-            results = self.decision.decide(state, [p[0] for p in parsed])
+            if getattr(self.decision, "supports_reasoning", False):
+                results = self.decision.decide(state, [p[0] for p in parsed], reasoning=settings)
+            else:
+                results = self.decision.decide(state, [p[0] for p in parsed])
         answers = {
             n: answer(spec, labels, r.probs)
             for n, (spec, labels), r in zip(names, parsed, results, strict=True)
@@ -197,6 +233,9 @@ def main(argv: list[str] | None = None) -> None:
         help="off: worked steps from the base model (needs --ckpt); on: with the decision "
         "LoRA, which also works on merged exports",
     )
+    ap.add_argument("--reasoning-mode", choices=["off", "auto", "on"])
+    ap.add_argument("--reasoning-effort", choices=["low", "medium", "high"])
+    ap.add_argument("--max-reasoning-tokens", type=int)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
@@ -221,6 +260,21 @@ def main(argv: list[str] | None = None) -> None:
         help="prompt token budget per question (default: the config's serve_max_seq_len)",
     )
     args = ap.parse_args(argv)
+    overrides = {
+        k: v
+        for k, v in {
+            "mode": args.reasoning_mode,
+            "effort": args.reasoning_effort,
+            "max_tokens": args.max_reasoning_tokens,
+        }.items()
+        if v is not None
+    }
+    try:
+        resolve_settings(server=overrides)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if args.reasoning and overrides:
+        ap.error("use either legacy --reasoning or v2 reasoning flags")
     if args.threads:
         torch.set_num_threads(args.threads)
     if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
@@ -252,10 +306,15 @@ def main(argv: list[str] | None = None) -> None:
             max_seq_len=args.max_seq_len or None,
             reasoner_adapter=args.reasoner_adapter,
         )
+    elif overrides or model.cfg.version >= 2:
+        from .reasoning_pipeline import controlled_decision
+
+        decision = controlled_decision(model, tok, max_seq_len=args.max_seq_len or None)
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
-    httpd = serve(decision, name, args.host, args.port)
+    service = DecisionService(decision, name, overrides or None)
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(service))
     print(
         f"[serve] {name} on {args.device} at http://{args.host}:{args.port}/v1/systemone",
         flush=True,

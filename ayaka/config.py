@@ -50,6 +50,9 @@ class ElectraConfig:
     # exact Hub revision of ``backbone`` (None = latest). Pinned so a later
     # upstream update cannot silently change a released model.
     backbone_revision: str | None = None
+    # Old checkpoints remain v1/direct. v2 configs opt into auto + medium.
+    version: int = 1
+    reasoning_defaults: dict = field(default_factory=dict)
 
 
 ELECTRA_SMALL = ElectraConfig(
