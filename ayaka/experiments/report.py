@@ -192,8 +192,11 @@ def collect(run):
         if "rows" not in raw:
             candidate[kind] = raw
             continue
+        split = "calibration" if kind == "calibration_measurements" else kind
         samples = (
-            split_samples(kind) if kind in ("router_train", "dev", "calibration", "test") else None
+            split_samples(split)
+            if split in ("router_train", "dev", "calibration", "test")
+            else None
         )
         if kind == "router_train" and dataset_signature(samples) != raw.get("dataset_signature"):
             from .v2 import case_representatives

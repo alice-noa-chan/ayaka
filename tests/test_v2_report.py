@@ -7,8 +7,10 @@ from ayaka.data.reasoning_v2 import curriculum
 from ayaka.eval.reasoning_v2 import dataset_signature
 from ayaka.eval.v2 import typed_row
 from ayaka.experiments.report import collect, compact_evaluation
+from ayaka.experiments.v2 import save_calibration_artifacts
 from ayaka.primitives import QuestionSpec
 from ayaka.training.batching import _noul_canonical
+from ayaka.training.path_calibration import PathCalibration
 
 
 def measured():
@@ -127,3 +129,22 @@ def test_collector_does_not_invent_provenance_for_early_unsigned_screens(tmp_pat
     assert result["paired"] == {}
     assert result["dataset_signature"] is None
     assert "unavailable" in result["dataset_verification"]
+
+
+def test_calibration_fit_keeps_paired_evidence_and_rejects_changed_preparation(tmp_path):
+    samples, measurements = measured()
+    # The collector verifies this archive against the reserved preparation,
+    # even though its file name differs from the serving temperature map.
+    (tmp_path / "calibration.json").write_text(
+        json.dumps([{"sample": s.to_json()} for s in samples])
+    )
+    destination = tmp_path / "eval" / "candidate"
+    save_calibration_artifacts(destination, measurements, PathCalibration({"noul": 1.5}))
+    assert json.loads((destination / "calibration.json").read_text()) == {"noul": 1.5}
+    assert json.loads((destination / "calibration_measurements.json").read_text()) == measurements
+    result = collect(tmp_path)["evaluation"]["candidate"]
+    assert result["calibration"] == {"noul": 1.5}
+    assert result["calibration_measurements"]["reports"]["low"]["reasoning_tokens"] == 54
+    (tmp_path / "calibration.json").write_text("[]")
+    with pytest.raises(ValueError, match="prepared split"):
+        collect(tmp_path)

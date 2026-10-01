@@ -43,6 +43,12 @@ STAGE_SECONDS = {
 TOTAL_SECONDS = 28800
 
 
+def save_calibration_artifacts(folder, measurements, calibration):
+    """Keep paired evidence as well as the serving-compatible temperature map."""
+    write_json(Path(folder) / "calibration_measurements.json", measurements)
+    write_json(Path(folder) / "calibration.json", calibration.temperatures)
+
+
 def training_stream(items, seed=15):
     rng = random.Random(seed)
     while True:
@@ -617,8 +623,8 @@ def worker(manifest_path, out, stage, seconds, screen_candidates=()):
                         calibration = PathCalibration.fit(
                             [r for rs in paired["calibration"]["rows"].values() for r in rs]
                         )
-                        write_json(
-                            folder / "eval" / name / "calibration.json", calibration.temperatures
+                        save_calibration_artifacts(
+                            folder / "eval" / name, paired["calibration"], calibration
                         )
                         decision.router = router if router.promoted else None
                         decision.calibration = calibration
