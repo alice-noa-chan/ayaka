@@ -12,6 +12,17 @@ from ..eval.reasoning_v2 import dataset_signature
 from ..eval.v2 import paired_report, summarize
 
 
+def diagnostic_summary(rows):
+    result = summarize(rows)
+    score = [r for r in rows if r["type"] == "score"]
+    if score:
+        result["by_type"]["score"].update(
+            nmae=sum(r["nmae"] for r in score) / len(score),
+            chance_nmae=sum(r["nmae_chance"] for r in score) / len(score),
+        )
+    return result
+
+
 def compact_evaluation(report, samples=None, *, legacy_curriculum_verified=False):
     """Recompute diagnostics from stored rows; never generate or alter raw files."""
     rows = copy.deepcopy(report.get("rows", {}))
@@ -56,7 +67,7 @@ def compact_evaluation(report, samples=None, *, legacy_curriculum_verified=False
         if not rs:
             continue
         summaries[mode] = {
-            **summarize(rs),
+            **diagnostic_summary(rs),
             "independent_cases": len({r.get("cluster_id", r["id"]) for r in rs}),
             "routes": dict(Counter(r.get("route", "unknown") for r in rs)),
             "finish_reasons": dict(Counter(r.get("finish_reason", "unknown") for r in rs)),
@@ -64,8 +75,14 @@ def compact_evaluation(report, samples=None, *, legacy_curriculum_verified=False
             "requested_budgets": dict(Counter(str(r["budget"]) for r in rs)),
             "input_tokens": sum(r.get("input_tokens", 0) for r in rs),
             "by_family": {
-                family: summarize([r for r in rs if r.get("family", "unknown") == family])
+                family: diagnostic_summary([r for r in rs if r.get("family", "unknown") == family])
                 for family in sorted({r.get("family", "unknown") for r in rs})
+            },
+            "by_language": {
+                language: diagnostic_summary(
+                    [r for r in rs if r.get("language", "unknown") == language]
+                )
+                for language in sorted({r.get("language", "unknown") for r in rs})
             },
         }
     pairs = {

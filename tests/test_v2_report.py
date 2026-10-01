@@ -61,6 +61,21 @@ def test_recompute_uses_underlying_cases_without_changing_measured_rows():
     assert result["reports"]["low"]["finish_reasons"] == {"eos": 6}
     assert result["reports"]["off"]["reasoning_tokens"] == 0
     assert result["reports"]["low"]["official_composite"] is None
+    assert result["reports"]["low"]["by_type"]["score"]["nmae"] == 0
+
+
+def test_report_keeps_language_slices_separate_and_score_chance_explicit():
+    samples, report = measured()
+    for rs in report["rows"].values():
+        for i, row in enumerate(rs):
+            row["language"] = ("en", "ko", "ja")[i % 3]
+    result = compact_evaluation(report, samples)["reports"]["low"]
+    assert {lang: r["n"] for lang, r in result["by_language"].items()} == {
+        "en": 2,
+        "ko": 2,
+        "ja": 2,
+    }
+    assert result["by_type"]["score"]["chance_nmae"] > 0
 
 
 def test_recompute_rejects_different_preparation_or_case_identity():
