@@ -132,14 +132,28 @@ def completion_plan(
         save_seconds = overheads["checkpoint_seconds"] * saves
         if any(not math.isfinite(n) or n < 0 for n in (optimizer_seconds, save_seconds)):
             raise ValueError("measured overheads must be finite and nonnegative")
-    estimated = (
-        profile["max_seconds"] + optimizer_seconds
-    ) * steps * safety_factor + save_seconds * (safety_factor if overheads else 1)
+    schedule = profile.get("schedule")
+    if schedule is not None and schedule["planned_steps"] != steps:
+        raise ValueError("completion forecast must match the profiled fixed schedule")
+    forecast_backward = schedule["max_seconds"] if schedule else profile["max_seconds"]
+    if not math.isfinite(forecast_backward) or forecast_backward <= 0:
+        raise ValueError("scheduled backward timing must be finite and positive")
+    estimated = (forecast_backward + optimizer_seconds) * steps * safety_factor + save_seconds * (
+        safety_factor if overheads else 1
+    )
     disk_needed = (overheads["checkpoint_bytes"] * saves * 1.1) if overheads else None
     disk_fits = disk_needed <= overheads["disk_free_bytes"] if overheads else True
     return {
         "planned_steps": steps,
         "observed_max_backward_seconds": profile["max_seconds"],
+        "forecast_backward_seconds_per_step": forecast_backward,
+        "forecast_basis": "maximum sampled actual scheduled batch"
+        if schedule
+        else "global stress maximum",
+        "all_stress_seconds_estimate": (
+            (profile["max_seconds"] + optimizer_seconds) * steps * safety_factor
+            + save_seconds * (safety_factor if overheads else 1)
+        ),
         "optimizer_seconds_allowance_per_step": optimizer_seconds,
         "safety_factor": safety_factor,
         "save_seconds_reserved": save_seconds,
@@ -152,7 +166,7 @@ def completion_plan(
         "fits": estimated <= remaining_seconds and disk_fits,
         "semantics": "estimate for completing every scheduled step, not a time-based partial curriculum",
         "limitations": (
-            "measured cold/warm stress and isolated optimizer/save; future hardware contention can differ"
+            "sampled scheduled maxima with margin, not a mathematical upper bound; cold stress checks memory separately; future batches/contention can differ"
             if overheads
             else "short train-only timing sample; optimizer/save allowances are assumptions; no wall-clock guarantee"
         ),
@@ -249,7 +263,9 @@ def profile_overheads(trainer, out, *, repeats=3):
             torch.cuda.set_rng_state_all(cuda_rng)
 
 
-def profile_production(trainer, stream, samples, inventory, prepare):
+def profile_production(
+    trainer, stream, samples, inventory, prepare, *, steps=None, seed=0, weights=None
+):
     """Measure random production batches plus cold largest-row strata, train only."""
     import itertools
     from collections import defaultdict
@@ -301,10 +317,60 @@ def profile_production(trainer, stream, samples, inventory, prepare):
         stress.append({"stratum": list(key), **measured})
     if policy() != initial:
         ordinary = profile_backward(trainer, stream, repeats=6, reserve_optimizer_state=True)
+    scheduled = None
+    if steps is not None:
+        from .workload import finite_workload, profile_schedule
+
+        selection = profile_schedule(
+            inventory, steps, trainer.cfg.questions_per_step, seed, weights
+        )
+        # Retry all selected batches under the final memory policy if a scheduled
+        # maximum triggers another fallback. Never combine incompatible policies.
+        for attempt in range(2):
+            before_schedule = policy()
+            measurements = []
+            for step, row_indices in selection:
+
+                def scheduled_batch(row_indices=row_indices):
+                    prepared = {}
+                    items = []
+                    for index, position in row_indices:
+                        if index not in prepared:
+                            prepared[index] = prepare(samples[index])
+                        items.append(prepared[index][position])
+                    yield items
+
+                measured = profile_backward(
+                    trainer,
+                    scheduled_batch(),
+                    warmup=0,
+                    repeats=1,
+                    cold_images=True,
+                    reserve_optimizer_state=True,
+                )
+                measurements.append({"step_index": step, **measured})
+            if policy() == before_schedule:
+                break
+            if attempt == 1:
+                raise ValueError("memory policy did not stabilize during scheduled profiling")
+        scheduled = {
+            "planned_steps": steps,
+            "schedule_sha256": finite_workload(
+                inventory, steps, trainer.cfg.questions_per_step, seed, weights
+            )["schedule_sha256"],
+            "selection": "20 evenly spaced steps plus maxima of six inventory cost proxies",
+            "batches": measurements,
+            "max_seconds": max(row["max_seconds"] for row in measurements),
+            "median_seconds": statistics.median(row["median_seconds"] for row in measurements),
+            "limitations": "proxies are not exact runtime bounds; every selected image batch starts cold",
+        }
     all_seconds = list(itertools.chain(ordinary["seconds"], *(row["seconds"] for row in stress)))
+    if scheduled:
+        all_seconds.extend(row["max_seconds"] for row in scheduled["batches"])
     return {
         **ordinary,
         "stress": stress,
+        **({"schedule": scheduled} if scheduled else {}),
         "max_seconds": max(all_seconds),
         "effective_policy": policy(),
         "oom_policy_changed": policy() != initial,

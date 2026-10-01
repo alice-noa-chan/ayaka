@@ -2,7 +2,13 @@ import itertools
 
 import pytest
 
-from ayaka.training.workload import finite_workload, sample_indices, stress_indices
+from ayaka.training.workload import (
+    finite_workload,
+    profile_schedule,
+    sample_indices,
+    scheduled_batches,
+    stress_indices,
+)
 
 
 def inventory():
@@ -58,3 +64,17 @@ def test_stress_selection_covers_largest_rows_in_every_stratum():
     rows.append({**rows[0], "rows": [{**rows[0]["rows"][0], "length": 900}]})
     selected = stress_indices(rows)
     assert selected == [1, 2, 3]
+
+
+def test_profile_schedule_visits_full_plan_and_uses_real_batches_with_leftovers():
+    rows = inventory()
+    planned = list(scheduled_batches(rows, 1200, 4, 7))
+    selected = profile_schedule(rows, 1200, 4, 7)
+    indices = [index for index, _ in selected]
+    assert indices[0] == 0 and indices[-1] == 1199
+    assert 20 <= len(indices) <= 26
+    assert all(batch == planned[index] and len(batch) == 4 for index, batch in selected)
+    assert max(sum(rows[i]["rows"][j]["length"] for i, j in b) for _, b in selected) == max(
+        sum(rows[i]["rows"][j]["length"] for i, j in b) for b in planned
+    )
+    assert profile_schedule(rows, 2, 4, 7) == list(enumerate(planned[:2]))

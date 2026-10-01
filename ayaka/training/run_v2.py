@@ -321,19 +321,22 @@ def execute_training(args, cfg, recipe, splits):
             describe_rows(sample, prepared_items(sample, tok, cfg, backend))
             for sample in splits["train"]
         ]
+    planned_steps = (
+        getattr(args, "planned_steps", 1200) if getattr(args, "profile_only", False) else args.steps
+    )
     profile = profile_production(
         trainer,
         stream(),
         splits["train"],
         inventory,
         lambda sample: prepared_items(sample, tok, cfg, backend),
+        steps=planned_steps,
+        seed=trainer.cfg.seed,
+        weights=recipe["language_sampling"],
     )
     (root / "throughput.json").write_bytes(canonical(profile) + b"\n")
     overheads = profile_overheads(trainer, root / "io_profile")
     (root / "overheads.json").write_bytes(canonical(overheads) + b"\n")
-    planned_steps = (
-        getattr(args, "planned_steps", 1200) if getattr(args, "profile_only", False) else args.steps
-    )
     workload = finite_workload(
         inventory,
         planned_steps,

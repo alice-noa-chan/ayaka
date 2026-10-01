@@ -51,6 +51,50 @@ def describe_rows(sample, items):
     }
 
 
+def scheduled_batches(inventory, steps, rows_per_step, seed, weights=None):
+    """Yield the exact finite source/row indices, including leftovers between steps."""
+    if any(type(n) is not int or n < 1 for n in (steps, rows_per_step)):
+        raise ValueError("workload requires positive fixed steps and rows per step")
+    if not inventory or any(not sample["rows"] for sample in inventory):
+        raise ValueError("workload inventory needs every nonempty prepared sample")
+    pending = []
+    indices = sample_indices([row["language"] for row in inventory], seed, weights)
+    for _ in range(steps):
+        while len(pending) < rows_per_step:
+            index = next(indices)
+            pending.extend((index, row) for row in range(len(inventory[index]["rows"])))
+        yield pending[:rows_per_step]
+        pending = pending[rows_per_step:]
+
+
+def profile_schedule(inventory, steps, rows_per_step, seed, weights=None, *, evenly_spaced=20):
+    """Sample across the whole plan and include its maxima for six cost proxies.
+
+    These are actual mixed production batches, not artificial homogeneous stress
+    batches. Proxy maxima cover long decisions, padding, trace/proposal labels,
+    cold images and total token work; they are not exact runtime upper bounds.
+    """
+    if type(evenly_spaced) is not int or evenly_spaced < 2:
+        raise ValueError("schedule profiling needs at least two spaced batches")
+    batches = list(scheduled_batches(inventory, steps, rows_per_step, seed, weights))
+    selected = {round(i * (steps - 1) / (evenly_spaced - 1)) for i in range(evenly_spaced)}
+    costs = []
+    for batch in batches:
+        rows = [inventory[index]["rows"][position] for index, position in batch]
+        costs.append(
+            (
+                sum(row["length"] for row in rows),
+                max(row["length"] for row in rows),
+                sum(row["trace_tokens"] for row in rows),
+                sum(row["proposal_tokens"] for row in rows),
+                sum(row["image"] for row in rows),
+                sum(row["length"] + row["trace_tokens"] + row["proposal_tokens"] for row in rows),
+            )
+        )
+    selected.update(max(range(steps), key=lambda index: costs[index][axis]) for axis in range(6))
+    return [(index, batches[index]) for index in sorted(selected)]
+
+
 def finite_workload(inventory, steps, rows_per_step, seed, weights=None):
     if any(type(n) is not int or n < 1 for n in (steps, rows_per_step)):
         raise ValueError("workload requires positive fixed steps and rows per step")
@@ -60,13 +104,8 @@ def finite_workload(inventory, steps, rows_per_step, seed, weights=None):
     digest = hashlib.sha256()
     seen, lineages = set(), set()
     totals = Counter()
-    pending = []
-    indices = sample_indices([row["language"] for row in inventory], seed, weights)
-    for _ in range(steps):
-        while len(pending) < rows_per_step:
-            index = next(indices)
-            pending.extend((index, row) for row in range(len(inventory[index]["rows"])))
-        for index, position in pending[:rows_per_step]:
+    for batch in scheduled_batches(inventory, steps, rows_per_step, seed, weights):
+        for index, position in batch:
             sample, row = inventory[index], inventory[index]["rows"][position]
             digest.update(f"{index}:{position};".encode())
             seen.add((index, position))
@@ -91,7 +130,6 @@ def finite_workload(inventory, steps, rows_per_step, seed, weights=None):
             totals["text_tokens"] += row["length"]
             totals["trace_tokens"] += row["trace_tokens"]
             totals["proposal_tokens"] += row["proposal_tokens"]
-        pending = pending[rows_per_step:]
     inventory_digest = hashlib.sha256(
         json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

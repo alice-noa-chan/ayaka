@@ -201,6 +201,22 @@ def test_measured_completion_counts_all_writes_and_rejects_disk_shortfall():
     assert not no_disk["fits"] and not no_disk["disk_fits"]
 
 
+def test_schedule_forecast_retains_stress_bound_and_refuses_different_step_count():
+    profile = {"max_seconds": 18, "schedule": {"planned_steps": 1200, "max_seconds": 6}}
+    result = completion_plan(profile, 1200, 14400)
+    assert result["fits"] and result["forecast_backward_seconds_per_step"] == 6
+    assert result["all_stress_seconds_estimate"] > 14400
+    assert result["observed_max_backward_seconds"] == 18
+    with pytest.raises(ValueError, match="match"):
+        completion_plan(profile, 1199, 14400)
+    with pytest.raises(ValueError, match="finite"):
+        completion_plan(
+            {**profile, "schedule": {"planned_steps": 1200, "max_seconds": float("nan")}},
+            1200,
+            14400,
+        )
+
+
 def test_production_profile_covers_cold_image_and_trace_strata_without_gradients():
     import itertools
 
@@ -209,13 +225,22 @@ def test_production_profile_covers_cold_image_and_trace_strata_without_gradients
     trainer, rows, sample, _ = setup()
     trainer.cfg.questions_per_step = 2
     report = profile_production(
-        trainer, itertools.repeat(rows), [sample], [describe_rows(sample, rows)], lambda _: rows
+        trainer,
+        itertools.repeat(rows),
+        [sample],
+        [describe_rows(sample, rows)],
+        lambda _: rows,
+        steps=2,
+        seed=7,
     )
     assert report["measured_batches"] == 6
     assert len(report["stress"]) == 2
     assert all(row["cold_image_features"] and row["weights_unchanged"] for row in report["stress"])
     assert report["max_seconds"] >= max(row["max_seconds"] for row in report["stress"])
     assert trainer.step_i == 0 and not trainer.opt.state
+    assert [row["step_index"] for row in report["schedule"]["batches"]] == [0, 1]
+    assert report["schedule"]["planned_steps"] == 2
+    assert all(row["cold_image_features"] for row in report["schedule"]["batches"])
 
 
 def test_profile_rejects_finite_losses_with_nonfinite_gradients_before_updates(monkeypatch):
