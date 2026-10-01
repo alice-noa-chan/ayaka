@@ -99,3 +99,16 @@ def test_collector_preserves_incomplete_status_and_hashes_sources(tmp_path):
     assert len(result["source_artifact_sha256"]["screen/example.json"]) == 64
     assert "selection" not in result
     assert "cluster_id" not in json.loads(source.read_text())["rows"]["off"][0]
+
+
+def test_collector_does_not_invent_provenance_for_early_unsigned_screens(tmp_path):
+    _, report = measured()
+    del report["dataset_signature"]
+    report["reports"] = {"low": {"n": 6, "cc_equal_types": 100}}
+    (tmp_path / "screen").mkdir()
+    (tmp_path / "screen/early.json").write_text(json.dumps(report))
+    result = collect(tmp_path)["screen"]["early"]
+    assert result["reports"] == report["reports"]
+    assert result["paired"] == {}
+    assert result["dataset_signature"] is None
+    assert "unavailable" in result["dataset_verification"]

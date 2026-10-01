@@ -129,13 +129,23 @@ def collect(run):
             curriculum_hash = hashlib.sha256(
                 (Path(__file__).parents[1] / "data/reasoning_v2.py").read_bytes()
             ).hexdigest()
+            legacy_verified = (
+                original.get("code_sha256", {}).get("data/reasoning_v2.py") == curriculum_hash
+            )
+            if report.get("dataset_signature") is None and not legacy_verified:
+                result["screen"][path.stem] = {
+                    "status": report["status"],
+                    "dataset_signature": None,
+                    "dataset_verification": "legacy input signature and original curriculum hash unavailable",
+                    "reports": report["reports"],
+                    "paired": {},
+                    "diagnostic_recomputation": "unavailable; original point measurements retained without inferred case intervals",
+                }
+                continue
             result["screen"][path.stem] = compact_evaluation(
                 report,
                 split_samples("dev"),
-                legacy_curriculum_verified=original.get("code_sha256", {}).get(
-                    "data/reasoning_v2.py"
-                )
-                == curriculum_hash,
+                legacy_curriculum_verified=legacy_verified,
             )
     if (root / "heads.json").exists():
         result["heads"] = [
