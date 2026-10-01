@@ -68,6 +68,40 @@ def test_complete_trace_rejected_instead_of_truncated():
         reasoning_items(sample, ToyTokenizer(), tiny_config(), {"q": ""})
 
 
+def test_prepared_decimal_curriculum_roundtrips_into_joint_training():
+    import json
+
+    from ayaka.data.schema import Sample
+    from ayaka.eval.reasoning_v2 import dataset_signature
+    from ayaka.training.batching import collate_items
+
+    sample, traces = next(
+        (s, t)
+        for s, t in curriculum("train")
+        if s.questions[0].type == "score" and s.metadata["task_family"] == "business"
+    )
+    restored = Sample.from_json(json.loads(json.dumps(sample.to_json())))
+    assert dataset_signature([restored]) == dataset_signature([sample])
+    assert [c.ordinal for c in restored.questions[0].candidates] == [
+        c.ordinal for c in sample.questions[0].candidates
+    ]
+    items = reasoning_items(
+        restored, ToyTokenizer(), tiny_config(version=2, max_seq_len=2048), traces
+    )
+    assert collate_items(items, 0).ordinals.tolist() == [0, 1, 2, 3, 0, 1, 2, 3]
+
+
+@pytest.mark.parametrize("invalid", ["not-a-number", "NaN", "Infinity"])
+def test_nonfinite_serialized_score_ordinal_is_rejected(invalid):
+    from ayaka.data.schema import Sample
+
+    sample, _ = next((s, t) for s, t in curriculum("train", 1) if s.questions[0].type == "score")
+    serialized = sample.to_json()
+    serialized["questions"][0]["candidates"][0]["ordinal"] = invalid
+    with pytest.raises(ValueError, match="finite numeric"):
+        Sample.from_json(serialized)
+
+
 @pytest.mark.parametrize("readout", ["lm", "pointer", "hybrid"])
 def test_head_ablation_runs_and_returns_valid_distributions(readout):
     torch.set_num_threads(1)
