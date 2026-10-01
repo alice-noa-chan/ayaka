@@ -156,3 +156,22 @@ def test_large_candidate_rerank_keeps_mass_and_separate_questions_have_separate_
     assert first.cache is not second.cache
     p = gen.readout(first, q)
     assert len(p) == 28 and sum(p) == pytest.approx(1, abs=1e-5)
+
+
+def test_auto_router_receives_requested_budget_and_never_changes_it():
+    o, g = Original(), Generator()
+    seen = []
+
+    class Router:
+        def should_reason(self, state, spec, baseline, tok, budget):
+            seen.append((baseline.probs, budget))
+            return True
+
+    d = ControlledDecision(o, g, Router())
+    d.decide(
+        "Hello",
+        [QuestionSpec("noul", "Hi?", ["no", "yes"])],
+        reasoning=[ReasoningSettings(mode="auto", effort="high", max_tokens=1000)],
+    )
+    assert seen == [([0.99, 0.01], 1000)]
+    assert g.budgets == [1000]

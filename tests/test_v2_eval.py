@@ -84,6 +84,10 @@ def test_serial_effort_runner_reports_deadline_incomplete_and_never_uses_gold():
     from ayaka.primitives import DecisionResult
 
     class Fake:
+        from ayaka.tokenization import ToyTokenizer
+
+        tok = ToyTokenizer()
+
         def decide(self, state, questions, reasoning):
             assert not hasattr(questions[0], "target_distribution")
             q = questions[0]

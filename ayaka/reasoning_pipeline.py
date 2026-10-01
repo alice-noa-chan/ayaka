@@ -203,7 +203,9 @@ class ControlledDecision:
             if use and setting.mode == "auto":
                 baseline = baselines[i]
                 if self.router is not None:
-                    use = self.router.should_reason(state, spec, baseline, self.tok)
+                    use = self.router.should_reason(
+                        state, spec, baseline, self.tok, budget=setting.budget
+                    )
                     extra["router"] = "learned"
                 else:
                     use = max(baseline.probs) <= 0.9 and gate_passes(

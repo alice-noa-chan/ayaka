@@ -251,6 +251,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--reasoning-mode", choices=["off", "auto", "on"])
     ap.add_argument("--reasoning-effort", choices=["low", "medium", "high"])
     ap.add_argument("--max-reasoning-tokens", type=int)
+    ap.add_argument("--reasoning-router", help="promoted v2 router JSON")
+    ap.add_argument("--reasoning-calibration", help="v2 path-temperature JSON")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
@@ -288,7 +290,7 @@ def main(argv: list[str] | None = None) -> None:
         resolve_settings(server=overrides)
     except ValueError as exc:
         ap.error(str(exc))
-    if args.reasoning and overrides:
+    if args.reasoning and (overrides or args.reasoning_router or args.reasoning_calibration):
         ap.error("use either legacy --reasoning or v2 reasoning flags")
     if args.threads:
         torch.set_num_threads(args.threads)
@@ -321,10 +323,19 @@ def main(argv: list[str] | None = None) -> None:
             max_seq_len=args.max_seq_len or None,
             reasoner_adapter=args.reasoner_adapter,
         )
-    elif overrides or model.cfg.version >= 2:
+    elif overrides or model.cfg.version >= 2 or args.reasoning_router or args.reasoning_calibration:
         from .reasoning_pipeline import controlled_decision
+        from .routing import BenefitRouter
+        from .training.path_calibration import PathCalibration
 
-        decision = controlled_decision(model, tok, max_seq_len=args.max_seq_len or None)
+        router = BenefitRouter.load(args.reasoning_router) if args.reasoning_router else None
+        calibration = None
+        if args.reasoning_calibration:
+            with open(args.reasoning_calibration, encoding="utf-8") as f:
+                calibration = PathCalibration(json.load(f))
+        decision = controlled_decision(
+            model, tok, max_seq_len=args.max_seq_len or None, router=router, calibration=calibration
+        )
         overrides = {"mode": "auto", **overrides}
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)

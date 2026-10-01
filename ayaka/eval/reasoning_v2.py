@@ -31,6 +31,12 @@ def evaluate_efforts(decision, samples, *, efforts=("low", "medium", "high"), de
                 result = decision.decide(sample.state, [spec], reasoning=[settings])[0]
                 row = typed_row(spec, result.probs, target)
                 extra = result.extras["reasoning"]
+                if mode == "off":
+                    from ..routing import routing_features
+
+                    row["routing_features"] = routing_features(
+                        sample.state, spec, result, decision.tok
+                    )
                 row.update(
                     id=f"{sample.metadata.get('source_example_id')}/{q.id}",
                     family=sample.metadata.get("task_family", "unknown"),
