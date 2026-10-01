@@ -88,7 +88,7 @@ def test_prepared_decimal_curriculum_roundtrips_into_joint_training():
     items = reasoning_items(
         restored, ToyTokenizer(), tiny_config(version=2, max_seq_len=2048), traces
     )
-    assert collate_items(items, 0).ordinals.tolist() == [0, 1, 2, 3, 0, 1, 2, 3]
+    assert collate_items(items, 0).ordinals.tolist() == [1, 2, 3, 0, 1, 2, 3, 0]
 
 
 @pytest.mark.parametrize("invalid", ["not-a-number", "NaN", "Infinity"])
@@ -127,3 +127,41 @@ def test_offline_boundary_oracles_and_balanced_curriculum():
     records = curriculum("dev")
     assert len(records) == 96
     assert all(sum(s.questions[0].target_distribution.values()) == 1 for s, _ in records)
+
+
+def test_curriculum_has_no_family_polarity_or_fixed_rendered_answer_shortcut():
+    from collections import defaultdict
+
+    from ayaka.prompt import canonical_order
+
+    for split in ("train", "router_train", "dev", "calibration", "test"):
+        polarities, positions = defaultdict(set), defaultdict(set)
+        for sample, _ in curriculum(split):
+            q = sample.questions[0]
+            if q.type == "noul":
+                polarities[sample.metadata["task_family"]].add(q.target_distribution["true"])
+            else:
+                gold = next(i for i, c in enumerate(q.candidates) if q.target_distribution[c.id])
+                order = (
+                    canonical_order([c.description for c in q.candidates])
+                    if q.type == "choice"
+                    else sorted(range(len(q.candidates)), key=lambda i: q.candidates[i].ordinal)
+                )
+                positions[q.type].add(order.index(gold))
+        assert all(labels == {0, 1} for labels in polarities.values())
+        assert positions["choice"] == positions["score"] == {0, 1, 2, 3}
+        from ayaka.data.reasoning_v2 import _case
+
+        assert {_case("leap", i, split)[1] for i in (1, 11, 21, 31)} == {0, 1}
+
+
+def test_curriculum_prefix_is_stable_and_polarity_depends_on_proposition():
+    short = {
+        (s.questions[0].type, s.metadata["source_example_id"]): s.to_json()
+        for s, _ in curriculum("train", 8)
+    }
+    full = {
+        (s.questions[0].type, s.metadata["source_example_id"]): s.to_json()
+        for s, _ in curriculum("train", 128)
+    }
+    assert all(full[key] == sample for key, sample in short.items())

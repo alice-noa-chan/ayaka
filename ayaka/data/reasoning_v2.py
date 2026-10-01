@@ -5,6 +5,7 @@ evidence of performance on independent natural language or JevBench items.
 """
 
 import hashlib
+import random
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -12,7 +13,7 @@ from ..evidence import add_months, business_days
 from .schema import Candidate, Question, Sample
 
 SPLITS = ("train", "router_train", "dev", "calibration", "test")
-CURRICULUM_VERSION = 2
+CURRICULUM_VERSION = 3
 VOICES = {
     "train": "Record {i}. {facts} Determine the requested value.",
     "router_train": "Case file {i}: {facts} Apply the stated rule to this case.",
@@ -26,7 +27,7 @@ def _case(op, i, split):
     variant = SPLITS.index(split)
     a = 20 + i * 3 + variant
     if op == "month_end":
-        start = f"{2024 + variant}-01-31"
+        start = f"{2024 + variant + i}-01-31"
         result = add_months(start, 1).day
         return (
             f"Add one calendar month to {start}, clamping to month end. Report the day of month.",
@@ -35,7 +36,10 @@ def _case(op, i, split):
             31,
         )
     if op == "leap":
-        year = 2000 + 100 * (i % 4) + variant
+        occurrence = i // len(OPERATIONS)
+        year = 2000 + 100 * ((i + occurrence) % 4) + 400 * variant
+        if occurrence % 4 == 3:
+            year = 2024 + 4 * occurrence + 400 * variant
         result = int(year % 400 == 0 or (year % 4 == 0 and year % 100 != 0))
         return (
             f"Year {year}. Report 1 if it is a Gregorian leap year and 0 otherwise.",
@@ -44,8 +48,8 @@ def _case(op, i, split):
             1,
         )
     if op == "business":
-        start = date(2026 + variant, 3, 2) + timedelta(days=i % 7)
-        end = start + timedelta(days=8 + variant)
+        start = date(2026 + variant, 3, 2) + timedelta(days=i * 7 + i % 7)
+        end = start + timedelta(days=8 + variant + i % 5)
         result = business_days(start.isoformat(), end.isoformat())
         return (
             f"Count weekdays after {start} through {end}, inclusive of the end, excluding the start. No holidays.",
@@ -158,18 +162,32 @@ def curriculum(split, per_type=32):
         for i in range(per_type):
             op = OPERATIONS[i % len(OPERATIONS)]
             facts, value, trace, upper = _case(op, i, split)
-            state = VOICES[split].format(i=i, facts=facts)
+            opaque_id = hashlib.sha256(f"document/{split}/{i}".encode()).hexdigest()[:8]
+            state = VOICES[split].format(i=opaque_id, facts=facts)
+            seed = int.from_bytes(hashlib.sha256(f"{split}/{kind}/{i}".encode()).digest()[:8])
+            rng = random.Random(seed)
+            # Distractor contents, not merely input permutations, must vary:
+            # Choice has a canonical display order and Score sorts by ordinal.
+            pool = [
+                v
+                for v in range(max(0, int(value) - 4), min(int(upper), int(value) + 4) + 1)
+                if v != value
+            ]
+            if not pool:
+                raise ValueError("verified case needs a plausible alternative value")
             if kind == "noul":
-                asked = value if i % 2 == 0 else value + 1
+                occurrence = i // len(OPERATIONS)
+                block = (
+                    hashlib.sha256(f"{split}/{op}/{occurrence // 2}/polarity".encode()).digest()[0]
+                    & 1
+                )
+                positive = bool(block ^ (occurrence % 2))
+                asked = value if positive else rng.choice(pool)
                 q = Question.noul("q", f"Is the requested value {asked}?", float(asked == value))
                 trace += f" Compare {value} with the proposed value {asked}: {'equal' if asked == value else 'different'}."
             else:
-                if kind == "score":
-                    # Semantic numeric levels with sparse ordinals are valid score criteria.
-                    numbers = sorted({max(0, value - 1), value, value + 1, max(upper, value + 2)})
-                else:
-                    numbers = [value + 1, value, value + 2, max(0, value - 1)]
-                    numbers = list(dict.fromkeys(numbers))
+                numbers = [value, *rng.sample(pool, min(3, len(pool)))]
+                rng.shuffle(numbers)
                 cands = [
                     Candidate(str(v), f"The requested value is {v}", v if kind == "score" else None)
                     for v in numbers
