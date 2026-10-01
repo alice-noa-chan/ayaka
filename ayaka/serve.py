@@ -136,19 +136,32 @@ class DecisionService:
             if getattr(self.decision, "supports_reasoning", False):
                 results = self.decision.decide(state, [p[0] for p in parsed], reasoning=settings)
             else:
-                results = self.decision.decide(state, [p[0] for p in parsed])
+                direct = (
+                    getattr(self.decision, "original", self.decision) if explicit else self.decision
+                )
+                results = direct.decide(state, [p[0] for p in parsed])
         answers = {
             n: answer(spec, labels, r.probs)
             for n, (spec, labels), r in zip(names, parsed, results, strict=True)
         }
         generated = [(r.extras.get("evidence") or {}).get("worked_steps", "") for r in results]
+        diagnostics = {
+            n: r.extras["reasoning"]
+            for n, r in zip(names, results, strict=True)
+            if "reasoning" in r.extras
+        }
+        reasoning_tokens = sum(d["generated_tokens"] for d in diagnostics.values())
         return {
             "model": body.get("model") or self.model_name,
             "answers": answers,
             "usage": {
                 "input_tokens": self._count_tokens(state, parsed),
-                "output_tokens": sum(len(self.decision.tok.encode(g)) for g in generated if g),
+                "output_tokens": reasoning_tokens
+                if diagnostics
+                else sum(len(self.decision.tok.encode(g)) for g in generated if g),
+                "reasoning_tokens": reasoning_tokens,
             },
+            **({"reasoning": diagnostics} if diagnostics else {}),
         }
 
     def _count_tokens(self, state, parsed) -> int:
@@ -310,6 +323,7 @@ def main(argv: list[str] | None = None) -> None:
         from .reasoning_pipeline import controlled_decision
 
         decision = controlled_decision(model, tok, max_seq_len=args.max_seq_len or None)
+        overrides = {"mode": "auto", **overrides}
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])

@@ -12,9 +12,9 @@ class ReasoningSettings:
     max_tokens: int | None = None
 
     def __post_init__(self):
-        if self.mode not in ("off", "auto", "on"):
+        if not isinstance(self.mode, str) or self.mode not in ("off", "auto", "on"):
             raise ValueError("reasoning.mode must be off, auto, or on")
-        if self.effort not in EFFORT_TOKENS:
+        if not isinstance(self.effort, str) or self.effort not in EFFORT_TOKENS:
             raise ValueError("reasoning.effort must be low, medium, or high")
         if self.max_tokens is not None and (
             type(self.max_tokens) is not int or not 0 <= self.max_tokens <= 1024
