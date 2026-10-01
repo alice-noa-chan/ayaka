@@ -8,9 +8,19 @@ from ..training.batching import _noul_canonical
 from .v2 import paired_report, summarize, typed_row
 
 
-def evaluate_efforts(decision, samples, *, efforts=("low", "medium", "high"), deadline=None):
+def evaluate_efforts(
+    decision,
+    samples,
+    *,
+    efforts=("low", "medium", "high"),
+    deadline=None,
+    verbose=False,
+    include_auto=False,
+):
     modes = {"off": ReasoningSettings(mode="off")}
     modes.update({effort: ReasoningSettings(mode="on", effort=effort) for effort in efforts})
+    if include_auto:
+        modes["auto"] = ReasoningSettings(mode="auto")
     rows = {mode: [] for mode in modes}
     complete = True
     for sample in samples:
@@ -34,7 +44,7 @@ def evaluate_efforts(decision, samples, *, efforts=("low", "medium", "high"), de
                 if mode == "off":
                     from ..routing import routing_features
 
-                    row["routing_features"] = routing_features(
+                    row["routing_features"] = extra.get("routing_features") or routing_features(
                         sample.state, spec, result, decision.tok
                     )
                 row.update(
@@ -56,6 +66,11 @@ def evaluate_efforts(decision, samples, *, efforts=("low", "medium", "high"), de
                 rows[mode].append(row)
             if not complete:
                 break
+            if verbose and len(rows["off"]) % 16 == 0:
+                print(
+                    f"[eval] questions={len(rows['off'])} modes={','.join(modes)} reasoning_tokens={sum(r['reasoning_tokens'] for rs in rows.values() for r in rs)}",
+                    flush=True,
+                )
         if not complete:
             break
     reports = {

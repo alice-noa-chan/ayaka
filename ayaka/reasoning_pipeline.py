@@ -198,6 +198,12 @@ class ControlledDecision:
                 "generation_s": 0.0,
                 "readout_s": 0.0,
             }
+            if i in baselines:
+                from .routing import routing_features
+
+                extra["routing_features"] = routing_features(
+                    state, spec, baselines[i], self.tok, budget=setting.budget
+                )
             use = setting.budget > 0
             if use and setting.mode == "auto":
                 baseline = baselines[i]
@@ -261,7 +267,10 @@ class ControlledDecision:
                 extra["input_tokens"] += trace.prefill_tokens + trace.readout_tokens
             if self.calibration is not None:
                 result.probs = self.calibration.apply(
-                    result.probs, spec.type, extra["route"], setting.budget
+                    result.probs,
+                    spec.type,
+                    extra["route"],
+                    setting.budget if extra["route"] != "direct" else 0,
                 )
                 result.distribution = dict(zip(spec.candidates, result.probs, strict=True))
             if spec.type == "noul":

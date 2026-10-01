@@ -91,6 +91,10 @@ questions rather than treating repeated efforts as new samples. Each budget also
 requires a positive dev confidence bound; unvalidated budgets stay direct.
 Older single-budget artifacts apply only at their measured budget. Forced `on`
 requests continue to run at every supported explicit budget.
+The independent test also measures actual `auto/medium` decisions alongside off
+and forced efforts. Router features use the uncalibrated direct distribution;
+output calibration cannot feed back into the routing inputs. Direct outputs use
+the zero-generation calibration band even when their requested auto budget is 384.
 
 ## Survey and evaluation
 

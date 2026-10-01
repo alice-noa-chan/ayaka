@@ -206,3 +206,25 @@ def test_auto_without_validated_router_stays_direct_even_for_uncertain_calculati
     assert result.extras["reasoning"]["budget"] == 384
     assert result.extras["reasoning"]["route"] == "direct"
     assert result.extras["reasoning"]["finish_reason"] == "no_validated_router"
+
+
+def test_calibration_cannot_change_router_features_and_direct_uses_zero_budget():
+    from ayaka.data.schema import Question, Sample
+    from ayaka.eval.reasoning_v2 import evaluate_efforts
+
+    seen = []
+
+    class Calibration:
+        def apply(self, probs, kind, route, budget):
+            seen.append((route, budget))
+            return [0.5, 0.5]
+
+    decision = ControlledDecision(Original(), Generator(), calibration=Calibration())
+    sample = Sample(
+        "Hello", [Question.noul("q", "Hi?", 1)], {"source_example_id": "test", "split": "test"}
+    )
+    report = evaluate_efforts(decision, [sample], efforts=(), include_auto=True)
+    assert report["rows"]["off"][0]["routing_features"][0] == 0.99
+    assert report["rows"]["off"][0]["probs"] == [0.5, 0.5]
+    assert seen == [("direct", 0), ("direct", 0)]
+    assert report["rows"]["auto"][0]["finish_reason"] == "no_validated_router"
