@@ -126,7 +126,7 @@ class Decision:
                 type=q.type, probs=p, distribution=dict(zip(q.candidates, p, strict=True))
             )
             if q.type == "score":
-                res.expected = sum(o * pi for o, pi in zip(q.ordinals, p, strict=True))
+                res.expected = sum(float(o) * pi for o, pi in zip(q.ordinals, p, strict=True))
             if q.type == "noul":
                 res.extras["p_true"] = p[1]
             results.append(res)

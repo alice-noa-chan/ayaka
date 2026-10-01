@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -7,7 +8,7 @@ from ayaka.collate import EncodedQuestion, full_rows
 from ayaka.config import tiny_config
 from ayaka.model.electra import PRIMITIVE_INDEX, ElectraDecisionModel
 from ayaka.model.ragged import ragged_softmax
-from ayaka.primitives import DecisionResult, QuestionSpec
+from ayaka.primitives import Decision, DecisionResult, QuestionSpec
 from ayaka.reasoning import ReasoningSettings
 from ayaka.reasoning_pipeline import (
     ControlledDecision,
@@ -53,6 +54,21 @@ class Generator:
 
     def readout(self, trace, spec):
         return [0.1, 0.9]
+
+
+@pytest.mark.parametrize("mode", ["off", "on"])
+def test_decimal_score_levels_survive_direct_and_reasoning_readouts(mode, monkeypatch):
+    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    direct = Decision(model, Tok())
+    monkeypatch.setattr(direct, "_run", lambda *args: [[0.1, 0.9]])
+    spec = QuestionSpec(
+        "score", "Rounded amount?", ["0.01", "0.02"], [Decimal("0.01"), Decimal("0.02")]
+    )
+    result = ControlledDecision(direct, Generator()).decide(
+        "Amount", [spec], reasoning=[ReasoningSettings(mode=mode)]
+    )[0]
+    assert result.expected == pytest.approx(0.019)
+    assert result.extras["reasoning"]["route"] == ("direct" if mode == "off" else "reasoned")
 
 
 def test_forced_high_bypasses_router_confidence_and_numeric_gate():

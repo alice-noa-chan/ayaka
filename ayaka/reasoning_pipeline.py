@@ -269,7 +269,7 @@ class ControlledDecision:
                 result.extras["p_true"] = result.probs[1]
             if spec.type == "score":
                 result.expected = sum(
-                    o * p for o, p in zip(spec.ordinals, result.probs, strict=True)
+                    float(o) * p for o, p in zip(spec.ordinals, result.probs, strict=True)
                 )
             result.extras["reasoning"] = extra
             results.append(result)
