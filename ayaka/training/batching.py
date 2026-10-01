@@ -174,7 +174,17 @@ def collate_items(
     encs = [it.enc for it in items]
     batch = full_rows(encs, pad_id) if prefix_len is None else suffix_rows(encs, prefix_len, pad_id)
     targets = torch.tensor([p for it in items for p in it.target], dtype=torch.float32)
-    ordinals = torch.tensor([o for it in items for o in it.ordinals], dtype=torch.long)
+    # RPS needs ordering, not numeric spacing. Rank exact Python/Decimal levels
+    # before tensor conversion so fractional or very large levels cannot tie
+    # through integer truncation or floating-point rounding.
+    ranks = []
+    for item in items:
+        order = sorted(range(len(item.ordinals)), key=item.ordinals.__getitem__)
+        rank = [0] * len(order)
+        for position, index in enumerate(order):
+            rank[index] = position
+        ranks.extend(rank)
+    ordinals = torch.tensor(ranks, dtype=torch.long)
     flagged = torch.tensor([it.flagged for it in items], dtype=torch.bool)
     teacher = teacher_mask = None
     if any(it.teacher is not None for it in items):

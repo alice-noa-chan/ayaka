@@ -12,10 +12,13 @@ from ayaka.training.reasoning import reasoning_items
 from ayaka.training.trainer import TrainConfig, Trainer
 
 
-def test_joint_step_trains_trace_and_decision_without_prompt_ce():
+@pytest.mark.parametrize("primitive", ["choice", "noul", "score"])
+def test_joint_step_trains_trace_and_decision_without_prompt_ce(primitive):
     torch.set_num_threads(1)
     tok, cfg = ToyTokenizer(), tiny_config(version=2, max_seq_len=2048)
-    sample, traces = curriculum("train", 1)[0]
+    sample, traces = [
+        row for row in curriculum("train", 3) if row[0].questions[0].type == primitive
+    ][2]
     items = reasoning_items(sample, tok, cfg, traces)
     assert len(items) == 2 and items[0].reasoning_labels is None
     assert len(items[1].reasoning_labels) == len(items[1].reasoning_positions)
@@ -28,6 +31,33 @@ def test_joint_step_trains_trace_and_decision_without_prompt_ce():
     record = trainer.train_step(items)
     assert record["reasoning_ce"] > 0 and record["nll"] > 0
     assert any(not torch.equal(before[n], p) for n, p in model.named_parameters() if n in before)
+
+
+@pytest.mark.parametrize(
+    "levels", [("0.02", "0.01"), ("1152921504606846977", "1152921504606846976")]
+)
+def test_score_collation_preserves_exact_fractional_and_large_order(levels):
+    from decimal import Decimal
+
+    from ayaka.data.schema import Candidate, Question, Sample
+    from ayaka.training.batching import collate_items, sample_to_items
+
+    ordinals = list(map(Decimal, levels))
+    sample = Sample(
+        "Levels",
+        [
+            Question(
+                "q",
+                "score",
+                "Rate?",
+                [Candidate("a", "higher", ordinals[0]), Candidate("b", "lower", ordinals[1])],
+                {"a": 1},
+            )
+        ],
+    )
+    items = sample_to_items(sample, ToyTokenizer(), tiny_config())
+    assert collate_items(items, 0).ordinals.tolist() == [1, 0]
+    assert items[0].ordinals == ordinals
 
 
 def test_complete_trace_rejected_instead_of_truncated():
