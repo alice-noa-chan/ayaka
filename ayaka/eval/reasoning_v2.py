@@ -1,6 +1,8 @@
 """Serial paired evaluation; targets and family metadata never enter inference."""
 
 import copy
+import hashlib
+import json
 import time
 
 from ..primitives import QuestionSpec
@@ -18,8 +20,10 @@ def evaluate_efforts(
     verbose=False,
     include_auto=False,
     resume_rows=None,
+    on_progress=None,
 ):
     samples = list(samples)
+    signature = dataset_signature(samples)
     modes = {"off": ReasoningSettings(mode="off")}
     modes.update({effort: ReasoningSettings(mode="on", effort=effort) for effort in efforts})
     if include_auto:
@@ -100,6 +104,14 @@ def evaluate_efforts(
                     f"[eval] questions={len(rows['off'])} modes={','.join(modes)} reasoning_tokens={sum(r['reasoning_tokens'] for rs in rows.values() for r in rs)}",
                     flush=True,
                 )
+            if on_progress is not None and new_call and min(map(len, rows.values())) % 16 == 0:
+                on_progress(
+                    {
+                        "status": "incomplete",
+                        "dataset_signature": signature,
+                        "rows": copy.deepcopy(rows),
+                    }
+                )
         if not complete:
             break
     positions = {key: index for index, key in enumerate(expected)}
@@ -119,4 +131,13 @@ def evaluate_efforts(
         "reports": reports,
         "paired": pairs,
         "rows": rows,
+        "dataset_signature": signature,
     }
+
+
+def dataset_signature(samples):
+    return hashlib.sha256(
+        json.dumps(
+            [s.to_json() for s in samples], sort_keys=True, ensure_ascii=False, default=str
+        ).encode()
+    ).hexdigest()

@@ -148,11 +148,10 @@ one container and no retries. The dedicated `ayaka-v2-exploration` volume stores
 prepared data, cached pinned weights, reports, budget ledger and checkpoints.
 Use a fresh volume/output directory for a separately authorized exploration.
 
-After the stopped Decimal-ordinal screen, `modal run modal_v2.py --recover-screen`
-reuses the prepared volume and original ledger. It retains the interrupted 2h
-reservation, spends at most 1h on a replacement screen from the recovery allowance,
-and omits the separate reproduction stage. Other stages retain their caps, subject
-to the remaining total budget. Reserved allocations are not measured GPU runtime.
+The earlier `--recover-screen` attempt retained the interrupted 2h reservation
+and reserved 1h for replacement screening. Reserved allocations differ from
+consumed runtime. The current runner also enforces cumulative stage caps; an
+unverified exhausted reservation cannot be reused for the same stage.
 
 Curriculum version 2 also hashes the underlying facts separately from their
 document voice. Identical facts cannot cross splits even under paraphrased
@@ -180,6 +179,18 @@ bound, not a billing invoice or a claim that unused allocations were consumed.
 Paired evaluations can resume stored rows without repeating already measured
 decisions. IDs, targets, types and budgets must match, and only complete 96-item
 results can enter selection.
+
+```sh
+modal run modal_v2.py --resume-paired-screen --closed-windows docs/experiments/v2_closed_windows.json
+```
+
+This continuation reuses the same prepared volume and ledger, resumes missing
+off/low pairs, then runs head/SFT/evaluation stages. Screening including earlier
+attempts stays below 2h; recovery and reproduction share the 1h allowance. Stale
+unvisited screen files are ignored. Every 16 questions writes a partial row
+checkpoint with a dataset signature. Compiled kernels persist in the volume.
+CPU budget reconciliation precedes allocation; the GPU function's hard timeout
+is reduced to the remaining total allowance, retaining the startup/flush margin.
 
 ## Status on 2026-10-01
 

@@ -57,9 +57,9 @@ def test_recovery_keeps_interrupted_reservation_and_caps_new_stage(tmp_path, mon
     recovered = bounded_run(
         "manifest", str(tmp_path), stages=("screen",), stage_limits={"screen": 3600}
     )
-    assert recovered["elapsed_s"] == 10800
+    assert recovered["elapsed_s"] == 7200
     assert recovered["stages"][0]["status"] == "interrupted"
-    assert recovered["stages"][1]["allocation_s"] == 3600
+    assert len(recovered["stages"]) == 1  # unverified screen time cannot be released
     with pytest.raises(ValueError, match="stage limits"):
         bounded_run("manifest", str(tmp_path), stage_limits={"screen": 7201})
 
@@ -130,3 +130,96 @@ def test_failed_first_sft_candidate_does_not_skip_second(tmp_path, monkeypatch):
     status = json.loads((tmp_path / "sft_status.json").read_text())
     assert status["status"] == "incomplete" and status["failed_candidates"] == ["broken"]
     assert "unsupported training kernel" in (tmp_path / "sft-broken-failure.json").read_text()
+
+
+def test_recovery_reuses_partial_pairs_skips_complete_and_ignores_stale_files(
+    tmp_path, monkeypatch
+):
+    import hashlib
+
+    import ayaka.experiments.v2 as experiment
+    from ayaka.data.reasoning_v2 import CURRICULUM_VERSION, curriculum
+    from ayaka.eval.reasoning_v2 import dataset_signature
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
+    (tmp_path / "preparation.json").write_text(
+        json.dumps(
+            {
+                "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "curriculum_version": CURRICULUM_VERSION,
+            }
+        )
+    )
+    full = {
+        "name": "complete",
+        "status": "complete",
+        "n": 96,
+        "by_type": {kind: {"n": 32} for kind in ("choice", "noul", "score")},
+        "cc_equal_types": 80,
+        "proper_loss": 0.1,
+        "p95_s": 1,
+    }
+    (tmp_path / "screen_summary.json").write_text(
+        json.dumps([full, {"name": "partial", "status": "incomplete"}])
+    )
+    (tmp_path / "screen").mkdir()
+    cached = {"off": [{"id": "cached"}], "low": []}
+    signature = dataset_signature([s for s, _ in curriculum("dev")])
+    (tmp_path / "screen/partial.json").write_text(
+        json.dumps({"rows": cached, "dataset_signature": signature})
+    )
+    (tmp_path / "screen/new.json").write_text(
+        json.dumps({"rows": {"off": [{"id": "stale"}]}, "dataset_signature": "old-curriculum"})
+    )
+    candidates = [
+        {"name": name, "support": "builtin", "total_parameters": 1}
+        for name in ("complete", "partial", "new")
+    ]
+    monkeypatch.setattr(experiment, "gpu_info", lambda: {})
+    monkeypatch.setattr(experiment, "load_manifest", lambda *args: {"candidates": candidates})
+    monkeypatch.setattr(experiment, "load_candidate", lambda c: (c["name"], None))
+    monkeypatch.setattr(experiment, "controlled_decision", lambda m, t: m)
+    seen = []
+
+    def evaluate(name, samples, **kwargs):
+        seen.append((name, kwargs["resume_rows"]))
+        return {
+            "status": "complete",
+            "reports": {"low": full},
+            "rows": {},
+            "dataset_signature": signature,
+        }
+
+    monkeypatch.setattr(experiment, "run_efforts", evaluate)
+    experiment.worker(str(manifest), str(tmp_path), "recover_screen", 60)
+    assert seen == [("partial", cached), ("new", None)]
+    assert set(json.loads((tmp_path / "selection.json").read_text())["ranked"]) == {
+        "complete",
+        "partial",
+        "new",
+    }
+
+
+def test_screen_and_recovery_share_caps_and_recovery_cannot_spend_reserve_twice(
+    tmp_path, monkeypatch
+):
+    import ayaka.experiments.v2 as experiment
+
+    monkeypatch.setattr(experiment, "gpu_info", lambda: {})
+    monkeypatch.setattr(
+        experiment.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0)
+    )
+    ledger = {
+        "elapsed_s": 3242,
+        "stages": [
+            {"stage": "screen", "allocation_s": 7200, "charged_s": 3242, "status": "interrupted"}
+        ],
+    }
+    (tmp_path / "budget.json").write_text(json.dumps(ledger))
+    result = bounded_run(
+        "manifest", str(tmp_path), stages=("recover_screen", "reserve", "heads", "heads")
+    )
+    assert result["elapsed_s"] == 3242 + 3600 + 3600
+    assert [row["stage"] for row in result["stages"]] == ["screen", "recover_screen", "heads"]
+    assert [row["stage"] for row in result["skipped_stages"]] == ["reserve", "heads"]

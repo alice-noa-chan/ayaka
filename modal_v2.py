@@ -7,6 +7,7 @@ downloads pinned weights into the persistent volume before GPU allocation.
 """
 
 import json
+from pathlib import Path
 
 import modal
 
@@ -26,7 +27,14 @@ image = (
         "flash-linear-attention==0.5.0",
         "datasets==5.0.1",
     )
-    .env({"HF_HOME": "/runs/hf-cache", "PYTHONPATH": "/root", "TOKENIZERS_PARALLELISM": "false"})
+    .env(
+        {
+            "HF_HOME": "/runs/hf-cache",
+            "PYTHONPATH": "/root",
+            "TOKENIZERS_PARALLELISM": "false",
+            "TRITON_CACHE_DIR": "/runs/kernel-cache",
+        }
+    )
     .add_local_dir("ayaka", remote_path="/root/ayaka")
     .add_local_file("docs/experiments/v2_candidates.json", remote_path="/root/candidates.json")
 )
@@ -52,7 +60,10 @@ def prepare_cpu():
 
 @app.function(gpu="H100", timeout=8 * 3600, **COMMON)
 def explore_h100(
-    budget_scale: float = 1.0, recover_screen: bool = False, refresh_curriculum: bool = False
+    budget_scale: float = 1.0,
+    recover_screen: bool = False,
+    refresh_curriculum: bool = False,
+    resume_paired_screen: bool = False,
 ):
     from ayaka.experiments.v2 import bounded_run
 
@@ -71,9 +82,25 @@ def explore_h100(
                 "stages": ("screen", "heads", "sft", "evaluate"),
                 "stage_limits": {"screen": 3000, "heads": 600},
             }
+        if resume_paired_screen:
+            options = {"stages": ("recover_screen", "heads", "sft", "evaluate")}
         return bounded_run(
             "/root/candidates.json", "/runs/exploration", scale=budget_scale, **options
         )
+    finally:
+        volume.commit()
+
+
+@app.function(timeout=600, **COMMON)
+def budget_cpu(observations=None):
+    from ayaka.experiments.budget import reconcile_closed_windows
+
+    volume.reload()
+    try:
+        if observations:
+            return reconcile_closed_windows("/runs/exploration", observations)
+        path = Path("/runs/exploration/budget.json")
+        return json.loads(path.read_text()) if path.exists() else {"elapsed_s": 0}
     finally:
         volume.commit()
 
@@ -84,13 +111,24 @@ def main(
     budget_scale: float = 1.0,
     recover_screen: bool = False,
     refresh_curriculum: bool = False,
+    resume_paired_screen: bool = False,
+    closed_windows: str = "",
 ):
-    if not recover_screen or refresh_curriculum:
+    if (not recover_screen and not resume_paired_screen) or refresh_curriculum:
         preparation = prepare_cpu.remote()
         print(json.dumps(preparation, indent=2))
     if not prepare_only:
+        observations = json.loads(Path(closed_windows).read_text()) if closed_windows else None
+        ledger = budget_cpu.remote(observations)
+        remaining = int(8 * 3600 - ledger["elapsed_s"] - 120)
+        if remaining <= 0:
+            print(json.dumps({"status": "budget_exhausted", "ledger": ledger}, indent=2))
+            return
         print(
             json.dumps(
-                explore_h100.remote(budget_scale, recover_screen, refresh_curriculum), indent=2
+                explore_h100.with_options(timeout=remaining).remote(
+                    budget_scale, recover_screen, refresh_curriculum, resume_paired_screen
+                ),
+                indent=2,
             )
         )

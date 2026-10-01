@@ -20,6 +20,7 @@ from ..checkpoint import apply_lora, load_checkpoint, save_checkpoint
 from ..config import ElectraConfig
 from ..data.decontam import Decontaminator
 from ..data.reasoning_v2 import CURRICULUM_VERSION, SPLITS, curriculum
+from ..eval.reasoning_v2 import dataset_signature
 from ..eval.reasoning_v2 import evaluate_efforts as run_efforts
 from ..eval.v2 import assert_isolated, select_candidates
 from ..losses import LossWeights
@@ -31,7 +32,14 @@ from ..training.path_calibration import PathCalibration
 from ..training.reasoning import reasoning_items
 from ..training.trainer import TrainConfig, Trainer
 
-STAGE_SECONDS = {"screen": 7200, "heads": 3600, "sft": 7200, "evaluate": 7200, "reserve": 3600}
+STAGE_SECONDS = {
+    "screen": 7200,
+    "recover_screen": 3600,
+    "heads": 3600,
+    "sft": 7200,
+    "evaluate": 7200,
+    "reserve": 3600,
+}
 TOTAL_SECONDS = 28800
 
 
@@ -188,6 +196,8 @@ def archive_stale_curriculum(out):
         shutil.copy2(path, archive / path.name)
     if (folder / "screen").exists():
         shutil.copytree(folder / "screen", archive / "screen", dirs_exist_ok=True)
+    write_json(folder / "screen_summary.json", [])
+    write_json(folder / "selection.json", {"ranked": [], "status": "stale_curriculum"})
 
 
 def gpu_info():
@@ -221,6 +231,7 @@ def worker(manifest_path, out, stage, seconds):
             "data/reasoning_v2.py",
             "reasoning_pipeline.py",
             "eval/reasoning_v2.py",
+            "training/batching.py",
         )
     }
     preparation = json.loads((folder / "preparation.json").read_text())
@@ -232,13 +243,23 @@ def worker(manifest_path, out, stage, seconds):
     if preparation.get("curriculum_version") != CURRICULUM_VERSION:
         raise ValueError("curriculum changed since CPU preparation; prepare the run again")
     failed, unfinished = [], []
-    if stage == "screen":
-        reports = []
+    if stage in ("screen", "recover_screen"):
+        summary_path = folder / "screen_summary.json"
+        reports = (
+            json.loads(summary_path.read_text())
+            if stage == "recover_screen" and summary_path.exists()
+            else []
+        )
+        previous = {r["name"]: r for r in reports}
+        completed = {r["name"] for r in select_candidates(reports)}
+        samples = [s for s, _ in curriculum("dev")]
+        signature = dataset_signature(samples)
         candidates = manifest["candidates"]
         ready = sorted(
             [c for c in candidates if c["support"] == "builtin"],
             key=lambda c: c["total_parameters"],
         )
+        ready = [c for c in ready if c["name"] not in completed]
         write_json(
             folder / "selection.json", {"split": "dev", "ranked": [], "status": "incomplete"}
         )
@@ -258,17 +279,31 @@ def worker(manifest_path, out, stage, seconds):
             }
             model = tok = decision = None
             try:
+                report_path = folder / "screen" / f"{candidate['name']}.json"
+                saved = (
+                    json.loads(report_path.read_text())
+                    if stage == "recover_screen" and report_path.exists()
+                    else {}
+                )
+                cached = (
+                    saved.get("rows")
+                    if saved.get("dataset_signature") == signature
+                    or (saved.get("dataset_signature") is None and candidate["name"] in previous)
+                    else None
+                )
                 model, tok = load_candidate(candidate)
                 decision = controlled_decision(model, tok)
                 evaluated = evaluate_efforts(
                     decision,
-                    [s for s, _ in curriculum("dev")],
+                    samples,
                     efforts=("low",),
                     deadline=candidate_deadline,
+                    resume_rows=cached,
+                    on_progress=partial(write_json, report_path),
                 )
                 write_json(folder / "screen" / f"{candidate['name']}.json", evaluated)
                 result.update(evaluated["reports"].get("low", {}))
-                result["status"] = evaluated["status"]
+                result.update(name=candidate["name"], status=evaluated["status"])
                 result["elapsed_s"] = time.monotonic() - start
             except Exception as exc:
                 result["error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
@@ -276,7 +311,7 @@ def worker(manifest_path, out, stage, seconds):
                 f"[screen] candidate={candidate['name']} status={result['status']} n={result.get('n', 0)}",
                 flush=True,
             )
-            reports.append(result)
+            reports = [r for r in reports if r["name"] != candidate["name"]] + [result]
             if result["status"] != "complete":
                 unfinished.append(candidate["name"])
             write_json(folder / "screen_summary.json", reports)
@@ -608,11 +643,40 @@ def bounded_run(
             TOTAL_SECONDS - ledger["elapsed_s"] - 120
         )  # container startup/final flush reserve
         limit = min(stage_limits.get(stage, STAGE_SECONDS[stage]) * scale, remaining)
+        family = ("screen", "recover_screen") if stage in ("screen", "recover_screen") else (stage,)
+        family_cap = (
+            STAGE_SECONDS["screen"]
+            if stage in ("screen", "recover_screen")
+            else STAGE_SECONDS[stage]
+        )
+        spent = sum(
+            entry.get("charged_s", entry["allocation_s"])
+            for entry in ledger["stages"]
+            if entry["stage"] in family
+        )
+        limit = min(limit, family_cap - spent)
+        if stage in ("recover_screen", "reserve"):
+            recovery_spent = sum(
+                entry.get("charged_s", entry["allocation_s"])
+                for entry in ledger["stages"]
+                if entry["stage"] in ("recover_screen", "reserve")
+            )
+            limit = min(limit, 3600 - recovery_spent)
         if limit <= 0:
-            break
+            ledger.setdefault("skipped_stages", []).append(
+                {
+                    "stage": stage,
+                    "reason": "total_budget" if remaining <= 0 else "cumulative_stage_cap",
+                }
+            )
+            write_json(ledger_path, ledger)
+            if remaining <= 0:
+                break
+            continue
         started = time.monotonic()
-        # Reserve the entire allocation before spawning; crashes cannot refund
-        # GPU time or reset the eight-hour ledger on a later resume.
+        # Reserve before spawning. Unverified crashes retain the reservation;
+        # only explicit externally observed closed-window reconciliation can
+        # release unused time, without erasing consumed GPU time or overruns.
         entry = {"stage": stage, "allocation_s": limit, "status": "running"}
         ledger["elapsed_s"] += limit
         ledger["stages"].append(entry)
