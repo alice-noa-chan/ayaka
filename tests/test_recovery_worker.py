@@ -3,6 +3,45 @@ from ayaka.data.recovery_v2 import recovery_curriculum
 from scripts.runpod_v2.recovery import selection
 
 
+def test_resume_rejects_partial_wrong_model_and_changed_question_order(tmp_path):
+    import json
+
+    import pytest
+
+    from scripts.runpod_v2.recovery import cached_report
+
+    path = tmp_path / "measurement.json"
+    report = {
+        "complete": True,
+        "model_id": "parent",
+        "split": "dev",
+        "rows": {"off": [{"id": "a"}, {"id": "b"}]},
+    }
+    path.write_text(json.dumps(report))
+    assert cached_report(path, "parent", "dev", {"off": ["a", "b"]}) == report
+    for model, split, ids in (
+        ("other", "dev", ["a", "b"]),
+        ("parent", "test", ["a", "b"]),
+        ("parent", "dev", ["b", "a"]),
+    ):
+        with pytest.raises(ValueError):
+            cached_report(path, model, split, {"off": ids})
+    report["complete"] = False
+    path.write_text(json.dumps(report))
+    with pytest.raises(ValueError):
+        cached_report(path, "parent", "dev", {"off": ["a", "b"]})
+
+
+def test_secondary_high_cohort_preserves_all_types_and_full_budget():
+    from ayaka.reasoning import ReasoningSettings
+    from scripts.runpod_v2.recovery import high_diagnostic_selection
+
+    samples = high_diagnostic_selection(recovery_curriculum("dev", 5))
+    assert len(samples) == 1
+    assert {q.type for q in samples[0].questions} == {"choice", "noul", "score"}
+    assert ReasoningSettings(mode="on", effort="high").budget == 1024
+
+
 def test_worker_selection_is_deterministic_and_keeps_rich_translations_together():
     old = language_curriculum("dev", 32)
     for sample in old:

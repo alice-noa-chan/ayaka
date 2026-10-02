@@ -68,6 +68,39 @@ def raw_temperatures(decision):
     decision.images.generator.apply_temperature = False
 
 
+def cached_report(path, identity, split, expected=None):
+    """Resume only complete measurements from the same model and ordered cohort."""
+    if not path.exists():
+        return None
+    report = json.loads(path.read_text())
+    if (
+        not report.get("complete")
+        or report.get("model_id") != identity
+        or report.get("split") != split
+    ):
+        raise ValueError("cannot reuse incomplete or mismatched recovery measurement")
+    if expected is not None:
+        for mode, ids in expected.items():
+            if [r["id"] for r in report.get("rows", {}).get(mode, [])] != ids:
+                raise ValueError("cannot reuse a different recovery cohort")
+    return report
+
+
+def question_ids(samples):
+    return [s.metadata["source_example_id"] + "/" + q.id for s in samples for q in s.questions]
+
+
+def high_diagnostic_selection(dev):
+    """Three preselected typed questions; every high request retains 1024 tokens."""
+    return [
+        s
+        for s in dev
+        if s.metadata["source_example_id"].startswith("recovery-1/")
+        and s.metadata["oracle_facts"]["index"] == 0
+        and s.metadata["language"] == "en"
+    ]
+
+
 class ForcedDecision:
     def __init__(self, decision, effort):
         self.decision, self.effort = decision, effort
@@ -117,10 +150,29 @@ def measure(checkpoint, name, dev, calibration, out, *, public_modes=("off",), d
         (out / f"{name}-{filename}.json").write_bytes(canonical(report) + b"\n")
         return report
 
+    def evaluate(filename, samples, modes, split, backend=decision):
+        path = out / f"{name}-{filename}.json"
+        existing = cached_report(path, identity, split, {m: question_ids(samples) for m in modes})
+        if existing is not None:
+            return existing
+        print(
+            json.dumps(
+                {
+                    "stage": filename,
+                    "checkpoint": name,
+                    "questions": len(question_ids(samples)),
+                    "modes": modes,
+                }
+            ),
+            flush=True,
+        )
+        return save(filename, evaluate_tracks(backend, samples, modes), split)
+
     # Preserve the released v1 temperatures as a separately labelled baseline.
     if name == "v1":
-        save("published-dev", evaluate_tracks(decision, dev, ("off",)), "dev")
-        save("published-public", public_report(decision, "off"), "public")
+        evaluate("published-dev", dev, ("off",), "dev")
+        if cached_report(out / f"{name}-published-public.json", identity, "public") is None:
+            save("published-public", public_report(decision, "off"), "public")
         from transformers import AutoTokenizer
 
         from ayaka.checkpoint import load_checkpoint
@@ -168,19 +220,31 @@ def measure(checkpoint, name, dev, calibration, out, *, public_modes=("off",), d
         if not parity["passed"]:
             raise ValueError("pretrained v1/native parity failed; refuse continuation")
     raw_temperatures(decision)
-    cal = evaluate_tracks(decision, calibration, ("off",))
     reasoning_calibration = selection(calibration, 32, 8)
-    cal["rows"]["low"] = evaluate_tracks(decision, reasoning_calibration, ("low",))["rows"]["low"]
-    cal = save("calibration", cal, "calibration")
+    cal = cached_report(
+        out / f"{name}-calibration.json",
+        identity,
+        "calibration",
+        {"off": question_ids(calibration), "low": question_ids(reasoning_calibration)},
+    )
+    if cal is None:
+        cal = evaluate("calibration-off", calibration, ("off",), "calibration")
+        cal["rows"]["low"] = evaluate(
+            "calibration-low", reasoning_calibration, ("low",), "calibration"
+        )["rows"]["low"]
+        cal = save("calibration", cal, "calibration")
     fits = fit_report_calibrations(cal)
     for domain, artifact in fits.items():
         artifact.save(out / f"{name}-temperature-{'-'.join(domain)}.json")
-    raw = evaluate_tracks(decision, dev, ("off",))
+    raw = evaluate("dev-off", dev, ("off",), "dev")
     reasoning_dev = selection(dev, 32, 8)
-    secondary = evaluate_tracks(decision, reasoning_dev, ("low", "high"))
-    raw["rows"].update(secondary["rows"])
-    raw["summary"].update(secondary["summary"])
-    raw["reasoning_scope"] = "secondary preselected subset; high calibration is not fitted"
+    for mode, cohort in (("low", reasoning_dev), ("high", high_diagnostic_selection(dev))):
+        secondary = evaluate(f"dev-{mode}", cohort, (mode,), "dev")
+        raw["rows"].update(secondary["rows"])
+        raw["summary"].update(secondary["summary"])
+    raw["reasoning_scope"] = (
+        "secondary low=168 questions; high=3 typed diagnostics at unchanged 1024-token budget; high calibration is not fitted"
+    )
     raw = save("raw-dev", raw, "dev")
     calibrated = save("calibrated-dev", recalibrate_report(raw, fits), "dev")
     if diagnostics:
@@ -235,8 +299,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kit", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
-    args.out.mkdir(parents=True, exist_ok=False)
+    args.out.mkdir(parents=True, exist_ok=args.resume)
     torch.set_num_threads(4)
     _, splits = validate_bundle(args.kit / "recovery-bundle")
     dev, calibration = selection(splits["dev"]), selection(splits["calibration"], 64, 32)
@@ -247,6 +312,7 @@ def main(argv=None):
         "reasoning_comparison": "secondary diagnostics, not primary promotion evidence",
         "planned_steps": 200,
         "test_access": "only after dev primary screen passes",
+        "secondary_revision": "high reduced to 3 typed diagnostics before current-v2 or pilot outcomes; full public sweep off only",
     }
     (args.out / "selection.json").write_bytes(canonical(selection_receipt) + b"\n")
     baseline, _ = measure(args.kit / "v1-checkpoint", "v1", dev, calibration, args.out)
@@ -256,7 +322,7 @@ def main(argv=None):
         dev,
         calibration,
         args.out,
-        public_modes=("off", "low", "high"),
+        public_modes=("off",),
     )
     (args.out / "current-screen.json").write_bytes(
         canonical(promotion_screen(baseline, current)) + b"\n"
