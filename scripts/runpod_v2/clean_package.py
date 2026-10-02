@@ -68,7 +68,9 @@ def clean_archive(base_tar, bundle, parent, out):
                 zstandard.ZstdCompressor(level=3, threads=4, write_checksum=True).stream_writer(
                     raw
                 ) as compressed,
-                tarfile.open(fileobj=compressed, mode="w|", copybufsize=8 * 1024**2) as archive,
+                tarfile.open(
+                    fileobj=compressed, mode="w|", bufsize=8 * 1024**2, copybufsize=8 * 1024**2
+                ) as archive,
             ):
                 for member in source:
                     if not trusted_base_member(member):
@@ -183,7 +185,7 @@ def clean_archive(base_tar, bundle, parent, out):
 def verify_clean_archive(path):
     path, actual, manifest = Path(path), {}, None
     with path.open("rb") as raw, zstandard.ZstdDecompressor().stream_reader(raw) as decoded:
-        with tarfile.open(fileobj=decoded, mode="r|") as archive:
+        with tarfile.open(fileobj=decoded, mode="r|", bufsize=8 * 1024**2) as archive:
             for member in archive:
                 parts = PurePosixPath(member.name).parts
                 if (
