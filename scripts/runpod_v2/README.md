@@ -118,3 +118,60 @@ credentials, unrelated runs and user artifacts are excluded.
 Runpod references: [persistent storage](https://docs.runpod.io/pods/storage/types),
 [file transfer](https://docs.runpod.io/pods/storage/transfer-files),
 [GPU Pod rates](https://www.runpod.io/pricing).
+
+## Corrected recovery preparation
+
+The failed 2026-10-02 pilot is experimental. Its original invoice menus and
+Noul labels admitted shortcuts; its control did not establish improvement.
+Use a newly prepared `--clean` bundle and the original pinned v1 checkpoint.
+Old evaluations, shape-only timing profiles, datasets and launch defaults must
+not be reused as clean evidence.
+
+```bash
+python -m ayaka.training.prepare_recovery --clean \
+  --source-bundle runs/v2-pretraining-20261002-training-ready-final \
+  --checkpoint /absolute/pinned/v1-checkpoint \
+  --training-window-seconds 3600 --out /absolute/new/clean-bundle
+python -m scripts.runpod_v2.clean_package \
+  --base-tar runs/ayaka-v2-runpod-ready.tar \
+  --bundle /absolute/new/clean-bundle --parent /absolute/pinned/v1-checkpoint \
+  --out /absolute/new/ayaka-v2-clean-ready.tar.zst
+```
+
+Packaging requires the `runpod` optional dependency. It reads verified local
+Linux runtime and pinned model files from the old archive, excludes its old
+source/data and private cache files, adds current code/clean data/v1 weights,
+and uses zstd level 3. It verifies the resulting frame and every member hash.
+No model download or dependency install is needed at GPU startup. Upload or
+prestage this archive and its SHA-256 sidecar before starting the paid GPU.
+
+Extract into a fresh directory with `pipefail` and `--no-same-owner`. The existing
+zstd extractor archive can be used if the machine has no zstd binary.
+
+```bash
+set -euo pipefail
+sha256sum -c ayaka-v2-clean-ready.tar.zst.sha256
+mkdir /workspace/clean-kit
+zstd -dc ayaka-v2-clean-ready.tar.zst | tar --no-same-owner -xf - -C /workspace/clean-kit
+bash /workspace/clean-kit/ayaka-v2/scripts/runpod_v2/start_clean.sh plan \
+  --out /workspace/clean-kit/ayaka-v2/outputs/clean-plan.json
+# Execute only with an admitted whole-Pod budget, including QA and delivery.
+bash /workspace/clean-kit/ayaka-v2/scripts/runpod_v2/start_clean.sh execute \
+  --out /workspace/clean-kit/ayaka-v2/outputs/clean-pilot \
+  --training-window-seconds 3600 --evaluation-window-seconds 1800
+```
+
+These allowances are limits, not measured runtime forecasts. New data invalidates
+old profiling. The fresh production preflight must admit the entire 200-step
+schedule before any optimizer update. Parent evaluation, loading, packaging,
+receipt verification and Pod deletion also need an external billing envelope.
+The runner does not allocate, stop or delete Pods. This full archive is larger
+than the previous thin package; prestaging trades local bandwidth/storage for
+less paid GPU setup.
+
+Clean training uses natural rehearsal and new corrected authored cases. Separate
+authored dev/test generators cover rule combinations absent from this training
+curriculum. Dev/test still share some formulas; final test is authored-only and
+does not prove natural, image or official sealed-inclusive JevBench quality.
+Raw improvement, calibrated improvement and published-parent comparison must
+all pass before opening test. Full training and release remain separate decisions.

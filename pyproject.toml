@@ -21,12 +21,14 @@ dependencies = [
 data = ["datasets>=3.0"]
 beam = ["beam-client>=0.2.200"]
 vision = ["pillow>=10.4", "torchvision>=0.21,<1", "transformers>=5.17,<6"]
+runpod = ["zstandard>=0.23,<1"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
     "datasets>=3.0",
     "pillow>=10.4",
     "torchvision>=0.21,<1",
+    "zstandard>=0.23,<1",
 ]
 
 [tool.setuptools.packages.find]
