@@ -1,0 +1,868 @@
+{
+  "status": "complete_screen_failed",
+  "measured_date_kst": "2026-10-03",
+  "scope": "fixed 200-step clean text-only v1 continuation; dev diagnostic, not official JevBench",
+  "execution": {
+    "id": "1b538580-41bc-4048-a5e7-2eaadfebfece",
+    "status": "COMPLETE",
+    "container_id": "function-1b538580-41bc-4048-a5e7-2eaadfebfece-6c1d95fc",
+    "started_at": "2026-10-02T15:01:15.011064Z",
+    "ended_at": "2026-10-02T16:29:57.105868Z",
+    "stub_id": "53c9ad75-f08f-4888-b813-f6e79b17d0c6",
+    "stub_name": "function/job:pilot_serverless",
+    "workspace_id": "2ed0e1d9-e34c-471a-973e-3dccbd89f410",
+    "workspace_name": "4f674a",
+    "created_at": "2026-10-02T15:01:11.782375Z",
+    "updated_at": "2026-10-02T16:29:57.131011Z"
+  },
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "bytes": 33670758400,
+    "torch": "2.8.0+cu128",
+    "cuda": "12.8",
+    "count": 1,
+    "bf16": true
+  },
+  "running_wrapper_revision": "d4990ba",
+  "immutable_kit_sha256": "a25b45abf551dc239d52509c90e52e0524bfc6643ed08543234106a651d3ab5e",
+  "allowance": {
+    "changed_recipe_fields": {
+      "completion_target_seconds": [
+        3600,
+        5400
+      ]
+    },
+    "data_sha256": {
+      "calibration.jsonl": "f1ef2aab222bfdb08c06fa055f6bd8414e5354d24b6c4ccc5b133d29b54de440",
+      "dev.jsonl": "5722121aed02da74b5f5ddfae1cf0d92214f28b04cd6f51c75abd9d5ab08578c",
+      "router_train.jsonl": "01aab91f5d24a8b9897adfccd4cc5096fcd5be376d8aa06098a95fc3708578a4",
+      "test.jsonl": "e60364d3580aeb503a8940d7fae8e8e64715a86cd449b4d196d24a38a8b56e05",
+      "train.jsonl": "08bf6a75efd066185a8eedcce9b00e073642ceee66c94cc98bf5f6b1813c2eb9"
+    },
+    "effective_manifest_sha256": "6ab56c3da2c3fcb387cd7a0fd0ae70886a93ae06cb6f2d107db7400bc31f18ba",
+    "effective_recipe_sha256": "8b6d33c87da091ec5cc7c8f2f18f85bc199bf6b41db9a73ef44ba0a8825ce935",
+    "optimizer_steps": 0,
+    "original_archive_sha256": "a25b45abf551dc239d52509c90e52e0524bfc6643ed08543234106a651d3ab5e",
+    "original_manifest_sha256": "095f22c47d2ce2202b3a7ae5b9fc2b6023ca49e630d301dbd6f9f88ee48387d9",
+    "original_recipe_sha256": "7fa9ef8895051e5956adeba9e7084ddbfd7f3c9afc5f499a5957aa95cba82ab9"
+  },
+  "workload": {
+    "available_prepared_rows": 11776,
+    "counts": {
+      "data_kind": {
+        "authored": 9354,
+        "natural": 3446
+      },
+      "language": {
+        "en": 8499,
+        "ja": 2089,
+        "ko": 2212
+      },
+      "route": {
+        "direct": 8123,
+        "trace": 4677
+      },
+      "type": {
+        "choice": 4215,
+        "noul": 3118,
+        "score": 5467
+      }
+    },
+    "inventory_sha256": "fb0c0897c3cb3480bf1b61c42855b10976d7da4ea7c47d82122dfac02b06e580",
+    "optimizer_steps_executed": 0,
+    "rows_per_step": 64,
+    "schedule_sha256": "cfa266e6bccb03434cea36f78fd85a4644a1b2c366939936bc98cdb8945a41e0",
+    "seed": 20261002,
+    "semantics": "fixed complete schedule; repeated prepared rows are not independent questions or epochs",
+    "steps": 200,
+    "tokens": {
+      "proposal_tokens": 0,
+      "text_tokens": 5744712,
+      "trace_tokens": 898035
+    },
+    "total_rows": 12800,
+    "unique_prepared_rows": 8909,
+    "unique_source_lineages": 1643
+  },
+  "completion": {
+    "complete": true,
+    "full_training_started": false,
+    "official_composite": null,
+    "release_promoted": false,
+    "screen_passed": false,
+    "test_evaluated": false,
+    "training_steps": 200
+  },
+  "verification": {
+    "files_verified": 59,
+    "outcome": {
+      "automatic_retry": false,
+      "elapsed_seconds": 5295.7832784600005,
+      "error": null,
+      "status": "complete"
+    },
+    "completion": {
+      "complete": true,
+      "full_training_started": false,
+      "official_composite": null,
+      "release_promoted": false,
+      "screen_passed": false,
+      "test_evaluated": false,
+      "training_steps": 200
+    },
+    "tensors": {
+      "all_finite": true,
+      "tensor_count": 539
+    }
+  },
+  "receipt": {
+    "bytes": 2166633275,
+    "error": null,
+    "files": 59,
+    "sha256": "ba93c10d4fd5065dfb7e45ebd4231587b120b4e2696c3afbbfcd767101e5ce77",
+    "status": "complete"
+  },
+  "cost": {
+    "initial_credit_usd": "7.032868",
+    "final_observed_credit_usd": "3.856738",
+    "episode_credit_consumed_usd": "3.176130",
+    "cash_spend_display_usd": "0.00",
+    "account_cap_usd": "6.85",
+    "serverless_compute_upper_allowance_usd": "6.69",
+    "automatic_topup": false,
+    "automatic_retry": false,
+    "reserved_a100_rejected": true,
+    "managed_eligible_credit_usd": "0.00",
+    "managed_minimum_usd": "25.00"
+  },
+  "cleanup": {
+    "running_containers": [],
+    "owned_empty_reserved_pool_deleted": true,
+    "staging_volume": "ayaka-clean-20261002",
+    "staging_volume_deleted": true
+  },
+  "training_seconds": 1664.637455701828,
+  "decision_work": {
+    "parent-published-dev": {
+      "questions": 2672,
+      "seconds": 550.1134894330045,
+      "model_id": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+      "cohort_sha256": "6b70fe86d74ff3f50a4e30359fe86785d37d17db3d6c1d1a6ef1d2827dd347af",
+      "summary": {
+        "off": {
+          "by_type": {
+            "choice": {
+              "brier": 0.6258768972160054,
+              "cc": 29.904192620317986,
+              "ece": 0.20226058931280083,
+              "n": 912,
+              "nll": 1.4561953853383032
+            },
+            "noul": {
+              "abstentions": 283,
+              "brier": 0.2815535004428033,
+              "cc": -23.33333333333333,
+              "ece": 0.3030944015063527,
+              "n": 720,
+              "nll": 1.0209816110642818
+            },
+            "score": {
+              "brier": 0.6635964195950196,
+              "cc": 35.06511683815998,
+              "ece": 0.1515502118290617,
+              "n": 1040,
+              "nll": 1.4316866258931902,
+              "rps": 0.1688381261052408
+            }
+          },
+          "cc_equal_types": 13.878658708381545,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 2672,
+          "official_composite": null,
+          "p50_s": 0.19008219249997182,
+          "p95_s": 0.2609556040000426,
+          "proper_loss": 0.882005040835942,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "parent-calibration": {
+      "questions": 1664,
+      "seconds": 354.14376453699947,
+      "model_id": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+      "cohort_sha256": "3176a6cc4835813308d802235a5a99c4499db5e9f7d254475c96b93a784bc57a",
+      "summary": {
+        "off": {
+          "by_type": {
+            "choice": {
+              "brier": 0.5632186199207374,
+              "cc": 41.16844689736216,
+              "ece": 0.10189789850884177,
+              "n": 576,
+              "nll": 1.2507601668275734
+            },
+            "noul": {
+              "abstentions": 176,
+              "brier": 0.27387112736952907,
+              "cc": -29.6875,
+              "ece": 0.2115276913303319,
+              "n": 384,
+              "nll": 0.7968593781818124
+            },
+            "score": {
+              "brier": 0.6248320662451293,
+              "cc": 45.67105524840365,
+              "ece": 0.07150423696095293,
+              "n": 704,
+              "nll": 1.2613459871704324,
+              "rps": 0.14583213787111465
+            }
+          },
+          "cc_equal_types": 19.050667381921937,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 1664,
+          "official_composite": null,
+          "p50_s": 0.19205267450001884,
+          "p95_s": 0.3689307901500342,
+          "proper_loss": 0.7311505609601667,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "parent-raw-dev": {
+      "questions": 2672,
+      "seconds": 554.2205268889975,
+      "model_id": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+      "cohort_sha256": "6b70fe86d74ff3f50a4e30359fe86785d37d17db3d6c1d1a6ef1d2827dd347af",
+      "summary": {
+        "off": {
+          "by_type": {
+            "choice": {
+              "brier": 0.6438220791349937,
+              "cc": 29.904192620317986,
+              "ece": 0.22284404627890353,
+              "n": 912,
+              "nll": 1.5508199220337142
+            },
+            "noul": {
+              "abstentions": 367,
+              "brier": 0.2611457590302998,
+              "cc": -35.27777777777777,
+              "ece": 0.27067834990236106,
+              "n": 720,
+              "nll": 0.9003456523392245
+            },
+            "score": {
+              "brier": 0.679195164008592,
+              "cc": 35.15222693347584,
+              "ece": 0.17953392237138288,
+              "n": 1040,
+              "nll": 1.5244469281249788,
+              "rps": 0.1744966053647809
+            }
+          },
+          "cc_equal_types": 9.926213925338685,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 2672,
+          "official_composite": null,
+          "p50_s": 0.192449588499926,
+          "p95_s": 0.2610173104500631,
+          "proper_loss": 0.8752207265792399,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "pilot-calibration": {
+      "questions": 1664,
+      "seconds": 359.3971591459949,
+      "model_id": "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d",
+      "cohort_sha256": "3176a6cc4835813308d802235a5a99c4499db5e9f7d254475c96b93a784bc57a",
+      "summary": {
+        "off": {
+          "by_type": {
+            "choice": {
+              "brier": 0.5154892463823798,
+              "cc": 46.45667638973409,
+              "ece": 0.05522969010885935,
+              "n": 576,
+              "nll": 1.1655376265794146
+            },
+            "noul": {
+              "abstentions": 278,
+              "brier": 0.20493103371675936,
+              "cc": -51.04166666666668,
+              "ece": 0.09625489010193176,
+              "n": 384,
+              "nll": 0.5793807802507828
+            },
+            "score": {
+              "brier": 0.5853868779351106,
+              "cc": 50.09781193403715,
+              "ece": 0.061409897636622184,
+              "n": 704,
+              "nll": 1.1894644488896042,
+              "rps": 0.1353532847013018
+            }
+          },
+          "cc_equal_types": 15.170940552368188,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 1664,
+          "official_composite": null,
+          "p50_s": 0.19554882400007045,
+          "p95_s": 0.3701726036500531,
+          "proper_loss": 0.6267572305104997,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "pilot-raw-dev": {
+      "questions": 2672,
+      "seconds": 556.6831531559874,
+      "model_id": "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d",
+      "cohort_sha256": "6b70fe86d74ff3f50a4e30359fe86785d37d17db3d6c1d1a6ef1d2827dd347af",
+      "summary": {
+        "off": {
+          "by_type": {
+            "choice": {
+              "brier": 0.6204829594756589,
+              "cc": 28.437753135387407,
+              "ece": 0.1881284041550042,
+              "n": 912,
+              "nll": 1.4846858660816196
+            },
+            "noul": {
+              "abstentions": 497,
+              "brier": 0.22267526471901103,
+              "cc": -57.5,
+              "ece": 0.16128027172665169,
+              "n": 720,
+              "nll": 0.8352796925712004
+            },
+            "score": {
+              "brier": 0.6660921902443078,
+              "cc": 37.48621429071095,
+              "ece": 0.16683726428219905,
+              "n": 1040,
+              "nll": 1.5319362134891867,
+              "rps": 0.17152075009541232
+            }
+          },
+          "cc_equal_types": 2.8079891420327847,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 2672,
+          "official_composite": null,
+          "p50_s": 0.19325906999938525,
+          "p95_s": 0.26619559520008784,
+          "proper_loss": 0.8304954362494107,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "pilot-forced-high": {
+      "questions": 3,
+      "seconds": 57.68803027899867,
+      "model_id": "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d",
+      "cohort_sha256": "eecc356d57f6adcffb13b727332ce0797adb0b76b55b1a87fd52395f11f97980",
+      "summary": {
+        "high": {
+          "by_type": {
+            "choice": {
+              "brier": 1.057031739165312e-08,
+              "cc": 100.0,
+              "ece": 8.20159912109375e-05,
+              "n": 1,
+              "nll": 8.201935470625284e-05
+            },
+            "noul": {
+              "abstentions": 0,
+              "brier": 0.9999952316341023,
+              "cc": -100.0,
+              "ece": 0.999997615814209,
+              "n": 1,
+              "nll": 12.940065375535761
+            },
+            "score": {
+              "brier": 3.6554990495578934e-07,
+              "cc": 99.96345585142686,
+              "ece": 0.0005192160606384277,
+              "n": 1,
+              "nll": 0.0005193508999730924,
+              "rps": 7.010133609616204e-08
+            }
+          },
+          "cc_equal_types": 33.32115195047562,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 3,
+          "official_composite": null,
+          "p50_s": 8.585032785999829,
+          "p95_s": 37.34138606739961,
+          "proper_loss": 4.313382488330602,
+          "reasoning_tokens": 593,
+          "sealed": false
+        }
+      }
+    }
+  },
+  "screen": {
+    "calibrated": {
+      "baseline": {
+        "by_type": {
+          "choice": {
+            "brier": 0.5934808130201735,
+            "cc": 29.904192620317986,
+            "ece": 0.14862624507856748,
+            "n": 912,
+            "nll": 1.3241929310042109
+          },
+          "noul": {
+            "abstentions": 660,
+            "brier": 0.19372773170097332,
+            "cc": -83.33333333333333,
+            "ece": 0.11407235371463526,
+            "n": 720,
+            "nll": 0.6567942127907039
+          },
+          "score": {
+            "brier": 0.6411881362750362,
+            "cc": 34.75267097228877,
+            "ece": 0.14188378871332924,
+            "n": 1040,
+            "nll": 1.3386683517816913,
+            "rps": 0.15972084357261696
+          }
+        },
+        "cc_equal_types": -6.225489913575525,
+        "method": "jevbench-v1.5-headline-A-equal-types-local",
+        "n": 2672,
+        "official_composite": null,
+        "p50_s": 0.192449588499926,
+        "p95_s": 0.2610173104500631,
+        "proper_loss": 0.7135693291225106,
+        "reasoning_tokens": 0,
+        "sealed": false
+      },
+      "candidate": {
+        "by_type": {
+          "choice": {
+            "brier": 0.587006434864966,
+            "cc": 28.437753135387407,
+            "ece": 0.14178044059337688,
+            "n": 912,
+            "nll": 1.3001867909691591
+          },
+          "noul": {
+            "abstentions": 522,
+            "brier": 0.21021836588200804,
+            "cc": -60.55555555555557,
+            "ece": 0.12168050453132546,
+            "n": 720,
+            "nll": 0.7295268015799979
+          },
+          "score": {
+            "brier": 0.6350225853530604,
+            "cc": 37.38603987297282,
+            "ece": 0.13874925341726918,
+            "n": 1040,
+            "nll": 1.3306661932277646,
+            "rps": 0.15812047243912325
+          }
+        },
+        "cc_equal_types": 1.7560791509348874,
+        "method": "jevbench-v1.5-headline-A-equal-types-local",
+        "n": 2672,
+        "official_composite": null,
+        "p50_s": 0.19325906999938525,
+        "p95_s": 0.26619559520008784,
+        "proper_loss": 0.72927802166276,
+        "reasoning_tokens": 0,
+        "sealed": false
+      },
+      "failures": [
+        "type_regression:choice",
+        "probability_regression:noul/nll",
+        "probability_regression:noul/brier",
+        "temporal_numeric_gain_below_5_points"
+      ],
+      "final_test_required": true,
+      "official_composite": null,
+      "paired": {
+        "bootstrap_replicates": 2000,
+        "bootstrap_seed": 15,
+        "bootstrap_unit": "underlying_case",
+        "broken": 55,
+        "cc_delta_95ci": [
+          5.388376564278178,
+          10.654920585480342
+        ],
+        "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+        "fixed": 157,
+        "independent_cases": 495,
+        "mean_nll_gain": -0.008290276691707309,
+        "score_count_tolerance": 1e-06,
+        "score_improved": 546,
+        "score_worsened": 374
+      },
+      "screen_passed": false
+    },
+    "full_training_authorized": false,
+    "official_composite": null,
+    "published_parent": {
+      "baseline": {
+        "by_type": {
+          "choice": {
+            "brier": 0.6258768972160054,
+            "cc": 29.904192620317986,
+            "ece": 0.20226058931280083,
+            "n": 912,
+            "nll": 1.4561953853383032
+          },
+          "noul": {
+            "abstentions": 283,
+            "brier": 0.2815535004428033,
+            "cc": -23.33333333333333,
+            "ece": 0.3030944015063527,
+            "n": 720,
+            "nll": 1.0209816110642818
+          },
+          "score": {
+            "brier": 0.6635964195950196,
+            "cc": 35.06511683815998,
+            "ece": 0.1515502118290617,
+            "n": 1040,
+            "nll": 1.4316866258931902,
+            "rps": 0.1688381261052408
+          }
+        },
+        "cc_equal_types": 13.878658708381545,
+        "method": "jevbench-v1.5-headline-A-equal-types-local",
+        "n": 2672,
+        "official_composite": null,
+        "p50_s": 0.19008219249997182,
+        "p95_s": 0.2609556040000426,
+        "proper_loss": 0.882005040835942,
+        "reasoning_tokens": 0,
+        "sealed": false
+      },
+      "candidate": {
+        "by_type": {
+          "choice": {
+            "brier": 0.587006434864966,
+            "cc": 28.437753135387407,
+            "ece": 0.14178044059337688,
+            "n": 912,
+            "nll": 1.3001867909691591
+          },
+          "noul": {
+            "abstentions": 522,
+            "brier": 0.21021836588200804,
+            "cc": -60.55555555555557,
+            "ece": 0.12168050453132546,
+            "n": 720,
+            "nll": 0.7295268015799979
+          },
+          "score": {
+            "brier": 0.6350225853530604,
+            "cc": 37.38603987297282,
+            "ece": 0.13874925341726918,
+            "n": 1040,
+            "nll": 1.3306661932277646,
+            "rps": 0.15812047243912325
+          }
+        },
+        "cc_equal_types": 1.7560791509348874,
+        "method": "jevbench-v1.5-headline-A-equal-types-local",
+        "n": 2672,
+        "official_composite": null,
+        "p50_s": 0.19325906999938525,
+        "p95_s": 0.26619559520008784,
+        "proper_loss": 0.72927802166276,
+        "reasoning_tokens": 0,
+        "sealed": false
+      },
+      "failures": [
+        "overall_gain_below_5_points",
+        "overall_gain_not_supported_by_paired_95ci",
+        "type_regression:choice",
+        "type_regression:noul",
+        "language_regression:en",
+        "language_regression:ko",
+        "language_regression:ja",
+        "temporal_numeric_gain_below_5_points"
+      ],
+      "final_test_required": true,
+      "official_composite": null,
+      "paired": {
+        "bootstrap_replicates": 2000,
+        "bootstrap_seed": 15,
+        "bootstrap_unit": "underlying_case",
+        "broken": 209,
+        "cc_delta_95ci": [
+          -15.516204031382058,
+          -8.86080748867326
+        ],
+        "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+        "fixed": 45,
+        "independent_cases": 495,
+        "mean_nll_gain": 0.17110349957536855,
+        "score_count_tolerance": 1e-06,
+        "score_improved": 576,
+        "score_worsened": 344
+      },
+      "screen_passed": false
+    },
+    "raw": {
+      "baseline": {
+        "by_type": {
+          "choice": {
+            "brier": 0.6438220791349937,
+            "cc": 29.904192620317986,
+            "ece": 0.22284404627890353,
+            "n": 912,
+            "nll": 1.5508199220337142
+          },
+          "noul": {
+            "abstentions": 367,
+            "brier": 0.2611457590302998,
+            "cc": -35.27777777777777,
+            "ece": 0.27067834990236106,
+            "n": 720,
+            "nll": 0.9003456523392245
+          },
+          "score": {
+            "brier": 0.679195164008592,
+            "cc": 35.15222693347584,
+            "ece": 0.17953392237138288,
+            "n": 1040,
+            "nll": 1.5244469281249788,
+            "rps": 0.1744966053647809
+          }
+        },
+        "cc_equal_types": 9.926213925338685,
+        "method": "jevbench-v1.5-headline-A-equal-types-local",
+        "n": 2672,
+        "official_composite": null,
+        "p50_s": 0.192449588499926,
+        "p95_s": 0.2610173104500631,
+        "proper_loss": 0.8752207265792399,
+        "reasoning_tokens": 0,
+        "sealed": false
+      },
+      "candidate": {
+        "by_type": {
+          "choice": {
+            "brier": 0.6204829594756589,
+            "cc": 28.437753135387407,
+            "ece": 0.1881284041550042,
+            "n": 912,
+            "nll": 1.4846858660816196
+          },
+          "noul": {
+            "abstentions": 497,
+            "brier": 0.22267526471901103,
+            "cc": -57.5,
+            "ece": 0.16128027172665169,
+            "n": 720,
+            "nll": 0.8352796925712004
+          },
+          "score": {
+            "brier": 0.6660921902443078,
+            "cc": 37.48621429071095,
+            "ece": 0.16683726428219905,
+            "n": 1040,
+            "nll": 1.5319362134891867,
+            "rps": 0.17152075009541232
+          }
+        },
+        "cc_equal_types": 2.8079891420327847,
+        "method": "jevbench-v1.5-headline-A-equal-types-local",
+        "n": 2672,
+        "official_composite": null,
+        "p50_s": 0.19325906999938525,
+        "p95_s": 0.26619559520008784,
+        "proper_loss": 0.8304954362494107,
+        "reasoning_tokens": 0,
+        "sealed": false
+      },
+      "failures": [
+        "overall_gain_below_5_points",
+        "overall_gain_not_supported_by_paired_95ci",
+        "type_regression:choice",
+        "type_regression:noul",
+        "probability_regression:score/nll",
+        "language_regression:en",
+        "language_regression:ko",
+        "language_regression:ja",
+        "temporal_numeric_gain_below_5_points"
+      ],
+      "final_test_required": true,
+      "official_composite": null,
+      "paired": {
+        "bootstrap_replicates": 2000,
+        "bootstrap_seed": 15,
+        "bootstrap_unit": "underlying_case",
+        "broken": 160,
+        "cc_delta_95ci": [
+          -10.16308183144524,
+          -4.25679032884187
+        ],
+        "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+        "fixed": 50,
+        "independent_cases": 495,
+        "mean_nll_gain": 0.03719045407279539,
+        "score_count_tolerance": 1e-06,
+        "score_improved": 541,
+        "score_worsened": 379
+      },
+      "screen_passed": false
+    },
+    "screen_passed": false
+  },
+  "group_comparison_raw": {
+    "language": {
+      "en": {
+        "n": 1104,
+        "parent_cc": 9.248955456656438,
+        "pilot_cc": 2.951396612628559,
+        "delta_cc": -6.297558844027879
+      },
+      "ja": {
+        "n": 784,
+        "parent_cc": 7.896324682177415,
+        "pilot_cc": -0.35632835139682584,
+        "delta_cc": -8.25265303357424
+      },
+      "ko": {
+        "n": 784,
+        "parent_cc": 8.618981604064652,
+        "pilot_cc": 1.6561598367403398,
+        "delta_cc": -6.9628217673243125
+      }
+    },
+    "family": {
+      "choice": {
+        "n": 192,
+        "parent_cc": 81.36295180722891,
+        "pilot_cc": 80.79819277108432,
+        "delta_cc": -0.5647590361445936
+      },
+      "judge": {
+        "n": 320,
+        "parent_cc": 62.319851609730506,
+        "pilot_cc": 65.8608688622545,
+        "delta_cc": 3.541017252524
+      },
+      "numeric": {
+        "n": 720,
+        "parent_cc": -24.271798123202597,
+        "pilot_cc": -25.141280567088398,
+        "delta_cc": -0.8694824438858006
+      },
+      "rule_revision": {
+        "n": 720,
+        "parent_cc": 36.83956341130801,
+        "pilot_cc": 32.10694247337434,
+        "delta_cc": -4.7326209379336746
+      },
+      "temporal_numeric": {
+        "n": 720,
+        "parent_cc": -10.011760533243438,
+        "pilot_cc": -26.216704084862055,
+        "delta_cc": -16.20494355161862
+      }
+    },
+    "source": {
+      "None": {
+        "n": 2672,
+        "parent_cc": 9.926213925338685,
+        "pilot_cc": 2.8079891420327847,
+        "delta_cc": -7.1182247833059
+      }
+    },
+    "partition": {
+      "fixed": {
+        "n": 2672,
+        "parent_cc": 9.926213925338685,
+        "pilot_cc": 2.8079891420327847,
+        "delta_cc": -7.1182247833059
+      }
+    }
+  },
+  "forced_high": [
+    {
+      "id": "independent-recovery-1/dev/0/en/noul",
+      "type": "noul",
+      "route": "reasoned",
+      "budget": 1024,
+      "reasoning_tokens": 415,
+      "finish_reason": "eos"
+    },
+    {
+      "id": "independent-recovery-1/dev/0/en/choice",
+      "type": "choice",
+      "route": "reasoned",
+      "budget": 1024,
+      "reasoning_tokens": 89,
+      "finish_reason": "eos"
+    },
+    {
+      "id": "independent-recovery-1/dev/0/en/score",
+      "type": "score",
+      "route": "reasoned",
+      "budget": 1024,
+      "reasoning_tokens": 89,
+      "finish_reason": "eos"
+    }
+  ],
+  "checkpoint_files": {
+    "recovery/pilot/checkpoint/adapter/README.md": {
+      "bytes": 5128,
+      "sha256": "11dd55d83a1ea0f16dba855f17ba84aac849c05212940fca84010cdf49d1cd42"
+    },
+    "recovery/pilot/checkpoint/adapter/adapter_config.json": {
+      "bytes": 1281,
+      "sha256": "96edce9909d3ec2bd702c2b463af037e6e970a08c706fa7fa663a09300bd1e41"
+    },
+    "recovery/pilot/checkpoint/adapter/adapter_model.safetensors": {
+      "bytes": 279118512,
+      "sha256": "ca65a26e42fa3e6d503b20b70a89b6b65e8399f2682ce9490ead83e5fd6beab8"
+    },
+    "recovery/pilot/checkpoint/ayaka_config.json": {
+      "bytes": 654,
+      "sha256": "692afe6337d3fb9a92c57e6cb0f2cc3a958d9ce57607bf9b2b47bf0c8cde77a6"
+    },
+    "recovery/pilot/checkpoint/complete.json": {
+      "bytes": 30,
+      "sha256": "8d46e55c843e12ea08ae7b1cb99f78e87ea79e0065600863aa965b8bac498076"
+    },
+    "recovery/pilot/checkpoint/electra_config.json": {
+      "bytes": 654,
+      "sha256": "692afe6337d3fb9a92c57e6cb0f2cc3a958d9ce57607bf9b2b47bf0c8cde77a6"
+    },
+    "recovery/pilot/checkpoint/head.pt": {
+      "bytes": 23229895,
+      "sha256": "f6b06dd266e96e1fffca6a546ec01309c6fd7ded4be2fe988416a05e89a831d3"
+    },
+    "recovery/pilot/checkpoint/head.safetensors": {
+      "bytes": 23224936,
+      "sha256": "3a20d7edbb3dfc0b09d23e4d191a4cb34115482318ee600a32b5827b62d473b6"
+    },
+    "recovery/pilot/checkpoint/meta.json": {
+      "bytes": 2055,
+      "sha256": "4aca5a0f826194ae1ea50c144a8935af901e52b5c747c08010a2f7714984982f"
+    }
+  },
+  "limitations": [
+    "No independent test opened because prespecified dev screen failed.",
+    "No full training, publication, promotion, new model selection or paid retry.",
+    "Three forced-high probes verify execution, not reasoning quality.",
+    "Text-only training; image and proposal quality not measured.",
+    "Local synthetic and natural dev diagnostics are not an official sealed-inclusive JevBench score.",
+    "NLL temperature fitting can increase Noul abstention and decrease thresholded competence.",
+    "Measured balance delta includes preparation and unsuccessful zero-training setup attempts."
+  ]
+}
