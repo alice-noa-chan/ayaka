@@ -1,0 +1,14 @@
+# The native three-GPU comparison runtime, pinned before deployment.
+torch==2.8.0
+torchvision==0.23.0
+transformers==5.17.0
+peft==0.21.0
+accelerate==1.15.0
+safetensors==0.8.0
+huggingface_hub==1.33.0
+tokenizers==0.23.2
+numpy==2.1.2
+flash-linear-attention==0.5.0
+datasets==5.0.1
+pillow==11.3.0
+pytest==8.4.2
