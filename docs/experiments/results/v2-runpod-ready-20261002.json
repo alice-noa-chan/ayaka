@@ -1,0 +1,117 @@
+{
+  "date": "2026-10-02",
+  "status": "offline_runpod_kit_ready_no_pretrained_training",
+  "target": {
+    "provider": "Runpod",
+    "gpu": "RTX PRO 6000 Blackwell 96GB",
+    "gpu_count": 1,
+    "cpu_threads": 4,
+    "persistent_workspace_gb": 100
+  },
+  "archive": {
+    "status": "complete_archive_and_all_members_verified",
+    "archive": "runs\\ayaka-v2-runpod-ready.tar",
+    "bytes": 23314565120,
+    "sha256": "3db50bf77cae01eb7e5575aee41a1df7cd1a8602d2dc6948484cfa5eee89d701",
+    "kit_manifest_sha256": "c8363ba710fb790d1b0452597fe49fceaa8393376131506e4cc0dd0aeca0830b",
+    "verified_file_records": 28877,
+    "seconds": 433.0629999998491,
+    "pretrained_optimizer_steps": 0
+  },
+  "kit": {
+    "files": 28877,
+    "bytes": 23253810541,
+    "manifest_sha256": "c8363ba710fb790d1b0452597fe49fceaa8393376131506e4cc0dd0aeca0830b",
+    "pinned_weight_digest_matches": true,
+    "pretrained_optimizer_steps": 0
+  },
+  "runtime": {
+    "locked_distributions_verified": 79,
+    "manylinux_tags_above_2_28": [],
+    "pretrained_optimizer_steps": 0,
+    "python": "3.11.14",
+    "torch": "2.8.0+cu128",
+    "cuda_runtime": "12.8",
+    "requirements_lock_sha256": "5bb66ee6168e6575ff50541738e47d501cfa15ca25b8f0eec65a11ef658fbd8b"
+  },
+  "offline_audit": {
+    "status": "offline_kit_verified_no_training",
+    "optimizer_steps": 0,
+    "steps": 1200,
+    "row_exposures": 76800,
+    "splits": {
+      "train": 2752,
+      "router_train": 1472,
+      "dev": 1472,
+      "calibration": 1472,
+      "test": 1472
+    },
+    "python": "3.11.14",
+    "torch": "2.8.0+cu128",
+    "cuda_runtime": "12.8",
+    "cpu_threads": 4,
+    "tokenizer_vocab": 262144,
+    "external_network_disabled": true,
+    "cuda_devices_hidden": true,
+    "log": "runs/runpod-kit-offline-audit-20261002.log"
+  },
+  "data": {
+    "bundle_manifest_sha256": "7b11be347d7a319663102b26aa6ec91de5947f23ae9efc6d6ed3aaabad9cad7e",
+    "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105",
+    "steps": 1200,
+    "rows_per_step": 64,
+    "row_exposures": 76800,
+    "train_samples": 2752,
+    "train_questions": 3872,
+    "train_rows": 5024,
+    "each_non_train_split_samples": 1472,
+    "each_non_train_split_questions": 1824,
+    "each_non_train_split_rows": 2976
+  },
+  "model": {
+    "backbone": "google/gemma-4-E4B-it",
+    "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "weight_bytes": 15992595884,
+    "weight_sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503"
+  },
+  "tests": {
+    "windows_full": {
+      "tests": 448,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 447,
+      "result_path": "runs/runpod-preparation-20261002-final-integration.xml"
+    },
+    "linux_full_before_last_copy_binding_test": {
+      "tests": 447,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 446,
+      "result_path": "runs/runpod-linux-offline-20261002-tests-final.xml"
+    },
+    "linux_latest_kit": {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 7,
+      "result_path": "runs/runpod-linux-offline-kit-tests-20261002.xml"
+    }
+  },
+  "pretrained_optimizer_steps": 0,
+  "paid_gpu_jobs_started_for_this_preparation": 0,
+  "uploaded_to_runpod": false,
+  "runpod_host_gpu_preflight_executed": false,
+  "main_training_complete": false,
+  "trained_quality_evaluation_complete": false,
+  "pod_start_command": "bash /workspace/ayaka-v2/scripts/runpod_v2/start.sh",
+  "remaining": [
+    "upload/extract on persistent Runpod volume",
+    "host GPU/driver/memory and complete-budget checks",
+    "full native pretrained training",
+    "scoped routing/calibration and independent quality evaluation"
+  ],
+  "forecast_scope": "Earlier 1h56m/$4.05 typical and 3h12m/$6.68 conservative figures are benchmark-derived training forecasts, not a measured Runpod run; transfer, archive extraction/integrity audit, storage and evaluation are additional."
+}

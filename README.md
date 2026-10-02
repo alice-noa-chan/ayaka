@@ -513,6 +513,11 @@ A checkpoint directory contains `electra_config.json`, the LoRA `adapter/`,
 The experimental v2 controls, native-backbone support, joint reasoning training
 and bounded H100 exploration are documented in [Ayaka v2](docs/experiments/AYAKA_V2.md).
 Published v1 checkpoints keep their existing defaults; v2 results are reported separately.
+The [Runpod offline deployment guide](scripts/runpod_v2/README.md) starts the complete
+native training schedule from a prepared archive. The
+[2026-10-02 preparation report](docs/experiments/V2_RUNPOD_READY_2026-10-02.md)
+records the actual archive, pinned runtime and offline verification; it does not
+claim a completed Runpod training or quality evaluation.
 The [2026-10-01 exploration findings](docs/experiments/V2_FINDINGS_2026-10-01.md)
 include measured improvements, multilingual regressions and the closed GPU-time audit.
 Native image inputs and opt-in text Choice generation/Other expansion are described
