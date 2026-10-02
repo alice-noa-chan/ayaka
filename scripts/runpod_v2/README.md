@@ -6,6 +6,12 @@ exact Ayaka source, and all five audited data splits. Startup never runs pip,
 downloads model/dataset files, or rebuilds supervision. A network connection is
 not needed for the audit or native training data/model reads.
 
+The preferred transport is `ayaka-v2-runpod-ready.tar.zst`, compressed with
+Zstandard **level 3, four threads**: 15.62GB instead of 23.31GB (32.98% smaller).
+The entire decompressed tar's SHA-256 matches the previously verified original.
+A small static Linux x86_64 extractor is provided separately, so the Pod needs
+no zstd installation. The native training kit and its manifest are unchanged.
+
 ## Deploy
 
 Use one **RTX PRO 6000 Blackwell 96GB**, Linux x86_64 (Ubuntu 22.04/24.04 is a
@@ -15,16 +21,25 @@ kit coexist. The runtime uses four CPU threads. The complete checkpoint schedule
 needs at least 20GiB free after extraction; the launcher checks this before
 model loading. Use a persistent volume for both the kit and outputs.
 
-Prestage the archive and checksum on the attached volume before GPU startup
+Prestage the compressed archive and checksum on the attached volume before GPU startup
 where possible. The package is a local artifact; creating it does not upload it
-to Runpod. After placing both files on `/workspace`:
+to Runpod. Also upload `runpod-zstd-linux-x86_64.tar.gz` and its `.sha256`
+sidecar when the host does not already have zstd. With all four files on
+`/workspace`, use the included extractor:
 
 ```bash
+set -euo pipefail
 cd /workspace
-sha256sum -c ayaka-v2-runpod-ready.tar.sha256
-tar -xf ayaka-v2-runpod-ready.tar
+sha256sum -c ayaka-v2-runpod-ready.tar.zst.sha256
+sha256sum -c runpod-zstd-linux-x86_64.tar.gz.sha256
+tar -xzf runpod-zstd-linux-x86_64.tar.gz
+./runpod-zstd-linux-x86_64/zstd -dc ayaka-v2-runpod-ready.tar.zst | tar -xf -
 bash /workspace/ayaka-v2/scripts/runpod_v2/start.sh
 ```
+
+If `zstd` is already installed, `tar --zstd -xf ayaka-v2-runpod-ready.tar.zst`
+replaces the extractor steps. Streaming extraction does not create an extra
+23GB intermediate tar. Shell `pipefail` prevents training after a failed decode.
 
 If the kit has already been extracted on the attached volume, use this as the
 Pod template start command:
@@ -87,6 +102,11 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES="" /absolute/new/runtime/bin/python3.11 \
   --snapshot /absolute/pinned/huggingface/snapshot \
   --runtime /absolute/new/runtime --out /absolute/new/kit \
   --archive /absolute/ayaka-v2-runpod-ready.tar
+# On the CPU preparation host with zstd available:
+zstd -3 -T4 --check /absolute/ayaka-v2-runpod-ready.tar \
+  -o /absolute/ayaka-v2-runpod-ready.tar.zst
+cd /absolute
+sha256sum ayaka-v2-runpod-ready.tar.zst > ayaka-v2-runpod-ready.tar.zst.sha256
 ```
 
 Runtime preparation needs network access on the CPU machine; deployed training

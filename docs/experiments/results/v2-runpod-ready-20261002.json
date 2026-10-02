@@ -108,10 +108,47 @@
   "trained_quality_evaluation_complete": false,
   "pod_start_command": "bash /workspace/ayaka-v2/scripts/runpod_v2/start.sh",
   "remaining": [
-    "upload/extract on persistent Runpod volume",
+    "upload compressed archive/checksums and portable extractor, then stream-extract on persistent Runpod volume",
     "host GPU/driver/memory and complete-budget checks",
     "full native pretrained training",
     "scoped routing/calibration and independent quality evaluation"
   ],
-  "forecast_scope": "Earlier 1h56m/$4.05 typical and 3h12m/$6.68 conservative figures are benchmark-derived training forecasts, not a measured Runpod run; transfer, archive extraction/integrity audit, storage and evaluation are additional."
+  "forecast_scope": "Earlier 1h56m/$4.05 typical and 3h12m/$6.68 conservative figures are benchmark-derived training forecasts, not a measured Runpod run; transfer, archive extraction/integrity audit, storage and evaluation are additional.",
+  "compressed_transport": {
+    "status": "zstd_level_3_complete_exact_tar_roundtrip_verified",
+    "path": "runs/ayaka-v2-runpod-ready.tar.zst",
+    "bytes": 15624451321,
+    "sha256": "48e862818043a1ff463554b8dc169b0dbb5afddb11b3d0937b74b2623ca616af",
+    "source_tar_bytes": 23314565120,
+    "source_tar_sha256": "3db50bf77cae01eb7e5575aee41a1df7cd1a8602d2dc6948484cfa5eee89d701",
+    "restored_tar_bytes": 23314565120,
+    "restored_tar_sha256": "3db50bf77cae01eb7e5575aee41a1df7cd1a8602d2dc6948484cfa5eee89d701",
+    "level": 3,
+    "threads": 4,
+    "frame_checksum": true,
+    "python_zstandard": "0.25.0",
+    "libzstd": "1.5.7",
+    "compression_seconds": 36.625,
+    "verification_seconds": 55.936999999918044,
+    "size_reduction_percent": 32.98416144336815,
+    "pretrained_optimizer_steps": 0
+  },
+  "portable_zstd_extractor": {
+    "path": "runs/runpod-zstd-linux-x86_64.tar.gz",
+    "bytes": 554970,
+    "sha256": "6e2d1bbc6ca77507b2bb76a2040bcc06c2fc50a60d6e427dab4a687ac2fad4de",
+    "binary_sha256": "d65b232212f4db6027791b40763ad96313eb731b7286b180eef45adfa9c764bb",
+    "version": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
+    "static_musl": true,
+    "musl_version": "1.2.5",
+    "source_url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+    "source_sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+    "official_source_checksum_verified": true,
+    "network_disabled_smoke": true,
+    "streamed_tar_extract_verified": true,
+    "executable_mode_preserved": true,
+    "corrupt_decode_blocks_next_command": true
+  },
+  "preferred_archive": "runs/ayaka-v2-runpod-ready.tar.zst",
+  "sealed_kit_unchanged_after_transport_compression": true
 }

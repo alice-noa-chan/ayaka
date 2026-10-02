@@ -6,8 +6,9 @@ for this preparation, and no pretrained optimizer update was performed.
 
 ## Actual artifact
 
-The local archive is `runs/ayaka-v2-runpod-ready.tar`; its sidecar is
-`runs/ayaka-v2-runpod-ready.tar.sha256`. The machine-readable
+The preferred local archive is `runs/ayaka-v2-runpod-ready.tar.zst`; its sidecar is
+`runs/ayaka-v2-runpod-ready.tar.zst.sha256`. The original uncompressed tar remains
+available. The machine-readable
 [preparation result](results/v2-runpod-ready-20261002.json) records the final
 archive size/SHA-256 and kit-manifest SHA-256. These are hashes of the actual
 assembled files, rather than a planned build.
@@ -21,6 +22,11 @@ temporary preparation logs stay outside Git.
 
 | Prepared item | Actual value |
 | --- | --- |
+| Preferred Zstandard archive size | 15,624,451,321 bytes (15.62GB / 14.55GiB), 32.98% smaller |
+| Compression | Level 3, four threads, frame checksum enabled, libzstd 1.5.7 |
+| Compressed archive SHA-256 | `48e862818043a1ff463554b8dc169b0dbb5afddb11b3d0937b74b2623ca616af` |
+| Portable extractor archive | 554,970 bytes, static Linux x86_64, zstd 1.5.7 / musl 1.2.5 |
+| Extractor archive SHA-256 | `6e2d1bbc6ca77507b2bb76a2040bcc06c2fc50a60d6e427dab4a687ac2fad4de` |
 | Archive size | 23,314,565,120 bytes (23.31GB / 21.71GiB) |
 | Archive SHA-256 | `3db50bf77cae01eb7e5575aee41a1df7cd1a8602d2dc6948484cfa5eee89d701` |
 | Kit file records | 28,877, independently verified inside the archive |
@@ -61,6 +67,13 @@ An independent archive reader also verifies the complete tar SHA-256 and every
 contained file's hash/size or relative symlink against the archived manifest.
 This catches packaging corruption in addition to checking the source kit.
 
+The additional Zstandard transport compression took 36.63 seconds locally;
+complete decompression/hash verification and compressed-file hashing took
+55.94 seconds. All 23,314,565,120 restored bytes hash to the original tar's
+SHA-256. The sealed kit is unchanged, including all 28,877 verified records.
+The compressed frame includes its original content size and checksum.
+This CPU operation does not load model weights or invoke the training pipeline.
+
 Windows full suite: **447 passed, 1 existing optional Beam skip**. Linux full
 suite in the pinned CUDA runtime, with external networking disabled and GPU
 hidden: **446 passed, the same skip**; the subsequently added pinned-weight
@@ -82,14 +95,28 @@ Use a Linux x86_64 Pod with a CUDA 12.8-compatible NVIDIA driver and **100GB
 persistent `/workspace` capacity**, leaving at least 20GiB free for checkpoint
 outputs after extracting the kit. Prestage the archive and sidecar on the
 volume before starting the paid GPU where possible. Local preparation does
-not upload these files or configure a Runpod volume/template.
+not upload these files or configure a Runpod volume/template. A static
+Linux x86_64 zstd extractor is supplied in `runs/runpod-zstd-linux-x86_64.tar.gz`
+with its own checksum and license notices. It needs no shared libraries or
+Python installation; prepare all four transport files before GPU startup.
 
 ```bash
+set -euo pipefail
 cd /workspace
-sha256sum -c ayaka-v2-runpod-ready.tar.sha256
-tar -xf ayaka-v2-runpod-ready.tar
+sha256sum -c ayaka-v2-runpod-ready.tar.zst.sha256
+sha256sum -c runpod-zstd-linux-x86_64.tar.gz.sha256
+tar -xzf runpod-zstd-linux-x86_64.tar.gz
+./runpod-zstd-linux-x86_64/zstd -dc ayaka-v2-runpod-ready.tar.zst | tar -xf -
 bash /workspace/ayaka-v2/scripts/runpod_v2/start.sh
 ```
+
+An existing host zstd can instead use `tar --zstd -xf`. Streaming extraction
+avoids storing a second, uncompressed intermediate tar, and `pipefail` stops
+the command sequence on a decompression failure. The decoder is built from
+the [official Zstandard 1.5.7 source](https://github.com/facebook/zstd/releases/tag/v1.5.7),
+whose release SHA-256 is checked before compiling with musl 1.2.5. The delivered
+binary's static linkage, version, round-trip decode, tar permissions and failed
+decode exit status are verified locally; the machine report records its digest.
 
 Once extracted, the last line is the Pod start command. No pip installation,
 dataset generation or model download occurs. Integrity checks, native backward
