@@ -34,6 +34,17 @@ def digest(path):
     return h.hexdigest()
 
 
+def validate_hardware(hardware, observed):
+    name, minimum = {"A100-80": ("A100", 75), "RTX5090": ("RTX 5090", 30)}[hardware]
+    if (
+        observed["count"] != 1
+        or name not in observed["gpu"]
+        or observed["bytes"] <= minimum * 1024**3
+        or not observed["bf16"]
+    ):
+        raise ValueError("GPU differs from the explicitly admitted hardware")
+
+
 def write_json(path, value):
     Path(path).write_bytes(canonical(value) + b"\n")
 
@@ -226,7 +237,7 @@ def package_results(directory, archive):
     return {"sha256": digest(archive), "bytes": archive.stat().st_size, "files": len(files)}
 
 
-def execute(volume, run_name, expires_at):
+def execute(volume, run_name, expires_at, hardware="A100-80"):
     volume = Path(volume)
     if not math.isfinite(expires_at) or not time.time() < expires_at <= time.time() + 10800:
         raise ValueError("require the real backend expiry within three hours")
@@ -259,10 +270,9 @@ def execute(volume, run_name, expires_at):
         python = kit / "runtime/bin/python3.11"
         probe = (
             "import json,torch; p=torch.cuda.get_device_properties(0); "
-            "assert torch.cuda.device_count()==1 and 'A100' in p.name "
-            "and p.total_memory>75*1024**3 and torch.cuda.is_bf16_supported(); "
             "print(json.dumps(dict(gpu=p.name,bytes=p.total_memory,torch=torch.__version__,"
-            "cuda=torch.version.cuda)))"
+            "cuda=torch.version.cuda,count=torch.cuda.device_count(),"
+            "bf16=torch.cuda.is_bf16_supported())))"
         )
         result = subprocess.run(
             [str(python), "-c", probe], capture_output=True, text=True, timeout=120
@@ -270,6 +280,7 @@ def execute(volume, run_name, expires_at):
         (output / "hardware.json").write_text(result.stdout)
         (output / "hardware.stderr.log").write_text(result.stderr)
         result.check_returncode()
+        validate_hardware(hardware, json.loads(result.stdout))
         remaining = min(
             JOB_SECONDS - (time.monotonic() - started) - 300,
             expires_at - time.time() - 600,

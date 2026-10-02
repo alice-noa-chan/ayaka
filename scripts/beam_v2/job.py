@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import time
 
 import worker
 from beam import Image, Volume, function
@@ -45,15 +46,33 @@ def pilot(expires_at):
     return worker.execute(MOUNT, "clean-pilot-20261002", expires_at)
 
 
+@function(
+    name="ayaka-clean-serverless-20261002",
+    gpu="RTX5090",
+    cpu=2,
+    memory="32Gi",
+    timeout=9700,
+    retries=0,
+    headless=True,
+    image=image,
+    volumes=[volume],
+    allow_marketplace=False,
+)
+def pilot_serverless():
+    return worker.execute(MOUNT, "clean-pilot-20261002", time.time() + 9700, "RTX5090")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "pilot", "build"))
+    parser.add_argument("action", choices=("prepare", "pilot", "serverless", "build"))
     parser.add_argument("--reservation-expires-at", type=float)
     args = parser.parse_args()
     if args.action == "build":
         print(json.dumps({"image_built": image.build().success}))
     elif args.action == "prepare":
         print(json.dumps(prepare.remote()))
+    elif args.action == "serverless":
+        print(json.dumps(pilot_serverless.remote()))
     else:
         if args.reservation_expires_at is None:
             parser.error("pilot requires the actual backend reservation expiry")

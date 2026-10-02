@@ -86,3 +86,11 @@ def test_cpu_failure_is_durable_without_a_client_log_connection(tmp_path, monkey
     receipt = json.loads((tmp_path / "ready.json").read_text())
     assert receipt["ready"] is False
     assert "local disk" in receipt["error"]
+
+
+def test_hardware_gate_rejects_smaller_cards_and_device_fallbacks():
+    good = {"count": 1, "gpu": "NVIDIA GeForce RTX 5090", "bytes": 32 * 1024**3, "bf16": True}
+    worker.validate_hardware("RTX5090", good)
+    for changed in ({"bytes": 24 * 1024**3}, {"gpu": "RTX 4090"}, {"bf16": False}):
+        with pytest.raises(ValueError, match="hardware"):
+            worker.validate_hardware("RTX5090", {**good, **changed})
