@@ -62,4 +62,5 @@ known-first-party = ["ayaka"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
