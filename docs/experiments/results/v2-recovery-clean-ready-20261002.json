@@ -1,0 +1,1000 @@
+{
+  "experiment": "ayaka-clean-recovery-preparation-20261002",
+  "status": "cpu_prepared_and_archive_verified",
+  "gpu_allocated": false,
+  "optimizer_steps_executed": 0,
+  "additional_gpu_cost_usd": 0,
+  "model_quality_measured": false,
+  "full_training_started": false,
+  "release_promoted": false,
+  "official_composite": null,
+  "prepared_source_revision": "10ad5f07ca8ef1f21bff08148d8bcc0715db3b26",
+  "prepared_manifest_sha256": "095f22c47d2ce2202b3a7ae5b9fc2b6023ca49e630d301dbd6f9f88ee48387d9",
+  "parent_checkpoint_sha256": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+  "counts": {
+    "calibration": {
+      "families": {
+        "choice": 192,
+        "judge": 64,
+        "numeric": 129,
+        "rule_revision": 126,
+        "temporal_numeric": 129
+      },
+      "languages": {
+        "en": 256,
+        "ja": 192,
+        "ko": 192
+      },
+      "modalities": {
+        "text": 640
+      },
+      "questions": 1664,
+      "samples": 640,
+      "types": {
+        "choice": 576,
+        "noul": 384,
+        "score": 704
+      }
+    },
+    "dev": {
+      "families": {
+        "choice": 192,
+        "judge": 64,
+        "numeric": 240,
+        "rule_revision": 240,
+        "temporal_numeric": 240
+      },
+      "languages": {
+        "en": 368,
+        "ja": 304,
+        "ko": 304
+      },
+      "modalities": {
+        "text": 976
+      },
+      "questions": 2672,
+      "samples": 976,
+      "types": {
+        "choice": 912,
+        "noul": 720,
+        "score": 1040
+      }
+    },
+    "router_train": {
+      "families": {
+        "choice": 192,
+        "judge": 64,
+        "numeric": 63,
+        "rule_revision": 63,
+        "temporal_numeric": 66
+      },
+      "languages": {
+        "en": 192,
+        "ja": 128,
+        "ko": 128
+      },
+      "modalities": {
+        "text": 448
+      },
+      "questions": 1088,
+      "samples": 448,
+      "types": {
+        "choice": 384,
+        "noul": 192,
+        "score": 512
+      }
+    },
+    "test": {
+      "families": {
+        "numeric": 240,
+        "rule_revision": 240,
+        "temporal_numeric": 240
+      },
+      "languages": {
+        "en": 240,
+        "ja": 240,
+        "ko": 240
+      },
+      "modalities": {
+        "text": 720
+      },
+      "questions": 2160,
+      "samples": 720,
+      "types": {
+        "choice": 720,
+        "noul": 720,
+        "score": 720
+      }
+    },
+    "train": {
+      "families": {
+        "choice": 1280,
+        "judge": 256,
+        "numeric": 513,
+        "rule_revision": 510,
+        "temporal_numeric": 513
+      },
+      "languages": {
+        "en": 1024,
+        "ja": 1024,
+        "ko": 1024
+      },
+      "modalities": {
+        "text": 3072
+      },
+      "questions": 7168,
+      "samples": 3072,
+      "types": {
+        "choice": 2816,
+        "noul": 1536,
+        "score": 2816
+      }
+    }
+  },
+  "model": {
+    "architecture": "gemma4",
+    "base_parameters": 7941100832,
+    "context_audit": {
+      "calibration": {
+        "max_tokens": 1342,
+        "prepared_rows": 2816
+      },
+      "dev": {
+        "max_tokens": 1620,
+        "prepared_rows": 2672
+      },
+      "router_train": {
+        "max_tokens": 1624,
+        "prepared_rows": 1664
+      },
+      "test": {
+        "max_tokens": 252,
+        "prepared_rows": 2160
+      },
+      "train": {
+        "max_tokens": 2574,
+        "prepared_rows": 11776
+      }
+    },
+    "initialization": "checkpoint_continuation",
+    "local_weights_ready": true,
+    "native_context": 131072,
+    "parameter_limit": 14000000000,
+    "parent_sha256": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+    "processor": "Gemma4Processor",
+    "repo": "google/gemma-4-E4B-it",
+    "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "tokenizer": "google/gemma-4-E4B-it",
+    "total_parameters": 8016669606,
+    "trainable_parameters": 75568774,
+    "training_context": 4096,
+    "vision_policy": "frozen",
+    "weight_loading": "not_loaded_meta_only"
+  },
+  "workload": {
+    "available_prepared_rows": 11776,
+    "counts": {
+      "data_kind": {
+        "authored": 9354,
+        "natural": 3446
+      },
+      "language": {
+        "en": 8499,
+        "ja": 2089,
+        "ko": 2212
+      },
+      "route": {
+        "direct": 8123,
+        "trace": 4677
+      },
+      "type": {
+        "choice": 4215,
+        "noul": 3118,
+        "score": 5467
+      }
+    },
+    "inventory_sha256": "fb0c0897c3cb3480bf1b61c42855b10976d7da4ea7c47d82122dfac02b06e580",
+    "optimizer_steps_executed": 0,
+    "rows_per_step": 64,
+    "schedule_sha256": "cfa266e6bccb03434cea36f78fd85a4644a1b2c366939936bc98cdb8945a41e0",
+    "seed": 20261002,
+    "semantics": "fixed complete schedule; repeated prepared rows are not independent questions or epochs",
+    "steps": 200,
+    "tokens": {
+      "proposal_tokens": 0,
+      "text_tokens": 5744712,
+      "trace_tokens": 898035
+    },
+    "total_rows": 12800,
+    "unique_prepared_rows": 8909,
+    "unique_source_lineages": 1643
+  },
+  "oracle_audit": {
+    "verified": true,
+    "independent_cases": 704,
+    "typed_questions": 6336,
+    "scope": "Actual prepared generation-3 authored rows; independent UTC/calendar and integer half-up target recomputation. Nonempty traces checked; arbitrary prose trace validity is not certified."
+  },
+  "shortcut_audit": {
+    "calibration": {
+      "baselines": {
+        "position/numeric": {
+          "cases": 43,
+          "histogram": {
+            "0": 7,
+            "1": 12,
+            "2": 8,
+            "3": 8,
+            "4": 8
+          },
+          "median_accuracy": 0.18604651162790697
+        },
+        "position/rule_revision": {
+          "cases": 42,
+          "histogram": {
+            "0": 24,
+            "1": 18
+          },
+          "median_accuracy": 0.42857142857142855
+        },
+        "position/temporal_numeric": {
+          "cases": 43,
+          "histogram": {
+            "0": 6,
+            "1": 6,
+            "2": 9,
+            "3": 1,
+            "4": 5,
+            "5": 7,
+            "6": 9
+          },
+          "median_accuracy": 0.023255813953488372
+        },
+        "rank/numeric": {
+          "cases": 43,
+          "histogram": {
+            "0": 6,
+            "1": 11,
+            "2": 8,
+            "3": 11,
+            "4": 7
+          },
+          "median_accuracy": 0.18604651162790697
+        },
+        "rank/rule_revision": {
+          "cases": 42,
+          "histogram": {
+            "0": 29,
+            "1": 13
+          },
+          "median_accuracy": 0.30952380952380953
+        },
+        "rank/temporal_numeric": {
+          "cases": 43,
+          "histogram": {
+            "0": 19,
+            "1": 6,
+            "2": 3,
+            "3": 4,
+            "4": 5,
+            "5": 3,
+            "6": 3
+          },
+          "median_accuracy": 0.09302325581395349
+        },
+        "year_parity/numeric": {
+          "best_parity_accuracy": 0.627906976744186,
+          "cases": 43
+        },
+        "year_parity/rule_revision": {
+          "best_parity_accuracy": 0.5238095238095238,
+          "cases": 42
+        },
+        "year_parity/temporal_numeric": {
+          "best_parity_accuracy": 0.6046511627906976,
+          "cases": 43
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "scope": "Targeted median/year shortcut checks and visible-only priors; not a proof that all shortcuts are absent.",
+      "uniform": {
+        "choice": {
+          "by_type": {
+            "choice": {
+              "brier": 0.7207589285714282,
+              "cc": 1.3626509755342238,
+              "ece": 0.037053571428571436,
+              "n": 128,
+              "nll": 1.4218136580278322
+            }
+          },
+          "cc_equal_types": 1.3626509755342238,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 128,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 1.4218136580278322,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "noul": {
+          "by_type": {
+            "noul": {
+              "abstentions": 128,
+              "brier": 0.25,
+              "cc": -100.0,
+              "ece": 0.0625,
+              "n": 128,
+              "nll": 0.6931471805599462
+            }
+          },
+          "cc_equal_types": -100.0,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 128,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.6931471805599462,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "score": {
+          "by_type": {
+            "score": {
+              "brier": 0.7207589285714282,
+              "cc": 13.143932911175792,
+              "ece": 0.037053571428571436,
+              "n": 128,
+              "nll": 1.4218136580278322,
+              "rps": 0.22154017857142866
+            }
+          },
+          "cc_equal_types": 13.143932911175792,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 128,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.22154017857142866,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "dev": {
+      "baselines": {
+        "position/numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 12,
+            "1": 14,
+            "2": 14,
+            "3": 22,
+            "4": 18
+          },
+          "median_accuracy": 0.175
+        },
+        "position/rule_revision": {
+          "cases": 40,
+          "histogram": {
+            "0": 17,
+            "1": 23
+          },
+          "median_accuracy": 0.575
+        },
+        "position/temporal_numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 25,
+            "1": 21,
+            "2": 9,
+            "3": 13,
+            "4": 1,
+            "5": 5,
+            "6": 6
+          },
+          "median_accuracy": 0.1625
+        },
+        "rank/numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 10,
+            "1": 22,
+            "2": 15,
+            "3": 22,
+            "4": 11
+          },
+          "median_accuracy": 0.1875
+        },
+        "rank/rule_revision": {
+          "cases": 40,
+          "histogram": {
+            "0": 29,
+            "1": 11
+          },
+          "median_accuracy": 0.275
+        },
+        "rank/temporal_numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 15,
+            "1": 16,
+            "2": 18,
+            "3": 18,
+            "4": 6,
+            "5": 3,
+            "6": 4
+          },
+          "median_accuracy": 0.225
+        },
+        "year_parity/numeric": {
+          "best_parity_accuracy": 0.5375,
+          "cases": 80
+        },
+        "year_parity/rule_revision": {
+          "best_parity_accuracy": 0.6,
+          "cases": 40
+        },
+        "year_parity/temporal_numeric": {
+          "best_parity_accuracy": 0.525,
+          "cases": 80
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "scope": "Targeted median/year shortcut checks and visible-only priors; not a proof that all shortcuts are absent.",
+      "uniform": {
+        "choice": {
+          "by_type": {
+            "choice": {
+              "brier": 0.6178571428571431,
+              "cc": 1.358234295415884,
+              "ece": 0.03452380952380951,
+              "n": 240,
+              "nll": 1.3228957826938812
+            }
+          },
+          "cc_equal_types": 1.358234295415884,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 240,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 1.3228957826938812,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "noul": {
+          "by_type": {
+            "noul": {
+              "abstentions": 240,
+              "brier": 0.20833333333333334,
+              "cc": -100.0,
+              "ece": 0.008333333333333333,
+              "n": 240,
+              "nll": 0.6931471805599466
+            }
+          },
+          "cc_equal_types": -100.0,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 240,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.6931471805599466,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "score": {
+          "by_type": {
+            "score": {
+              "brier": 0.6178571428571431,
+              "cc": 16.678382304700246,
+              "ece": 0.03452380952380951,
+              "n": 240,
+              "nll": 1.3228957826938812,
+              "rps": 0.16525793650793644
+            }
+          },
+          "cc_equal_types": 16.678382304700246,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 240,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.16525793650793644,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "router_train": {
+      "baselines": {
+        "position/numeric": {
+          "cases": 21,
+          "histogram": {
+            "0": 5,
+            "1": 5,
+            "2": 3,
+            "3": 3,
+            "4": 5
+          },
+          "median_accuracy": 0.14285714285714285
+        },
+        "position/rule_revision": {
+          "cases": 21,
+          "histogram": {
+            "0": 10,
+            "1": 11
+          },
+          "median_accuracy": 0.5238095238095238
+        },
+        "position/temporal_numeric": {
+          "cases": 22,
+          "histogram": {
+            "0": 1,
+            "1": 6,
+            "2": 5,
+            "3": 4,
+            "4": 3,
+            "5": 1,
+            "6": 2
+          },
+          "median_accuracy": 0.18181818181818182
+        },
+        "rank/numeric": {
+          "cases": 21,
+          "histogram": {
+            "0": 6,
+            "1": 3,
+            "2": 5,
+            "3": 5,
+            "4": 2
+          },
+          "median_accuracy": 0.23809523809523808
+        },
+        "rank/rule_revision": {
+          "cases": 21,
+          "histogram": {
+            "0": 12,
+            "1": 9
+          },
+          "median_accuracy": 0.42857142857142855
+        },
+        "rank/temporal_numeric": {
+          "cases": 22,
+          "histogram": {
+            "0": 8,
+            "1": 4,
+            "2": 2,
+            "3": 5,
+            "5": 1,
+            "6": 2
+          },
+          "median_accuracy": 0.22727272727272727
+        },
+        "year_parity/numeric": {
+          "best_parity_accuracy": 0.5714285714285714,
+          "cases": 21
+        },
+        "year_parity/rule_revision": {
+          "best_parity_accuracy": 0.7142857142857143,
+          "cases": 21
+        },
+        "year_parity/temporal_numeric": {
+          "best_parity_accuracy": 0.6363636363636364,
+          "cases": 22
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "scope": "Targeted median/year shortcut checks and visible-only priors; not a proof that all shortcuts are absent.",
+      "uniform": {
+        "choice": {
+          "by_type": {
+            "choice": {
+              "brier": 0.7212053571428568,
+              "cc": -3.992571959145748,
+              "ece": 0.053794642857142846,
+              "n": 64,
+              "nll": 1.4244423473764358
+            }
+          },
+          "cc_equal_types": -3.992571959145748,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 64,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 1.4244423473764358,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "noul": {
+          "by_type": {
+            "noul": {
+              "abstentions": 64,
+              "brier": 0.25,
+              "cc": -100.0,
+              "ece": 0.0,
+              "n": 64,
+              "nll": 0.6931471805599452
+            }
+          },
+          "cc_equal_types": -100.0,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 64,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.6931471805599452,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "score": {
+          "by_type": {
+            "score": {
+              "brier": 0.7212053571428568,
+              "cc": 15.322580645161278,
+              "ece": 0.053794642857142846,
+              "n": 64,
+              "nll": 1.4244423473764358,
+              "rps": 0.22049851190476194
+            }
+          },
+          "cc_equal_types": 15.322580645161278,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 64,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.22049851190476194,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "test": {
+      "baselines": {
+        "position/numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 23,
+            "1": 13,
+            "2": 16,
+            "3": 17,
+            "4": 11
+          },
+          "median_accuracy": 0.2
+        },
+        "position/rule_revision": {
+          "cases": 40,
+          "histogram": {
+            "0": 24,
+            "1": 16
+          },
+          "median_accuracy": 0.4
+        },
+        "position/temporal_numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 15,
+            "1": 16,
+            "2": 21,
+            "3": 16,
+            "4": 2,
+            "5": 5,
+            "6": 5
+          },
+          "median_accuracy": 0.2625
+        },
+        "rank/numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 14,
+            "1": 15,
+            "2": 13,
+            "3": 19,
+            "4": 19
+          },
+          "median_accuracy": 0.1625
+        },
+        "rank/rule_revision": {
+          "cases": 40,
+          "histogram": {
+            "0": 29,
+            "1": 11
+          },
+          "median_accuracy": 0.275
+        },
+        "rank/temporal_numeric": {
+          "cases": 80,
+          "histogram": {
+            "0": 15,
+            "1": 15,
+            "2": 15,
+            "3": 14,
+            "4": 6,
+            "5": 6,
+            "6": 9
+          },
+          "median_accuracy": 0.175
+        },
+        "year_parity/numeric": {
+          "best_parity_accuracy": 0.55,
+          "cases": 80
+        },
+        "year_parity/rule_revision": {
+          "best_parity_accuracy": 0.525,
+          "cases": 40
+        },
+        "year_parity/temporal_numeric": {
+          "best_parity_accuracy": 0.5375,
+          "cases": 80
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "scope": "Targeted median/year shortcut checks and visible-only priors; not a proof that all shortcuts are absent.",
+      "uniform": {
+        "choice": {
+          "by_type": {
+            "choice": {
+              "brier": 0.6178571428571431,
+              "cc": 6.112054329371744,
+              "ece": 0.04285714285714286,
+              "n": 240,
+              "nll": 1.3228957826938812
+            }
+          },
+          "cc_equal_types": 6.112054329371744,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 240,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 1.3228957826938812,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "noul": {
+          "by_type": {
+            "noul": {
+              "abstentions": 240,
+              "brier": 0.20833333333333334,
+              "cc": -100.0,
+              "ece": 0.05,
+              "n": 240,
+              "nll": 0.6931471805599466
+            }
+          },
+          "cc_equal_types": -100.0,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 240,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.6931471805599466,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "score": {
+          "by_type": {
+            "score": {
+              "brier": 0.6178571428571431,
+              "cc": 13.248135346552559,
+              "ece": 0.04285714285714286,
+              "n": 240,
+              "nll": 1.3228957826938812,
+              "rps": 0.17813492063492062
+            }
+          },
+          "cc_equal_types": 13.248135346552559,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 240,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.17813492063492062,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    },
+    "train": {
+      "baselines": {
+        "position/numeric": {
+          "cases": 171,
+          "histogram": {
+            "0": 32,
+            "1": 33,
+            "2": 26,
+            "3": 42,
+            "4": 38
+          },
+          "median_accuracy": 0.15204678362573099
+        },
+        "position/rule_revision": {
+          "cases": 170,
+          "histogram": {
+            "0": 80,
+            "1": 90
+          },
+          "median_accuracy": 0.5294117647058824
+        },
+        "position/temporal_numeric": {
+          "cases": 171,
+          "histogram": {
+            "0": 27,
+            "1": 20,
+            "2": 28,
+            "3": 29,
+            "4": 21,
+            "5": 23,
+            "6": 23
+          },
+          "median_accuracy": 0.1695906432748538
+        },
+        "rank/numeric": {
+          "cases": 171,
+          "histogram": {
+            "0": 34,
+            "1": 33,
+            "2": 39,
+            "3": 33,
+            "4": 32
+          },
+          "median_accuracy": 0.22807017543859648
+        },
+        "rank/rule_revision": {
+          "cases": 170,
+          "histogram": {
+            "0": 97,
+            "1": 73
+          },
+          "median_accuracy": 0.4294117647058823
+        },
+        "rank/temporal_numeric": {
+          "cases": 171,
+          "histogram": {
+            "0": 67,
+            "1": 16,
+            "2": 16,
+            "3": 16,
+            "4": 25,
+            "5": 20,
+            "6": 11
+          },
+          "median_accuracy": 0.0935672514619883
+        },
+        "year_parity/numeric": {
+          "best_parity_accuracy": 0.5029239766081871,
+          "cases": 171
+        },
+        "year_parity/rule_revision": {
+          "best_parity_accuracy": 0.5647058823529412,
+          "cases": 170
+        },
+        "year_parity/temporal_numeric": {
+          "best_parity_accuracy": 0.5029239766081871,
+          "cases": 171
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "scope": "Targeted median/year shortcut checks and visible-only priors; not a proof that all shortcuts are absent.",
+      "uniform": {
+        "choice": {
+          "by_type": {
+            "choice": {
+              "brier": 0.7194754464285719,
+              "cc": -1.25649577289997,
+              "ece": 0.019084821428571423,
+              "n": 512,
+              "nll": 1.4175772250192915
+            }
+          },
+          "cc_equal_types": -1.25649577289997,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 512,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 1.4175772250192915,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "noul": {
+          "by_type": {
+            "noul": {
+              "abstentions": 512,
+              "brier": 0.25,
+              "cc": -100.0,
+              "ece": 0.001953125,
+              "n": 512,
+              "nll": 0.6931471805599468
+            }
+          },
+          "cc_equal_types": -100.0,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 512,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.6931471805599468,
+          "reasoning_tokens": 0,
+          "sealed": false
+        },
+        "score": {
+          "by_type": {
+            "score": {
+              "brier": 0.7194754464285719,
+              "cc": 13.665220272321022,
+              "ece": 0.019084821428571423,
+              "n": 512,
+              "nll": 1.4175772250192915,
+              "rps": 0.22168898809523807
+            }
+          },
+          "cc_equal_types": 13.665220272321022,
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "n": 512,
+          "official_composite": null,
+          "p50_s": 0.0,
+          "p95_s": 0.0,
+          "proper_loss": 0.22168898809523807,
+          "reasoning_tokens": 0,
+          "sealed": false
+        }
+      }
+    }
+  },
+  "package": {
+    "bytes": 15745901475,
+    "compression_level": 3,
+    "files": 28891,
+    "optimizer_steps": 0,
+    "runtime_scope": "copied and individually verified from the previously tested Linux kit; new Linux execution not yet measured",
+    "sha256": "a25b45abf551dc239d52509c90e52e0524bfc6643ed08543234106a651d3ab5e",
+    "archive_sha256": "a25b45abf551dc239d52509c90e52e0524bfc6643ed08543234106a651d3ab5e",
+    "verified": true,
+    "zstd_frame_consumed": true,
+    "path": "runs/ayaka-v2-clean-ready-20261002.tar.zst"
+  },
+  "validation": {
+    "project_tests": "475 passed, 1 skipped in 116.66s (0:01:56)",
+    "linux_related_tests": "19 passed in 7.61s",
+    "ruff_lint_passed": true,
+    "format_check_passed": true,
+    "source_matches": true,
+    "linux_cpu_schedule_matches": true,
+    "linux_scope": "Previously tested pinned Linux runtime, current clean source and bundle; no GPU execution or extracted-new-kit execution."
+  },
+  "changes": [
+    "Remove all old authored rehearsal and inspected final test.",
+    "Use fresh generation-3 corrected traces and natural human-labelled rehearsal.",
+    "Separate independent authored rule-combination dev/test without training traces.",
+    "Bind profiles and evaluations to evidence/menus/targets rather than shapes or IDs.",
+    "Require raw and calibrated improvement plus comparison against published v1 settings.",
+    "Package complete verified Linux runtime, pinned backbone, original v1 and clean source/data at zstd level 3.",
+    "Align tar streaming and verified copy buffers to remove repeated copies."
+  ],
+  "limits": [
+    "All new preparation is CPU-only. No model improvement has been demonstrated.",
+    "The new test is authored-only; dev/test share some formulas and do not establish natural/image or official JevBench generalization.",
+    "Median/parity audits are targeted and sample-size limited, not exhaustive absence-of-shortcuts proof.",
+    "Actual prepared gold targets are independently recomputed; arbitrary prose trace correctness is not automatically certified.",
+    "Old GPU timing/profile reports are invalid for this changed workload. Fresh GPU production preflight and whole-Pod admission are required.",
+    "Historical 200-step training took 1316.34 seconds. This is a reference, not a new runtime forecast.",
+    "The executable runner does not allocate or delete Pods; its external controller must reserve evaluation/delivery and stop billing after verified receipt."
+  ],
+  "launch": {
+    "cpu_plan": "bash ayaka-v2/scripts/runpod_v2/start_clean.sh plan --out ayaka-v2/outputs/clean-plan.json",
+    "fixed_pilot": "bash ayaka-v2/scripts/runpod_v2/start_clean.sh execute --out ayaka-v2/outputs/clean-pilot --training-window-seconds 3600 --evaluation-window-seconds 1800",
+    "allowed_actions_default": "plan",
+    "training_steps": 200,
+    "old_reference_profiles_allowed": false
+  }
+}
