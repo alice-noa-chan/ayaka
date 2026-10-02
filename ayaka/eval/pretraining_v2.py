@@ -76,6 +76,7 @@ def evaluate_tracks(decision, samples, modes=("off", "low", "medium", "high"), *
                     partition="generated_finite" if "proposal_supervision" in metadata else "fixed",
                     probs=result.probs,
                     target=target,
+                    ordinals=spec.ordinals,
                     budget=setting.budget,
                     route=diagnostic.get("route", "direct"),
                     generated_tokens=diagnostic.get("generated_tokens", 0),
