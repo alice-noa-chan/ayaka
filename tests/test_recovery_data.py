@@ -1,14 +1,17 @@
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+import pytest
+
 from ayaka.data.recovery_v2 import recovery_curriculum, verified_case
 from ayaka.training.prepare_v2 import audit_splits
 
 
-def test_recovery_oracles_recompute_multistage_results_independently():
+@pytest.mark.parametrize("generation", [1, 3])
+def test_recovery_oracles_recompute_multistage_results_independently(generation):
     for split in ("train", "dev", "test"):
         for index in range(60):
-            facts, target, trace = verified_case(split, index)
+            facts, target, trace = verified_case(split, index, generation=generation)
             utc = datetime.fromisoformat(facts["utc"])
             if facts["family"] == "temporal_numeric":
                 start = utc.date()
