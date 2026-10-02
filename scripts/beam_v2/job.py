@@ -56,7 +56,6 @@ def pilot(expires_at):
     headless=True,
     image=image,
     volumes=[volume],
-    allow_marketplace=False,
 )
 def pilot_serverless():
     return worker.execute(MOUNT, "clean-pilot-20261002", time.time() + 9700, "RTX5090")
