@@ -132,6 +132,56 @@ def public_report(decision, effort):
     return report
 
 
+def verify_fresh_test(kit, out):
+    """After the dev gate, compare the parent on the identical fresh test."""
+    screen = json.loads((out / "pilot-screen.json").read_text())
+    completion = json.loads((out / "pilot/checkpoint/complete.json").read_text())
+    if not screen["screen_passed"] or completion != {"steps": 200, "complete": True}:
+        raise ValueError("fresh comparison requires a passing dev screen and complete fixed pilot")
+    candidate = json.loads((out / "fresh-authored-test.json").read_text())
+    identity = checkpoint_fingerprint(out / "pilot/checkpoint")
+    if (
+        not candidate.get("complete")
+        or candidate.get("split") != "test"
+        or candidate.get("model_id") != identity
+    ):
+        raise ValueError("fresh candidate report must match the completed pilot")
+
+    from ayaka.eval.v2 import paired_report, summarize
+    from ayaka.multimodal import load_image_decision
+
+    _, splits = validate_bundle(kit / "recovery-bundle")
+    decision = load_image_decision(str(kit / "v1-checkpoint"), device="cuda", dtype=torch.bfloat16)
+    raw_temperatures(decision)
+    parent_id = checkpoint_fingerprint(kit / "v1-checkpoint")
+    raw = evaluate_tracks(decision, splits["test"], ("off",))
+    raw.update(split="test", model_id=parent_id, weights_selected=False)
+    for row in raw["rows"]["off"]:
+        row["model_id"] = parent_id
+    fits = fit_report_calibrations(json.loads((out / "v1-calibration.json").read_text()))
+    baseline = recalibrate_report(raw, fits)
+    a, b = baseline["rows"]["off"], candidate["rows"]["off"]
+    if not a or len(a) != len(b):
+        raise ValueError("fresh comparison requires nonempty matched cohorts")
+    for left, right in zip(a, b, strict=True):
+        for key in ("id", "cluster_id", "type", "target", "ordinals", "language", "family"):
+            if left.get(key) != right.get(key):
+                raise ValueError(f"unmatched fresh comparison field: {key}")
+    result = {
+        "complete": True,
+        "split": "test",
+        "scope": "Matched fresh authored test, no weight or mode selection; not official JevBench",
+        "baseline": summarize(a),
+        "candidate": summarize(b),
+        "paired": paired_report(a, b),
+        "official_composite": None,
+        "release_promoted": False,
+    }
+    (out / "v1-fresh-authored-test.json").write_bytes(canonical(baseline) + b"\n")
+    (out / "fresh-test-comparison.json").write_bytes(canonical(result) + b"\n")
+    return result
+
+
 def measure(checkpoint, name, dev, calibration, out, *, public_modes=("off",), diagnostics=True):
     from ayaka.multimodal import load_image_decision
 
@@ -300,7 +350,10 @@ def main(argv=None):
     parser.add_argument("--kit", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--verify-fresh-test", action="store_true")
     args = parser.parse_args(argv)
+    if args.verify_fresh_test:
+        return verify_fresh_test(args.kit, args.out)
     args.out.mkdir(parents=True, exist_ok=args.resume)
     torch.set_num_threads(4)
     _, splits = validate_bundle(args.kit / "recovery-bundle")
@@ -363,6 +416,7 @@ def main(argv=None):
         (args.out / "fresh-authored-test.json").write_bytes(
             canonical(recalibrate_report(final, fits)) + b"\n"
         )
+        verify_fresh_test(args.kit, args.out)
     result = {
         "complete": True,
         "planned_steps": 200,

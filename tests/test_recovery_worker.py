@@ -42,6 +42,22 @@ def test_secondary_high_cohort_preserves_all_types_and_full_budget():
     assert ReasoningSettings(mode="on", effort="high").budget == 1024
 
 
+def test_fresh_parent_comparison_refuses_failed_screen_before_loading_test(tmp_path):
+    import json
+
+    import pytest
+
+    from scripts.runpod_v2.recovery import verify_fresh_test
+
+    (tmp_path / "pilot/checkpoint").mkdir(parents=True)
+    (tmp_path / "pilot-screen.json").write_text(json.dumps({"screen_passed": False}))
+    (tmp_path / "pilot/checkpoint/complete.json").write_text(
+        json.dumps({"steps": 200, "complete": True})
+    )
+    with pytest.raises(ValueError, match="passing dev screen"):
+        verify_fresh_test(tmp_path / "missing-bundle", tmp_path)
+
+
 def test_worker_selection_is_deterministic_and_keeps_rich_translations_together():
     old = language_curriculum("dev", 32)
     for sample in old:
