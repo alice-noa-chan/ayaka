@@ -8,6 +8,7 @@ import json
 import math
 import time
 from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 
 import torch
@@ -123,6 +124,33 @@ def fresh_image_backend(cfg, device, *, offline=True):
     return model, tok, backend
 
 
+def continuation_image_backend(path, cfg, device, expected_identity):
+    """Preserve a trained adapter/head; never silently restart or change its architecture."""
+    from ..checkpoint import load_config
+    from ..multimodal import load_image_decision
+    from .scoped_calibration import checkpoint_fingerprint
+
+    if checkpoint_fingerprint(path) != expected_identity:
+        raise ValueError("continuation checkpoint identity mismatch")
+    previous = asdict(load_config(path))
+    requested = asdict(cfg)
+    for key in ("name", "version", "reasoning_defaults"):
+        previous.pop(key)
+        requested.pop(key)
+    if previous != requested:
+        raise ValueError("continuation must preserve backbone revision, LoRA and head architecture")
+    decision = load_image_decision(path, device=device, dtype=torch.bfloat16, trainable=True)
+    model, tok, backend = decision.model, decision.tok, decision.images.original.backend
+    model.cfg = cfg
+    backend.native.language_model = model.backbone
+    trainable_stack = {id(p) for p in model.parameters()}
+    for parameter in backend.native.parameters():
+        if id(parameter) not in trainable_stack:
+            parameter.requires_grad_(False)
+    backend.processing_device = "cpu"
+    return model, tok, backend
+
+
 def sample_stream(
     samples,
     tok,
@@ -188,14 +216,23 @@ def main(argv=None):
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--allow-weight-downloads", action="store_true")
     parser.add_argument("--checkpoint-every", type=int, default=100)
+    parser.add_argument("--init-checkpoint", help="immutable trained adapter/head for continuation")
     args = parser.parse_args(argv)
     manifest, splits = validate_bundle(args.bundle)
     recipe = json.loads((Path(args.bundle) / "training_config.json").read_text(encoding="utf-8"))
     if (
-        recipe["initialization"] != "fresh_lora_from_pinned_base"
+        recipe["initialization"] not in {"fresh_lora_from_pinned_base", "checkpoint_continuation"}
         or recipe["vision_policy"] != "frozen"
     ):
         raise ValueError("unsupported initialization or vision checkpoint policy")
+    continuation = recipe["initialization"] == "checkpoint_continuation"
+    if continuation != bool(args.init_checkpoint):
+        raise ValueError("continuation recipe and --init-checkpoint must agree")
+    if continuation:
+        from .scoped_calibration import checkpoint_fingerprint
+
+        if checkpoint_fingerprint(args.init_checkpoint) != recipe.get("initial_checkpoint_sha256"):
+            raise ValueError("continuation checkpoint identity mismatch")
     config = dict(recipe["model"])
     config["lora_targets"] = tuple(config["lora_targets"])
     cfg = ElectraConfig(**config)
@@ -263,9 +300,14 @@ def main(argv=None):
 def execute_training(args, cfg, recipe, splits):
     start = time.monotonic()
     torch.manual_seed(recipe["training"]["seed"])
-    model, tok, backend = fresh_image_backend(
-        cfg, args.device, offline=not args.allow_weight_downloads
-    )
+    if recipe.get("initialization") == "checkpoint_continuation":
+        model, tok, backend = continuation_image_backend(
+            args.init_checkpoint, cfg, args.device, recipe["initial_checkpoint_sha256"]
+        )
+    else:
+        model, tok, backend = fresh_image_backend(
+            cfg, args.device, offline=not args.allow_weight_downloads
+        )
     trainer = Trainer(
         model,
         tok,
@@ -418,6 +460,7 @@ def execute_training(args, cfg, recipe, splits):
         "router": "not_promoted",
         "test": "not_used",
         "initialization": recipe["initialization"],
+        "initial_checkpoint_sha256": recipe.get("initial_checkpoint_sha256"),
         "completion_plan": plan,
         "complete": trainer.step_i == args.steps and not trainer.stopped_early,
     }
