@@ -21,6 +21,7 @@ volume = Volume(name=VOLUME, mount_path=MOUNT)
     memory="8Gi",
     timeout=1800,
     retries=0,
+    headless=True,
     image=image,
     volumes=[volume],
 )
@@ -35,19 +36,25 @@ def prepare():
     memory="64Gi",
     timeout=10000,
     retries=0,
+    headless=True,
     image=image,
     volumes=[volume],
     pool=POOL,
 )
-def pilot():
-    return worker.execute(MOUNT, "clean-pilot-20261002")
+def pilot(expires_at):
+    return worker.execute(MOUNT, "clean-pilot-20261002", expires_at)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("prepare", "pilot", "build"))
+    parser.add_argument("--reservation-expires-at", type=float)
     args = parser.parse_args()
     if args.action == "build":
         print(json.dumps({"image_built": image.build().success}))
+    elif args.action == "prepare":
+        print(json.dumps(prepare.remote()))
     else:
-        print(json.dumps((prepare if args.action == "prepare" else pilot).remote()))
+        if args.reservation_expires_at is None:
+            parser.error("pilot requires the actual backend reservation expiry")
+        print(json.dumps(pilot.remote(args.reservation_expires_at)))

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import signal
@@ -9,6 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Thread
 
@@ -34,6 +36,32 @@ def digest(path):
 
 def write_json(path, value):
     Path(path).write_bytes(canonical(value) + b"\n")
+
+
+def stage_archive(source, destination, *, workers=8, part_bytes=32 * 1024**2):
+    """Read independent volume ranges concurrently, then verify locally."""
+    source, destination = Path(source), Path(destination)
+    size = source.stat().st_size
+    with destination.open("xb") as stream:
+        stream.truncate(size)
+
+    def copy_range(start):
+        stop = min(size, start + part_bytes)
+        with source.open("rb") as reader, destination.open("r+b") as writer:
+            reader.seek(start)
+            writer.seek(start)
+            while start < stop:
+                data = reader.read(min(8 * 1024**2, stop - start))
+                if not data:
+                    raise ValueError("offline archive range was truncated")
+                writer.write(data)
+                start += len(data)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(copy_range, range(0, size, part_bytes)))
+    if digest(destination) != ARCHIVE_SHA:
+        raise ValueError("staged archive checksum mismatch")
+    return destination
 
 
 def extract_kit(archive, destination):
@@ -95,13 +123,17 @@ def apply_training_allowance(kit):
     return overlay
 
 
-def prepare(volume):
+def _prepare(volume):
     volume = Path(volume)
-    # CPU serverless ephemeral disks can be small. Free persistent storage holds
-    # this temporary CPU extraction; the reserved GPU extracts onto its own disk.
-    with tempfile.TemporaryDirectory(prefix="cpu-check-", dir=volume) as temp:
-        kit = extract_kit(volume / ARCHIVE, temp)
+    with tempfile.TemporaryDirectory(prefix="ayaka-beam-cpu-") as temp:
+        if shutil.disk_usage(temp).free < 60 * 1024**3:
+            raise ValueError("CPU preparation needs 60GiB local disk before GPU reservation")
+        write_json(volume / "prepare-progress.json", {"phase": "local_archive_staging"})
+        archive = stage_archive(volume / ARCHIVE, Path(temp) / ARCHIVE)
+        write_json(volume / "prepare-progress.json", {"phase": "local_extract_and_verify"})
+        kit = extract_kit(archive, temp)
         overlay = apply_training_allowance(kit)
+        write_json(volume / "prepare-progress.json", {"phase": "offline_cpu_plan"})
         subprocess.run(
             [
                 "bash",
@@ -116,10 +148,22 @@ def prepare(volume):
         receipt = {"ready": True, "archive_sha256": ARCHIVE_SHA, "overlay": overlay}
         write_json(volume / "ready.json", receipt)
         shutil.copyfile(kit / "outputs/beam-plan.json", volume / "plan.json")
+        write_json(volume / "prepare-progress.json", {"phase": "complete"})
         return receipt
 
 
-def run_logged(command, log_path, timeout):
+def prepare(volume):
+    try:
+        return _prepare(volume)
+    except Exception as exc:
+        write_json(
+            Path(volume) / "ready.json",
+            {"ready": False, "error": f"{type(exc).__name__}: {exc}"},
+        )
+        raise
+
+
+def run_logged(command, log_path, timeout, progress=None):
     """Stream progress and kill the whole subprocess tree on a timeout."""
     with Path(log_path).open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
@@ -136,6 +180,8 @@ def run_logged(command, log_path, timeout):
                 log.write(line)
                 log.flush()
                 print(line, end="", flush=True)
+                if progress:
+                    progress(line[-500:])
 
         reader = Thread(target=forward, daemon=True)
         reader.start()
@@ -180,8 +226,10 @@ def package_results(directory, archive):
     return {"sha256": digest(archive), "bytes": archive.stat().st_size, "files": len(files)}
 
 
-def execute(volume, run_name):
+def execute(volume, run_name, expires_at):
     volume = Path(volume)
+    if not math.isfinite(expires_at) or not time.time() < expires_at <= time.time() + 10800:
+        raise ValueError("require the real backend expiry within three hours")
     ready = json.loads((volume / "ready.json").read_text())
     if not ready.get("ready") or ready["archive_sha256"] != ARCHIVE_SHA:
         raise ValueError("CPU preparation must pass before GPU execution")
@@ -192,11 +240,18 @@ def execute(volume, run_name):
     output = root / "result"
     output.mkdir()
     status, error = "failed", None
+
+    def progress(phase):
+        write_json(volume / (run_name + ".progress.json"), {"phase": phase, "at": time.time()})
+
     try:
-        if shutil.disk_usage(root).free < 40 * 1024**3:
-            raise ValueError("GPU workspace needs at least 40GiB free disk")
+        if shutil.disk_usage(root).free < 60 * 1024**3:
+            raise ValueError("GPU workspace needs at least 60GiB free disk")
         print("Verifying and extracting the offline GPU kit", flush=True)
-        kit = extract_kit(volume / ARCHIVE, root)
+        progress("local_archive_staging")
+        archive = stage_archive(volume / ARCHIVE, root / ARCHIVE)
+        progress("local_extract_and_verify")
+        kit = extract_kit(archive, root)
         overlay = apply_training_allowance(kit)
         if overlay != ready["overlay"]:
             raise ValueError("GPU kit differs from CPU-admitted preparation")
@@ -215,7 +270,10 @@ def execute(volume, run_name):
         (output / "hardware.json").write_text(result.stdout)
         (output / "hardware.stderr.log").write_text(result.stderr)
         result.check_returncode()
-        remaining = JOB_SECONDS - (time.monotonic() - started) - 300
+        remaining = min(
+            JOB_SECONDS - (time.monotonic() - started) - 300,
+            expires_at - time.time() - 600,
+        )
         if remaining < TRAIN_SECONDS + EVAL_SECONDS:
             raise TimeoutError("insufficient whole-job envelope before optimizer updates")
         run_logged(
@@ -232,6 +290,7 @@ def execute(volume, run_name):
             ],
             output / "execution.log",
             remaining,
+            progress,
         )
         complete = json.loads((output / "recovery/complete.json").read_text())
         if not complete["complete"] or complete["training_steps"] != 200:
@@ -250,6 +309,7 @@ def execute(volume, run_name):
         },
     )
     archive = root / (run_name + ".tar.zst")
+    progress("packaging_results")
     receipt = package_results(output, archive)
     destination = volume / archive.name
     shutil.copyfile(archive, destination)
@@ -257,4 +317,5 @@ def execute(volume, run_name):
         raise ValueError("durable result copy checksum mismatch")
     receipt.update(status=status, error=error)
     write_json(volume / (run_name + ".receipt.json"), receipt)
+    progress("durable_receipt")
     return receipt

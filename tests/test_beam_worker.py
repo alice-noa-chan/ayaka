@@ -66,3 +66,23 @@ def test_streamed_subprocess_enforces_timeout(tmp_path):
         worker.run_logged(
             [sys.executable, "-c", "import time; time.sleep(10)"], tmp_path / "log", 0.05
         )
+
+
+def test_parallel_staging_verifies_all_ranges_and_rejects_corruption(tmp_path, monkeypatch):
+    source = tmp_path / "source.zst"
+    source.write_bytes(bytes(range(256)) * 101 + b"last incomplete range")
+    monkeypatch.setattr(worker, "ARCHIVE_SHA", worker.digest(source))
+    copied = worker.stage_archive(source, tmp_path / "local.zst", workers=4, part_bytes=333)
+    assert copied.read_bytes() == source.read_bytes()
+    source.write_bytes(source.read_bytes()[:-1] + b"!")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        worker.stage_archive(source, tmp_path / "bad.zst", workers=4, part_bytes=333)
+
+
+def test_cpu_failure_is_durable_without_a_client_log_connection(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker.shutil, "disk_usage", lambda _: SimpleNamespace(free=0))
+    with pytest.raises(ValueError, match="60GiB"):
+        worker.prepare(tmp_path)
+    receipt = json.loads((tmp_path / "ready.json").read_text())
+    assert receipt["ready"] is False
+    assert "local disk" in receipt["error"]

@@ -16,15 +16,22 @@ Upload the immutable archive with `python transfer.py cp` to the private
 Beam-client Python interpreter to run `job.py build`, then `job.py prepare`.
 The transfer adapter fixes the installed SDK's Windows remote-path separator
 without changing native local paths or credentials. The CPU task verifies the archive and every extracted file and runs the bundled
-interpreter's plan. CPU extraction uses persistent storage and is removed after
-verification. The immutable kit manifest is checked before applying the separately
+interpreter's plan. CPU and GPU stage independent archive ranges concurrently to
+local disk and verify all checksums there. Preparation requires 60GiB free local
+disk, avoiding slow small-file operations on the object-store volume. Tasks run
+headless so a lost client log connection cannot cancel otherwise healthy work;
+backend timeouts and reservation expiry remain mandatory. Poll owned task status
+and durable receipts rather than resubmitting. The immutable kit manifest is checked before applying the separately
 recorded time allowance. No GPU should be reserved until preparation succeeds.
 
 Create the isolated pool, then reserve exactly the admitted provider/region/offer
 with `beam pool scale`, `--ttl 3h` and `--max-spend 4.56`. Never extend it, enable
-automatic retries, or use a serverless fallback. `job.py pilot` runs only on that
+automatic retries, or use a serverless fallback. `job.py pilot --reservation-expires-at EPOCH` runs only on that
 pool. A100 80GB/BF16 is checked before model work. The complete schedule requires
 fresh production profiling before any optimizer update; old timing is not reused.
+Read the expiry from the actual reservation. The worker reserves ten minutes
+before it for artifact delivery and refuses insufficient complete-run envelopes.
+Durable phase files remain readable when the SDK's client log stream disconnects.
 
 Results, including failures, are compressed with zstd level 3, checksum verified
 on the persistent volume, and described by a receipt. Download and verify the
