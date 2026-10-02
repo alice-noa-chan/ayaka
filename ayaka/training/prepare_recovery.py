@@ -24,7 +24,26 @@ from .scoped_calibration import checkpoint_fingerprint
 from .workload import describe_rows, finite_workload
 
 
-def prepare_recovery(source_bundle, checkpoint, out, *, training_window_seconds=2400):
+def clean_splits(previous):
+    from ..data.recovery_audit import shortcut_audit
+    from ..data.recovery_holdout import independent_holdout
+
+    result, audits = {}, {}
+    for split in SPLITS:
+        natural = [s for s in previous[split] if s.metadata.get("data_kind") == "natural"]
+        if split in {"dev", "test"}:
+            authored = independent_holdout(split, 240)
+        else:
+            authored = recovery_curriculum(
+                split, {"train": 512, "router_train": 64, "calibration": 128}[split], generation=3
+            )
+        audits[split] = shortcut_audit(authored)
+        # Never reuse the previously inspected natural or authored final test.
+        result[split] = authored if split == "test" else natural + authored
+    return result, audits
+
+
+def prepare_recovery(source_bundle, checkpoint, out, *, training_window_seconds=2400, clean=False):
     if type(training_window_seconds) is not int or not 1 <= training_window_seconds <= 28800:
         raise ValueError("training window must be a positive integer within eight hours")
     root = Path(out)
@@ -38,11 +57,14 @@ def prepare_recovery(source_bundle, checkpoint, out, *, training_window_seconds=
         reasoning_defaults={"mode": "auto", "effort": "medium"},
     )
     identity = checkpoint_fingerprint(checkpoint)
-    counts = {"train": 512, "router_train": 64, "dev": 256, "calibration": 128, "test": 256}
-    for split, count in counts.items():
-        new = recovery_curriculum(split, count)
-        # The previously inspected test is never relabelled as a fresh final test.
-        splits[split] = new if split == "test" else splits[split] + new
+    shortcut_checks = None
+    if clean:
+        splits, shortcut_checks = clean_splits(splits)
+    else:
+        counts = {"train": 512, "router_train": 64, "dev": 256, "calibration": 128, "test": 256}
+        for split, count in counts.items():
+            new = recovery_curriculum(split, count)
+            splits[split] = new if split == "test" else splits[split] + new
     audited = audit_splits(splits)
     model_audit, tok, backend = inspect_model(cfg, offline=True)
     context, inventory = {}, []
@@ -96,9 +118,15 @@ def prepare_recovery(source_bundle, checkpoint, out, *, training_window_seconds=
         "files": {name: sha256((root / name).read_bytes()) for name in files},
         "version": VERSION,
         "parent_bundle_sha256": sha256((Path(source_bundle) / "manifest.json").read_bytes()),
-        "data_scope": "natural rehearsal plus multistage authored recovery; new authored-only final test",
+        "data_scope": "natural rehearsal plus generation-3 corrected recovery; separately authored rule-combination dev/test"
+        if clean
+        else "natural rehearsal plus multistage authored recovery; new authored-only final test",
+        "recovery_policy": "clean-3" if clean else "legacy",
         "optimizer_steps_executed": 0,
     }
+    if clean:
+        (root / "shortcut-audit.json").write_bytes(canonical(shortcut_checks) + b"\n")
+        manifest["shortcut_audit_sha256"] = sha256((root / "shortcut-audit.json").read_bytes())
     (root / "manifest.json").write_bytes(canonical(manifest) + b"\n")
     validate_bundle(root)
     workload = finite_workload(
@@ -120,7 +148,15 @@ def prepare_recovery(source_bundle, checkpoint, out, *, training_window_seconds=
                 "temporal_numeric_gain_minimum_points": 5,
                 "max_type_language_regression_points": 1,
                 "no_probability_regression": True,
-                "final_test": "new authored-only cases, not an official JevBench or full natural-language promotion",
+                "final_test": "independent-recovery-1 authored cases, no training traces; shared dev/test rule families, not official JevBench or natural generalization"
+                if clean
+                else "new authored-only cases, not an official JevBench or full natural-language promotion",
+                "raw_improvement_required": clean,
+                "calibrated_improvement_required": clean,
+                "published_parent_nonregression_required": clean,
+                "old_profiles_or_parent_reports_reusable": False
+                if clean
+                else "only exact content-bound inputs",
                 "full_training_authorized_by_screen": False,
             }
         )
@@ -135,12 +171,18 @@ def main(argv=None):
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--training-window-seconds", type=int, default=2400)
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="exclude old authored data and prepare fresh independent rule-combination evaluation",
+    )
     args = parser.parse_args(argv)
     return prepare_recovery(
         args.source_bundle,
         args.checkpoint,
         args.out,
         training_window_seconds=args.training_window_seconds,
+        clean=args.clean,
     )
 
 
