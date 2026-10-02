@@ -11,7 +11,7 @@ from ayaka.tokenization import ToyTokenizer
 @pytest.mark.parametrize(
     "family", ["granite", "qwen3_5", "qwen3_5_hybrid", "gemma4_text", "gemma4_unified_text"]
 )
-def test_native_output_logits_and_cache_match(family):
+def test_native_output_logits_and_cache_match(family, monkeypatch):
     from transformers import (
         Gemma4ForCausalLM,
         Gemma4UnifiedForCausalLM,
@@ -38,6 +38,15 @@ def test_native_output_logits_and_cache_match(family):
         )
         lm = GraniteForCausalLM(cfg).eval()
     elif family.startswith("qwen3_5"):
+        # This is a CPU reference test. Installed FLA may otherwise dispatch to
+        # GPU-only Triton kernels even for CPU tensors (Transformers 5.17).
+        import inspect
+
+        from transformers.models.qwen3_5 import modeling_qwen3_5
+
+        for name in ("torch_chunk_gated_delta_rule", "torch_recurrent_gated_delta_rule"):
+            function = getattr(modeling_qwen3_5, name)
+            monkeypatch.setattr(modeling_qwen3_5, name, inspect.unwrap(function))
         cfg = Qwen3_5TextConfig(
             vocab_size=512,
             hidden_size=64,
