@@ -24,7 +24,7 @@ from ayaka.training.prepare_v2 import canonical, validate_bundle
 from ayaka.training.scoped_calibration import checkpoint_fingerprint
 
 
-def selection(samples, per_type=128, rich_cases=64):
+def selection(samples, per_type=64, rich_cases=64):
     """Select before inference, keeping translations grouped in rich diagnostics."""
     rng, selected, used = random.Random(20261002), [], set()
     for kind in ("choice", "noul", "score"):
