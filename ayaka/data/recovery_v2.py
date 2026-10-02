@@ -170,6 +170,37 @@ def evidence(facts, language):
     )
 
 
+def candidate_numbers(facts, value, rng):
+    """Avoid leaking the result through a gold-centered candidate range."""
+    if facts["family"] == "rule_revision":
+        numbers = [0, 1]
+    elif facts["family"] == "temporal_numeric":
+        # The authored delay generator has the fixed domain 0..6, independent
+        # of this case's result. Every case receives the identical numeric set.
+        numbers = list(range(7))
+    else:
+        rank = rng.randrange(5)
+        lower = rng.sample(range(1, 10), rank)
+        upper = rng.sample(range(1, 10), 4 - rank)
+        numbers = [value, *(value - n for n in lower), *(value + n for n in upper)]
+    rng.shuffle(numbers)
+    return numbers
+
+
+def noul_probe(split, index, family, value):
+    """Truth is independent of index parity and its visible timestamp year."""
+    rng = random.Random(f"recovery-noul-2/{split}/{index}")
+    truth = bool(rng.getrandbits(1))
+    if truth:
+        return value, True
+    alternatives = (
+        [1 - value]
+        if family == "rule_revision"
+        else [n for n in (value - 2, value - 1, value + 1, value + 2) if n >= 0]
+    )
+    return rng.choice(alternatives), False
+
+
 def recovery_curriculum(split, cases=128):
     if split not in SPLITS or type(cases) is not int or cases < 1:
         raise ValueError("positive cases and known split required")
@@ -180,17 +211,12 @@ def recovery_curriculum(split, cases=128):
         for language in ("en", "ko", "ja"):
             questions, traces = [], {}
             rng = random.Random(f"distractors/{split}/{index}")
-            numbers = (
-                [0, 1]
-                if facts["family"] == "rule_revision"
-                else list(range(max(0, value - 2), value + 3))
-            )
-            rng.shuffle(numbers)
+            numbers = candidate_numbers(facts, value, rng)
             for kind in ("choice", "noul", "score"):
                 if kind == "noul":
-                    asked = value if index % 2 else rng.choice([n for n in numbers if n != value])
+                    asked, truth = noul_probe(split, index, facts["family"], value)
                     question = Question.noul(
-                        kind, f"Is the requested result {asked}?", float(asked == value)
+                        kind, f"Is the requested result {asked}?", float(truth)
                     )
                     notes = (
                         trace
@@ -216,7 +242,8 @@ def recovery_curriculum(split, cases=128):
                     evidence(facts, language),
                     questions,
                     {
-                        "source": "ayaka-recovery-verified-1",
+                        "source": "ayaka-recovery-verified-2",
+                        "candidate_design_version": 2,
                         "license": "MIT",
                         "split": split,
                         "language": language,

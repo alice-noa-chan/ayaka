@@ -61,3 +61,28 @@ def test_evidence_excludes_computed_answers_and_translations_share_lineage():
         for split in ("train", "router_train", "dev", "calibration", "test")
     }
     assert audit_splits(splits)
+
+
+def test_candidate_numbers_and_noul_truth_do_not_encode_the_answer():
+    import random
+
+    from ayaka.data.recovery_v2 import candidate_numbers, noul_probe
+
+    assert all(
+        set(candidate_numbers({"family": "temporal_numeric"}, n, random.Random(n))) == set(range(7))
+        for n in range(7)
+    )
+    ranks = []
+    parity_correct = 0
+    for index in range(600):
+        facts, value, _ = verified_case("dev", index)
+        asked, truth = noul_probe("dev", index, facts["family"], value)
+        assert truth == (asked == value)
+        parity_correct += truth == bool(index % 2)
+        if facts["family"] == "numeric":
+            values = sorted(candidate_numbers(facts, value, random.Random(f"control/{index}")))
+            assert len(set(values)) == 5 and min(values) >= 0
+            ranks.append(values.index(value))
+    assert set(ranks) == set(range(5))
+    assert ranks.count(2) / len(ranks) < 0.35
+    assert 0.4 < parity_correct / 600 < 0.6
