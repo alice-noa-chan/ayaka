@@ -15,6 +15,10 @@ from .workload import finite_workload
 
 
 def profile_binding(cfg, recipe, inventory, steps):
+    if not inventory or any(not row.get("content_sha256") for row in inventory):
+        raise ValueError(
+            "reference reuse requires content-bound rows; regenerate legacy preparation"
+        )
     package = Path(__file__).resolve().parents[1]
     # These entry points change admission/preparation, not numerical training.
     excluded = {

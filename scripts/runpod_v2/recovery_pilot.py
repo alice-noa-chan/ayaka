@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from ayaka.eval.pretraining_v2 import evaluate_tracks
+from ayaka.eval.pretraining_v2 import cohort_fingerprint, evaluate_tracks
 from ayaka.eval.recovery_v2 import (
     evaluate_trace_diagnostics,
     fit_report_calibrations,
@@ -34,6 +34,7 @@ def validate_parent_reports(baseline, original, parent_id, dev):
             report.get("model_id") != parent_id
             or not report.get("complete")
             or report.get("split") != "dev"
+            or report.get("cohort_sha256") != cohort_fingerprint(dev)
             or [r["id"] for r in report.get("rows", {}).get("off", [])] != expected
         ):
             raise ValueError(

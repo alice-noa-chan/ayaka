@@ -34,6 +34,11 @@ def sample_indices(languages, seed, weights=None):
 
 def describe_rows(sample, items):
     return {
+        "content_sha256": hashlib.sha256(
+            json.dumps(
+                sample.to_json(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest(),
         "language": sample.metadata["language"],
         "source_lineage": sample.metadata["source_lineage"],
         "data_kind": sample.metadata.get("data_kind", "authored"),

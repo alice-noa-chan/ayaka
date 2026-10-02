@@ -16,7 +16,13 @@ from ..training.prepare_v2 import canonical, sha256, validate_bundle
 from .v2 import paired_report, summarize, typed_row
 
 
+def cohort_fingerprint(samples):
+    """Bind cached reports to evidence, menus, targets, traces and provenance."""
+    return sha256(canonical([sample.to_json() for sample in samples]))
+
+
 def evaluate_tracks(decision, samples, modes=("off", "low", "medium", "high"), *, deadline=None):
+    samples = list(samples)
     settings = {
         mode: ReasoningSettings(
             mode="off" if mode == "off" else ("auto" if mode == "auto" else "on"),
@@ -94,6 +100,7 @@ def evaluate_tracks(decision, samples, modes=("off", "low", "medium", "high"), *
             break
     report = {
         "complete": complete,
+        "cohort_sha256": cohort_fingerprint(samples),
         "rows": rows,
         "official_composite": None,
         "scope": "repository-authored pretraining tracks; not JevBench sealed-inclusive",

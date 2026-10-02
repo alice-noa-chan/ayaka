@@ -6,6 +6,41 @@ import pytest
 from ayaka.training.reference_profile import validate_reference
 
 
+def test_reference_binding_refuses_shape_only_legacy_inventory():
+    from ayaka.training.reference_profile import profile_binding
+
+    with pytest.raises(ValueError, match="content-bound"):
+        profile_binding(None, None, [{"rows": [{"length": 123}]}], 200)
+
+
+def test_same_shape_new_labels_invalidate_reference_inventory():
+    import copy
+
+    from ayaka.config import tiny_config
+    from ayaka.training.reference_profile import profile_binding
+
+    recipe = {
+        "training": {"questions_per_step": 1, "seed": 7},
+        "language_sampling": {"en": 1},
+    }
+    row = {"type": "choice", "length": 10, "trace_tokens": 0, "proposal_tokens": 0, "image": False}
+    inventory = [
+        {
+            "language": "en",
+            "source_lineage": "same",
+            "data_kind": "authored",
+            "content_sha256": "a" * 64,
+            "rows": [row],
+        }
+    ]
+    before = profile_binding(tiny_config(), recipe, inventory, 2)
+    changed = copy.deepcopy(inventory)
+    changed[0]["content_sha256"] = "b" * 64
+    after = profile_binding(tiny_config(), recipe, changed, 2)
+    assert before["schedule"] == after["schedule"]
+    assert before["inventory"] != after["inventory"]
+
+
 def test_reference_profile_rejects_stale_runtime_schedule_and_modified_bytes(tmp_path):
     binding = {"parent": "v1", "schedule": "fixed-200"}
     runtime = {"gpu": "same-gpu", "torch": "pinned"}
