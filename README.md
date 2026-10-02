@@ -525,4 +525,9 @@ checks. No pretrained optimization accompanies that preparation.
 The [2026-10-02 training optimization report](docs/experiments/V2_TRAINING_OPTIMIZATION_2026-10-02.md)
 records equal-work CPU timing, batched losses/images, frozen-feature and CPU
 preparation caches, the updated immutable bundle, and complete-schedule budget
-forecasting. Actual pretrained H100 speed and four-hour completion remain unmeasured.
+forecasting. That report records the earlier CPU-only measurements.
+The [latest preparation and H100 profiling report](docs/experiments/V2_TRAINING_READY_2026-10-02.md)
+adds pinned natural EN/KO/JA rehearsal, preserves previous evaluation examples,
+accounts for every row in the fixed training plan, and measures production
+backward, optimizer memory and checkpoint IO without live optimizer updates.
+Full trained quality and end-to-end training completion remain unmeasured.

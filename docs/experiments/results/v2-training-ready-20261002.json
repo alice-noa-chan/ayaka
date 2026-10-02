@@ -1,0 +1,3329 @@
+{
+  "date": "2026-10-02",
+  "status": "prepared_and_zero_update_h100_profiled_no_main_training",
+  "pretrained_optimizer_steps_executed": 0,
+  "bundle": {
+    "path": "runs/v2-pretraining-20261002-ready",
+    "manifest_sha256": "7b11be347d7a319663102b26aa6ec91de5947f23ae9efc6d6ed3aaabad9cad7e",
+    "implementation_revision": "41194b4ddd5f96fa32a7eabf031d5232c2eeef79",
+    "counts": {
+      "calibration": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "choice": 192,
+          "exception": 9,
+          "judge": 64,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 640,
+          "ja": 416,
+          "ko": 416
+        },
+        "modalities": {
+          "image": 384,
+          "text": 1088
+        },
+        "questions": 1824,
+        "samples": 1472,
+        "types": {
+          "choice": 736,
+          "noul": 448,
+          "score": 640
+        }
+      },
+      "dev": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "choice": 192,
+          "exception": 9,
+          "judge": 64,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 640,
+          "ja": 416,
+          "ko": 416
+        },
+        "modalities": {
+          "image": 384,
+          "text": 1088
+        },
+        "questions": 1824,
+        "samples": 1472,
+        "types": {
+          "choice": 736,
+          "noul": 448,
+          "score": 640
+        }
+      },
+      "router_train": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "choice": 192,
+          "exception": 9,
+          "judge": 64,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 640,
+          "ja": 416,
+          "ko": 416
+        },
+        "modalities": {
+          "image": 384,
+          "text": 1088
+        },
+        "questions": 1824,
+        "samples": 1472,
+        "types": {
+          "choice": 736,
+          "noul": 448,
+          "score": 640
+        }
+      },
+      "test": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "choice": 192,
+          "exception": 9,
+          "judge": 64,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 640,
+          "ja": 416,
+          "ko": 416
+        },
+        "modalities": {
+          "image": 384,
+          "text": 1088
+        },
+        "questions": 1824,
+        "samples": 1472,
+        "types": {
+          "choice": 736,
+          "noul": 448,
+          "score": 640
+        }
+      },
+      "train": {
+        "families": {
+          "business": 9,
+          "calendar": 192,
+          "candidate_partition": 32,
+          "chart": 192,
+          "choice": 1280,
+          "exception": 9,
+          "judge": 256,
+          "leap": 12,
+          "missing": 9,
+          "month_end": 12,
+          "native_language": 288,
+          "partition_diagnostics": 32,
+          "probability": 9,
+          "receipt": 192,
+          "rounding": 9,
+          "rubric": 9,
+          "rule": 192,
+          "rule_revision": 9,
+          "timezone": 9
+        },
+        "languages": {
+          "en": 1024,
+          "ja": 864,
+          "ko": 864
+        },
+        "modalities": {
+          "image": 384,
+          "text": 2368
+        },
+        "questions": 3872,
+        "samples": 2752,
+        "types": {
+          "choice": 1824,
+          "noul": 448,
+          "score": 1600
+        }
+      }
+    },
+    "model_preflight": {
+      "architecture": "gemma4",
+      "base_parameters": 7941100832,
+      "conservative_total_elements": 8034056528,
+      "context_audit": {
+        "calibration": {
+          "max_tokens": 1342,
+          "prepared_rows": 2976
+        },
+        "dev": {
+          "max_tokens": 1620,
+          "prepared_rows": 2976
+        },
+        "router_train": {
+          "max_tokens": 1624,
+          "prepared_rows": 2976
+        },
+        "test": {
+          "max_tokens": 1738,
+          "prepared_rows": 2976
+        },
+        "train": {
+          "max_tokens": 2574,
+          "prepared_rows": 5024
+        }
+      },
+      "license": "apache-2.0",
+      "license_source": "https://huggingface.co/google/gemma-4-E4B-it",
+      "local_weights_ready": true,
+      "native_context": 131072,
+      "natural_data": {
+        "counts": {
+          "commonsense_qa/calibration": 64,
+          "commonsense_qa/dev": 64,
+          "commonsense_qa/router_train": 64,
+          "commonsense_qa/test": 64,
+          "commonsense_qa/train": 256,
+          "helpsteer2/calibration": 64,
+          "helpsteer2/dev": 64,
+          "helpsteer2/router_train": 64,
+          "helpsteer2/test": 64,
+          "helpsteer2/train": 256,
+          "massive_ja/calibration": 64,
+          "massive_ja/dev": 64,
+          "massive_ja/router_train": 64,
+          "massive_ja/test": 64,
+          "massive_ja/train": 512,
+          "massive_ko/calibration": 64,
+          "massive_ko/dev": 64,
+          "massive_ko/router_train": 64,
+          "massive_ko/test": 64,
+          "massive_ko/train": 512
+        },
+        "removed": {
+          "duplicate_evidence": 11040,
+          "reserved_or_public_overlap": 64
+        },
+        "reserved_evaluation_sha256": "ee9c2d184787c1e97ac7ecc56043f92cb0a9dcd9881712ab53ab8c54e6c256b2",
+        "reserved_samples": 128,
+        "sources": [
+          {
+            "available_samples": 20324,
+            "card_url": "https://huggingface.co/datasets/nvidia/HelpSteer2",
+            "file": "train.jsonl.gz",
+            "file_sha256": "c0d7e91d738d42e8a08070db26c4c09a9c7631308e1f0fd380ff43d130c9f713",
+            "license": "CC-BY-4.0",
+            "original_split": "train",
+            "repo": "nvidia/HelpSteer2",
+            "revision": "990b2711a36180dd19d9c94b8627844866f8982a",
+            "source": "helpsteer2"
+          },
+          {
+            "available_samples": 9741,
+            "card_url": "https://huggingface.co/datasets/tau/commonsense_qa",
+            "file": "data/train-00000-of-00001.parquet",
+            "file_sha256": "b0449767ed986bfc2ca52b1244a46ef12f732756727f3cb0a4ab69ac8b3d282b",
+            "license": "CC-BY-4.0",
+            "original_split": "train",
+            "repo": "tau/commonsense_qa",
+            "revision": "94630fe30dad47192a8546eb75f094926d47e155",
+            "source": "commonsense_qa"
+          },
+          {
+            "available_samples": 11514,
+            "card_url": "https://huggingface.co/datasets/AmazonScience/massive",
+            "file": "ko-KR/train/0000.parquet",
+            "file_sha256": "3b5e11303fb75aa42d70b5be42b5052192c17911363388c8c15749f61a9c6d00",
+            "license": "CC-BY-4.0",
+            "original_split": "train",
+            "repo": "AmazonScience/massive",
+            "revision": "ed58ac423a2f4121720918bf5301577edce4ffd3",
+            "source": "massive_ko"
+          },
+          {
+            "available_samples": 11514,
+            "card_url": "https://huggingface.co/datasets/AmazonScience/massive",
+            "file": "ja-JP/train/0000.parquet",
+            "file_sha256": "90fb4b86ba1b6ff76d07deb21c9b4d08a5fba329e09f79c14ae64a5c01fb1c6e",
+            "license": "CC-BY-4.0",
+            "original_split": "train",
+            "repo": "AmazonScience/massive",
+            "revision": "ed58ac423a2f4121720918bf5301577edce4ffd3",
+            "source": "massive_ja"
+          }
+        ],
+        "split_policy": "source groups; formats and ontologies shared across splits",
+        "target_provenance": "human labels; no generated rationale added"
+      },
+      "official_weight_elements": 7996156490,
+      "parameter_limit": 14000000000,
+      "processor": "Gemma4Processor",
+      "repo": "google/gemma-4-E4B-it",
+      "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+      "tokenizer": "google/gemma-4-E4B-it",
+      "total_parameters": 7979000870,
+      "trainable_parameters": 37900038,
+      "training_context": 4096,
+      "vision_policy": "frozen",
+      "weight_loading": "not_loaded_meta_only"
+    },
+    "weight_cache": {
+      "bundle_manifest_sha256": "7b11be347d7a319663102b26aa6ec91de5947f23ae9efc6d6ed3aaabad9cad7e",
+      "download_and_audit_seconds": 12.235000000102445,
+      "optimizer_steps": 0,
+      "repo": "google/gemma-4-E4B-it",
+      "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+      "shards": {
+        "model.safetensors": {
+          "bytes": 15992595884,
+          "sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503"
+        }
+      },
+      "status": "pinned_native_weights_cached_no_training"
+    },
+    "readiness": {
+      "status": "bundle_verified_no_training",
+      "source_code_matches": true,
+      "manifest_sha256": "7b11be347d7a319663102b26aa6ec91de5947f23ae9efc6d6ed3aaabad9cad7e",
+      "optimizer_steps": 0,
+      "execution_requires": [
+        "explicit optimizer step count",
+        "explicit GPU time budget",
+        "pinned pretrained weights available",
+        "GPU forward/backward preflight without optimizer update"
+      ]
+    }
+  },
+  "complete_workload": {
+    "available_prepared_rows": 5024,
+    "counts": {
+      "data_kind": {
+        "authored": 34839,
+        "natural": 41961
+      },
+      "language": {
+        "en": 55971,
+        "ja": 10482,
+        "ko": 10347
+      },
+      "route": {
+        "direct": 55458,
+        "image": 4956,
+        "image_trace": 4956,
+        "proposal": 685,
+        "trace": 10745
+      },
+      "type": {
+        "choice": 28736,
+        "noul": 11550,
+        "score": 36514
+      }
+    },
+    "inventory_sha256": "ef7f8cb2fd35bfde4a524e63242f2c7ba1a02547ef0b4d10e56eacd1f7e4ed37",
+    "optimizer_steps_executed": 0,
+    "rows_per_step": 64,
+    "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105",
+    "seed": 20261001,
+    "semantics": "fixed complete schedule; repeated prepared rows are not independent questions or epochs",
+    "steps": 1200,
+    "tokens": {
+      "proposal_tokens": 32450,
+      "text_tokens": 31271215,
+      "trace_tokens": 294602
+    },
+    "total_rows": 76800,
+    "unique_prepared_rows": 5024,
+    "unique_source_lineages": 1780
+  },
+  "v1_base_reference": {
+    "checkpoint": "runs/release/ayaka-base",
+    "steps": 1200,
+    "train_seconds": 11266.1190969944,
+    "stopped_early": false,
+    "backbone": "google/gemma-4-E4B-it",
+    "backbone_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "comparison_limit": "Same pinned backbone and 1200x64 exposure count; different corpus/supervision, actual v1 train_sec versus forecast v2 full time; no claimed measured H100 speedup ratio."
+  },
+  "h100": {
+    "app_url": "https://modal.com/apps/gaon12/main/ap-glUx5aI9RpTtTLml6BcOxF",
+    "raw_report_directory": "runs/v2-h100-scheduled-profile-20261002",
+    "summary": {
+      "status": "complete",
+      "exit_code": 0,
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "gpu_memory_bytes": 85017624576,
+      "measured_function_seconds": 717.5914628190001,
+      "optimizer_steps": 0,
+      "job": "20261001T233442",
+      "preparation": {
+        "status": "cpu_ready_gpu_not_started",
+        "previous_gpu_bound_seconds": 22249.845275706,
+        "reserved_gpu_seconds": 1200,
+        "cumulative_gpu_bound_seconds": 24649.845275706
+      }
+    },
+    "preflight": {
+      "finite_gradients": true,
+      "loss_components": {
+        "brier": 0.3754294216632843,
+        "nll": 0.9973782300949097,
+        "pointer_nll": 1.1719045639038086,
+        "proposal_ce": 0.014652744866907597,
+        "reasoning_ce": 2.385897636413574,
+        "rps": 0.11181516945362091,
+        "total": 2.294499397277832
+      },
+      "losses": [
+        2.294499397277832
+      ],
+      "optimizer_steps": 0,
+      "weights_unchanged": true
+    },
+    "ordinary": {
+      "batches": [
+        {
+          "forward_chunks": 12,
+          "image_rows": 6,
+          "proposal_tokens": 0,
+          "rows": 64,
+          "text_tokens": 26610,
+          "trace_tokens": 111
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 10,
+          "proposal_tokens": 48,
+          "rows": 64,
+          "text_tokens": 26044,
+          "trace_tokens": 220
+        },
+        {
+          "forward_chunks": 11,
+          "image_rows": 4,
+          "proposal_tokens": 0,
+          "rows": 64,
+          "text_tokens": 27361,
+          "trace_tokens": 294
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 14,
+          "proposal_tokens": 96,
+          "rows": 64,
+          "text_tokens": 24699,
+          "trace_tokens": 297
+        },
+        {
+          "forward_chunks": 12,
+          "image_rows": 10,
+          "proposal_tokens": 48,
+          "rows": 64,
+          "text_tokens": 30675,
+          "trace_tokens": 221
+        },
+        {
+          "forward_chunks": 11,
+          "image_rows": 4,
+          "proposal_tokens": 0,
+          "rows": 64,
+          "text_tokens": 24309,
+          "trace_tokens": 255
+        }
+      ],
+      "cold_image_features": false,
+      "device": "cuda",
+      "effective_policy": {
+        "checkpoint_threshold": 1024,
+        "micro_ckpt_tokens": 8192,
+        "micro_tokens": 4096
+      },
+      "last_losses": {
+        "brier": 0.7002158761024475,
+        "missing": 0.011873362585902214,
+        "nll": 2.09572696685791,
+        "pointer_nll": 1.6035692691802979,
+        "reasoning_ce": 1.0796539783477783,
+        "rps": 0.07713499665260315,
+        "total": 3.2807672023773193
+      },
+      "max_seconds": 19.40773115600001,
+      "measured_batches": 6,
+      "median_seconds": 6.6670683145,
+      "oom_policy_changed": true,
+      "optimizer_state_reserved_bytes": 303200304,
+      "optimizer_steps": 0,
+      "scope": "production sample and cold largest-row language/type/route/flag strata including CPU preparation",
+      "seconds": [
+        7.432950422999966,
+        6.107041406999997,
+        6.9594058029999815,
+        5.703018656999916,
+        7.379108863000056,
+        6.374730826000018
+      ],
+      "warmup_batches": 1,
+      "weights_unchanged": true
+    },
+    "cold_stress": [
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.173261851999996,
+        "measured_batches": 1,
+        "median_seconds": 1.173261851999996,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.173261851999996
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 4.758902716999998,
+        "measured_batches": 1,
+        "median_seconds": 4.758902716999998,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          4.758902716999998
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.0179031919999915,
+        "measured_batches": 1,
+        "median_seconds": 6.0179031919999915,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.0179031919999915
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          false,
+          false,
+          true,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.388740757000008,
+        "measured_batches": 1,
+        "median_seconds": 2.388740757000008,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.388740757000008
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 3.101235959999997,
+        "measured_batches": 1,
+        "median_seconds": 3.101235959999997,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          3.101235959999997
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.34304640500001,
+        "measured_batches": 1,
+        "median_seconds": 9.34304640500001,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.34304640500001
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.363511439000007,
+        "measured_batches": 1,
+        "median_seconds": 6.363511439000007,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.363511439000007
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.336361180000011,
+        "measured_batches": 1,
+        "median_seconds": 9.336361180000011,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.336361180000011
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.46084768099999,
+        "measured_batches": 1,
+        "median_seconds": 6.46084768099999,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.46084768099999
+        ],
+        "stratum": [
+          "en",
+          "choice",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.607434833000013,
+        "measured_batches": 1,
+        "median_seconds": 9.607434833000013,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.607434833000013
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 0.9335484590000078,
+        "measured_batches": 1,
+        "median_seconds": 0.9335484590000078,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          0.9335484590000078
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.8217322149999973,
+        "measured_batches": 1,
+        "median_seconds": 1.8217322149999973,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.8217322149999973
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 5.46668372900001,
+        "measured_batches": 1,
+        "median_seconds": 5.46668372900001,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          5.46668372900001
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.619046709999992,
+        "measured_batches": 1,
+        "median_seconds": 7.619046709999992,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.619046709999992
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.354536751000012,
+        "measured_batches": 1,
+        "median_seconds": 6.354536751000012,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.354536751000012
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.617016338000013,
+        "measured_batches": 1,
+        "median_seconds": 7.617016338000013,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.617016338000013
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.407791971999984,
+        "measured_batches": 1,
+        "median_seconds": 6.407791971999984,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.407791971999984
+        ],
+        "stratum": [
+          "en",
+          "noul",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 19.40773115600001,
+        "measured_batches": 1,
+        "median_seconds": 19.40773115600001,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          19.40773115600001
+        ],
+        "stratum": [
+          "en",
+          "score",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.4565979159999927,
+        "measured_batches": 1,
+        "median_seconds": 2.4565979159999927,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.4565979159999927
+        ],
+        "stratum": [
+          "en",
+          "score",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.452606331999988,
+        "measured_batches": 1,
+        "median_seconds": 2.452606331999988,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.452606331999988
+        ],
+        "stratum": [
+          "en",
+          "score",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.655597173000018,
+        "measured_batches": 1,
+        "median_seconds": 1.655597173000018,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.655597173000018
+        ],
+        "stratum": [
+          "en",
+          "score",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.72542218800001,
+        "measured_batches": 1,
+        "median_seconds": 7.72542218800001,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.72542218800001
+        ],
+        "stratum": [
+          "en",
+          "score",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.485292467000022,
+        "measured_batches": 1,
+        "median_seconds": 6.485292467000022,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.485292467000022
+        ],
+        "stratum": [
+          "en",
+          "score",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.817465792999997,
+        "measured_batches": 1,
+        "median_seconds": 7.817465792999997,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.817465792999997
+        ],
+        "stratum": [
+          "en",
+          "score",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.46023551899998,
+        "measured_batches": 1,
+        "median_seconds": 6.46023551899998,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.46023551899998
+        ],
+        "stratum": [
+          "en",
+          "score",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.8724617470000453,
+        "measured_batches": 1,
+        "median_seconds": 2.8724617470000453,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.8724617470000453
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 4.830343457999959,
+        "measured_batches": 1,
+        "median_seconds": 4.830343457999959,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          4.830343457999959
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.8844101010000145,
+        "measured_batches": 1,
+        "median_seconds": 1.8844101010000145,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.8844101010000145
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 3.040899975000002,
+        "measured_batches": 1,
+        "median_seconds": 3.040899975000002,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          3.040899975000002
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.38742707299997,
+        "measured_batches": 1,
+        "median_seconds": 9.38742707299997,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.38742707299997
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.470422316999986,
+        "measured_batches": 1,
+        "median_seconds": 6.470422316999986,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.470422316999986
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.244061914000042,
+        "measured_batches": 1,
+        "median_seconds": 9.244061914000042,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.244061914000042
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.655292239000005,
+        "measured_batches": 1,
+        "median_seconds": 6.655292239000005,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.655292239000005
+        ],
+        "stratum": [
+          "ja",
+          "choice",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.3839375899999595,
+        "measured_batches": 1,
+        "median_seconds": 1.3839375899999595,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.3839375899999595
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 0.9141074769999591,
+        "measured_batches": 1,
+        "median_seconds": 0.9141074769999591,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          0.9141074769999591
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.8257491909999999,
+        "measured_batches": 1,
+        "median_seconds": 1.8257491909999999,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.8257491909999999
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 5.378989125000032,
+        "measured_batches": 1,
+        "median_seconds": 5.378989125000032,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          5.378989125000032
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.818515682999987,
+        "measured_batches": 1,
+        "median_seconds": 7.818515682999987,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.818515682999987
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.477541052999982,
+        "measured_batches": 1,
+        "median_seconds": 6.477541052999982,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.477541052999982
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.824391083000023,
+        "measured_batches": 1,
+        "median_seconds": 7.824391083000023,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.824391083000023
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.473487132999992,
+        "measured_batches": 1,
+        "median_seconds": 6.473487132999992,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.473487132999992
+        ],
+        "stratum": [
+          "ja",
+          "noul",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.4417839629999776,
+        "measured_batches": 1,
+        "median_seconds": 1.4417839629999776,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.4417839629999776
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.4155378399999563,
+        "measured_batches": 1,
+        "median_seconds": 2.4155378399999563,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.4155378399999563
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.861376516000007,
+        "measured_batches": 1,
+        "median_seconds": 1.861376516000007,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.861376516000007
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.622477564999997,
+        "measured_batches": 1,
+        "median_seconds": 1.622477564999997,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.622477564999997
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.794099563999964,
+        "measured_batches": 1,
+        "median_seconds": 7.794099563999964,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.794099563999964
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.507510714000034,
+        "measured_batches": 1,
+        "median_seconds": 6.507510714000034,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.507510714000034
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 8.076357685999994,
+        "measured_batches": 1,
+        "median_seconds": 8.076357685999994,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          8.076357685999994
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.563980227000002,
+        "measured_batches": 1,
+        "median_seconds": 6.563980227000002,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.563980227000002
+        ],
+        "stratum": [
+          "ja",
+          "score",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.748774057999981,
+        "measured_batches": 1,
+        "median_seconds": 2.748774057999981,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.748774057999981
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 4.84753509899997,
+        "measured_batches": 1,
+        "median_seconds": 4.84753509899997,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          4.84753509899997
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.258446344000049,
+        "measured_batches": 1,
+        "median_seconds": 2.258446344000049,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.258446344000049
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 3.0802610909999544,
+        "measured_batches": 1,
+        "median_seconds": 3.0802610909999544,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          3.0802610909999544
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.369438295000009,
+        "measured_batches": 1,
+        "median_seconds": 9.369438295000009,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.369438295000009
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.483329474000016,
+        "measured_batches": 1,
+        "median_seconds": 6.483329474000016,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.483329474000016
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 9.460029711999994,
+        "measured_batches": 1,
+        "median_seconds": 9.460029711999994,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          9.460029711999994
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.519389606999994,
+        "measured_batches": 1,
+        "median_seconds": 6.519389606999994,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.519389606999994
+        ],
+        "stratum": [
+          "ko",
+          "choice",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.4196627050000075,
+        "measured_batches": 1,
+        "median_seconds": 1.4196627050000075,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.4196627050000075
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 3.3878241119999757,
+        "measured_batches": 1,
+        "median_seconds": 3.3878241119999757,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          3.3878241119999757
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.8656041730000084,
+        "measured_batches": 1,
+        "median_seconds": 1.8656041730000084,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.8656041730000084
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 5.380590474999963,
+        "measured_batches": 1,
+        "median_seconds": 5.380590474999963,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          5.380590474999963
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.767666964999989,
+        "measured_batches": 1,
+        "median_seconds": 7.767666964999989,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.767666964999989
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.443131116000018,
+        "measured_batches": 1,
+        "median_seconds": 6.443131116000018,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.443131116000018
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.74838207199997,
+        "measured_batches": 1,
+        "median_seconds": 7.74838207199997,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.74838207199997
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.437000039999987,
+        "measured_batches": 1,
+        "median_seconds": 6.437000039999987,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.437000039999987
+        ],
+        "stratum": [
+          "ko",
+          "noul",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.3982376980000026,
+        "measured_batches": 1,
+        "median_seconds": 1.3982376980000026,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.3982376980000026
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          false,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.3959830360000183,
+        "measured_batches": 1,
+        "median_seconds": 2.3959830360000183,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.3959830360000183
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          false,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 2.280850746999988,
+        "measured_batches": 1,
+        "median_seconds": 2.280850746999988,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          2.280850746999988
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          false,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 1.6465837389999933,
+        "measured_batches": 1,
+        "median_seconds": 1.6465837389999933,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          1.6465837389999933
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          false,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.732529118999992,
+        "measured_batches": 1,
+        "median_seconds": 7.732529118999992,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.732529118999992
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          true,
+          false,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.451458179999975,
+        "measured_batches": 1,
+        "median_seconds": 6.451458179999975,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.451458179999975
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          true,
+          false,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 7.806836496000017,
+        "measured_batches": 1,
+        "median_seconds": 7.806836496000017,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          7.806836496000017
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          true,
+          true,
+          false,
+          false
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      },
+      {
+        "cold_image_features": true,
+        "device": "cuda",
+        "max_seconds": 6.479004088000011,
+        "measured_batches": 1,
+        "median_seconds": 6.479004088000011,
+        "optimizer_state_reserved_bytes": 303200304,
+        "optimizer_steps": 0,
+        "scope": "production forward/backward and input preparation; optimizer/save not timed",
+        "seconds": [
+          6.479004088000011
+        ],
+        "stratum": [
+          "ko",
+          "score",
+          true,
+          true,
+          false,
+          true
+        ],
+        "warmup_batches": 0,
+        "weights_unchanged": true
+      }
+    ],
+    "planned_schedule": {
+      "batches": [
+        {
+          "batches": [
+            {
+              "forward_chunks": 10,
+              "image_rows": 4,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 32695,
+              "trace_tokens": 151
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.6409995555877686,
+            "missing": 0.00480480445548892,
+            "nll": 1.8221514225006104,
+            "pointer_nll": 1.6729679107666016,
+            "reasoning_ce": 0.751919686794281,
+            "rps": 0.07227260619401932,
+            "total": 2.8966143131256104
+          },
+          "max_seconds": 7.082751323000025,
+          "measured_batches": 1,
+          "median_seconds": 7.082751323000025,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            7.082751323000025
+          ],
+          "step_index": 0,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 13,
+              "image_rows": 8,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 34639,
+              "trace_tokens": 150
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.6977795958518982,
+            "missing": 0.008123943582177162,
+            "nll": 2.432309627532959,
+            "pointer_nll": 1.94582200050354,
+            "reasoning_ce": 0.6810197830200195,
+            "rps": 0.08622909337282181,
+            "total": 3.601463556289673
+          },
+          "max_seconds": 8.452319518000081,
+          "measured_batches": 1,
+          "median_seconds": 8.452319518000081,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            8.452319518000081
+          ],
+          "step_index": 31,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 12,
+              "image_rows": 14,
+              "proposal_tokens": 46,
+              "rows": 64,
+              "text_tokens": 23025,
+              "trace_tokens": 298
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5461151003837585,
+            "missing": 0.011875084601342678,
+            "nll": 1.7691650390625,
+            "pointer_nll": 1.5639132261276245,
+            "proposal_ce": 0.03324903920292854,
+            "reasoning_ce": 1.477508544921875,
+            "rps": 0.10162336379289627,
+            "total": 2.9998362064361572
+          },
+          "max_seconds": 6.672588234000045,
+          "measured_batches": 1,
+          "median_seconds": 6.672588234000045,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.672588234000045
+          ],
+          "step_index": 63,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 11,
+              "image_rows": 8,
+              "proposal_tokens": 46,
+              "rows": 64,
+              "text_tokens": 22960,
+              "trace_tokens": 228
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.647803783416748,
+            "missing": 0.011248409748077393,
+            "nll": 2.33819842338562,
+            "pointer_nll": 1.5973429679870605,
+            "proposal_ce": 0.03537679836153984,
+            "reasoning_ce": 0.9208499193191528,
+            "rps": 0.07867037504911423,
+            "total": 3.4549803733825684
+          },
+          "max_seconds": 6.489830559999973,
+          "measured_batches": 1,
+          "median_seconds": 6.489830559999973,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.489830559999973
+          ],
+          "step_index": 126,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 10,
+              "image_rows": 6,
+              "proposal_tokens": 46,
+              "rows": 64,
+              "text_tokens": 24370,
+              "trace_tokens": 260
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5957298278808594,
+            "missing": 0.00011834669567178935,
+            "nll": 1.8221204280853271,
+            "pointer_nll": 1.9198344945907593,
+            "proposal_ce": 0.03105725720524788,
+            "reasoning_ce": 1.2145220041275024,
+            "rps": 0.0289873406291008,
+            "total": 3.076678991317749
+          },
+          "max_seconds": 5.553178436999929,
+          "measured_batches": 1,
+          "median_seconds": 5.553178436999929,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            5.553178436999929
+          ],
+          "step_index": 189,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 12,
+              "image_rows": 4,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 25872,
+              "trace_tokens": 224
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.7552786469459534,
+            "nll": 2.119051456451416,
+            "pointer_nll": 1.631713628768921,
+            "reasoning_ce": 1.1751999855041504,
+            "rps": 0.09536823630332947,
+            "total": 3.3721437454223633
+          },
+          "max_seconds": 7.321812368999986,
+          "measured_batches": 1,
+          "median_seconds": 7.321812368999986,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            7.321812368999986
+          ],
+          "step_index": 252,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 9,
+              "image_rows": 6,
+              "proposal_tokens": 96,
+              "rows": 64,
+              "text_tokens": 26242,
+              "trace_tokens": 366
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.46323809027671814,
+            "missing": 0.013122809119522572,
+            "nll": 1.580334186553955,
+            "pointer_nll": 1.4787079095840454,
+            "proposal_ce": 0.06324774771928787,
+            "reasoning_ce": 1.7897182703018188,
+            "rps": 0.13071909546852112,
+            "total": 2.85416316986084
+          },
+          "max_seconds": 6.203544043000079,
+          "measured_batches": 1,
+          "median_seconds": 6.203544043000079,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.203544043000079
+          ],
+          "step_index": 316,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 11,
+              "image_rows": 24,
+              "proposal_tokens": 48,
+              "rows": 64,
+              "text_tokens": 20422,
+              "trace_tokens": 431
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.3722916841506958,
+            "missing": 0.0,
+            "nll": 1.4105044603347778,
+            "pointer_nll": 1.639132022857666,
+            "proposal_ce": 0.028820261359214783,
+            "reasoning_ce": 2.1741607189178467,
+            "rps": 0.11120706051588058,
+            "total": 2.7853245735168457
+          },
+          "max_seconds": 5.806439005000016,
+          "measured_batches": 1,
+          "median_seconds": 5.806439005000016,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            5.806439005000016
+          ],
+          "step_index": 351,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 13,
+              "image_rows": 12,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 23399,
+              "trace_tokens": 204
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5767465233802795,
+            "missing": 0.0012499052099883556,
+            "nll": 1.9715752601623535,
+            "pointer_nll": 1.5751636028289795,
+            "reasoning_ce": 1.5475516319274902,
+            "rps": 0.07705076783895493,
+            "total": 3.2240428924560547
+          },
+          "max_seconds": 7.676204719999987,
+          "measured_batches": 1,
+          "median_seconds": 7.676204719999987,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            7.676204719999987
+          ],
+          "step_index": 379,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 13,
+              "image_rows": 9,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 27760,
+              "trace_tokens": 228
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5663069486618042,
+            "missing": 0.0012498083524405956,
+            "nll": 1.9320075511932373,
+            "pointer_nll": 1.5320719480514526,
+            "reasoning_ce": 1.6043214797973633,
+            "rps": 0.10114894062280655,
+            "total": 3.19179368019104
+          },
+          "max_seconds": 7.923393922000059,
+          "measured_batches": 1,
+          "median_seconds": 7.923393922000059,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            7.923393922000059
+          ],
+          "step_index": 442,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 12,
+              "image_rows": 8,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 25827,
+              "trace_tokens": 259
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5183534026145935,
+            "missing": 0.0001472578151151538,
+            "nll": 1.5628587007522583,
+            "pointer_nll": 1.5400772094726562,
+            "reasoning_ce": 1.2346208095550537,
+            "rps": 0.15378032624721527,
+            "total": 2.7083048820495605
+          },
+          "max_seconds": 6.503669218000027,
+          "measured_batches": 1,
+          "median_seconds": 6.503669218000027,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.503669218000027
+          ],
+          "step_index": 505,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 8,
+              "image_rows": 10,
+              "proposal_tokens": 48,
+              "rows": 64,
+              "text_tokens": 20674,
+              "trace_tokens": 443
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.4351244270801544,
+            "missing": 0.014372932724654675,
+            "nll": 1.3630716800689697,
+            "pointer_nll": 1.5205134153366089,
+            "proposal_ce": 0.03216978907585144,
+            "reasoning_ce": 1.8125946521759033,
+            "rps": 0.19191400706768036,
+            "total": 2.6577634811401367
+          },
+          "max_seconds": 4.525894736000055,
+          "measured_batches": 1,
+          "median_seconds": 4.525894736000055,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            4.525894736000055
+          ],
+          "step_index": 547,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 10,
+              "image_rows": 4,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 22476,
+              "trace_tokens": 286
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.505527913570404,
+            "nll": 1.9297562837600708,
+            "pointer_nll": 1.6064895391464233,
+            "reasoning_ce": 1.4545766115188599,
+            "rps": 0.06298083066940308,
+            "total": 3.1228837966918945
+          },
+          "max_seconds": 5.32591964400001,
+          "measured_batches": 1,
+          "median_seconds": 5.32591964400001,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            5.32591964400001
+          ],
+          "step_index": 568,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 12,
+              "image_rows": 10,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 29572,
+              "trace_tokens": 193
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5430471897125244,
+            "missing": 0.005251393187791109,
+            "nll": 1.945388913154602,
+            "pointer_nll": 1.4923938512802124,
+            "reasoning_ce": 1.1627694368362427,
+            "rps": 0.07265858352184296,
+            "total": 3.040205240249634
+          },
+          "max_seconds": 6.762071951999928,
+          "measured_batches": 1,
+          "median_seconds": 6.762071951999928,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.762071951999928
+          ],
+          "step_index": 631,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 9,
+              "image_rows": 8,
+              "proposal_tokens": 46,
+              "rows": 64,
+              "text_tokens": 19608,
+              "trace_tokens": 255
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.4438076913356781,
+            "missing": 0.008777106180787086,
+            "nll": 1.6398965120315552,
+            "pointer_nll": 1.708504319190979,
+            "proposal_ce": 0.03507894277572632,
+            "reasoning_ce": 1.403228759765625,
+            "rps": 0.1243891566991806,
+            "total": 2.848066806793213
+          },
+          "max_seconds": 4.992740885999979,
+          "measured_batches": 1,
+          "median_seconds": 4.992740885999979,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            4.992740885999979
+          ],
+          "step_index": 694,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 11,
+              "image_rows": 8,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 23506,
+              "trace_tokens": 267
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.4988345503807068,
+            "missing": 0.0002678038727026433,
+            "nll": 1.3356575965881348,
+            "pointer_nll": 1.6037604808807373,
+            "reasoning_ce": 1.3689156770706177,
+            "rps": 0.04300113394856453,
+            "total": 2.491994857788086
+          },
+          "max_seconds": 6.242354968999962,
+          "measured_batches": 1,
+          "median_seconds": 6.242354968999962,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.242354968999962
+          ],
+          "step_index": 757,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 11,
+              "image_rows": 6,
+              "proposal_tokens": 48,
+              "rows": 64,
+              "text_tokens": 25456,
+              "trace_tokens": 201
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.6130239367485046,
+            "missing": 0.0,
+            "nll": 1.7619283199310303,
+            "pointer_nll": 1.7596909999847412,
+            "proposal_ce": 0.03435678780078888,
+            "reasoning_ce": 1.0617910623550415,
+            "rps": 0.07909239828586578,
+            "total": 2.9494388103485107
+          },
+          "max_seconds": 6.384900308999931,
+          "measured_batches": 1,
+          "median_seconds": 6.384900308999931,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.384900308999931
+          ],
+          "step_index": 820,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 9,
+              "image_rows": 10,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 22745,
+              "trace_tokens": 317
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5174363851547241,
+            "missing": 0.013748055323958397,
+            "nll": 1.9228342771530151,
+            "pointer_nll": 1.668461561203003,
+            "reasoning_ce": 1.3923060894012451,
+            "rps": 0.18302762508392334,
+            "total": 3.1672792434692383
+          },
+          "max_seconds": 5.115592867000032,
+          "measured_batches": 1,
+          "median_seconds": 5.115592867000032,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            5.115592867000032
+          ],
+          "step_index": 883,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 12,
+              "image_rows": 10,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 31706,
+              "trace_tokens": 192
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.6806668043136597,
+            "missing": 0.0,
+            "nll": 1.7898616790771484,
+            "pointer_nll": 1.7874557971954346,
+            "reasoning_ce": 0.7911608219146729,
+            "rps": 0.09674974530935287,
+            "total": 2.9376423358917236
+          },
+          "max_seconds": 7.217747191000058,
+          "measured_batches": 1,
+          "median_seconds": 7.217747191000058,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            7.217747191000058
+          ],
+          "step_index": 947,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 12,
+              "image_rows": 12,
+              "proposal_tokens": 48,
+              "rows": 64,
+              "text_tokens": 27527,
+              "trace_tokens": 197
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5510597825050354,
+            "nll": 1.4459319114685059,
+            "pointer_nll": 1.6977792978286743,
+            "proposal_ce": 0.028820261359214783,
+            "reasoning_ce": 1.1075540781021118,
+            "rps": 0.06055785343050957,
+            "total": 2.5900211334228516
+          },
+          "max_seconds": 6.9802503339999475,
+          "measured_batches": 1,
+          "median_seconds": 6.9802503339999475,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.9802503339999475
+          ],
+          "step_index": 1010,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 10,
+              "image_rows": 10,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 23670,
+              "trace_tokens": 322
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5498211979866028,
+            "missing": 0.011433070525527,
+            "nll": 2.2157764434814453,
+            "pointer_nll": 1.649558186531067,
+            "reasoning_ce": 1.7287664413452148,
+            "rps": 0.11760936677455902,
+            "total": 3.548205852508545
+          },
+          "max_seconds": 5.522971309000013,
+          "measured_batches": 1,
+          "median_seconds": 5.522971309000013,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            5.522971309000013
+          ],
+          "step_index": 1073,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 8,
+              "image_rows": 7,
+              "proposal_tokens": 240,
+              "rows": 64,
+              "text_tokens": 21555,
+              "trace_tokens": 237
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.5880935192108154,
+            "nll": 1.8761476278305054,
+            "pointer_nll": 1.9234182834625244,
+            "proposal_ce": 0.1563091278076172,
+            "reasoning_ce": 1.3691515922546387,
+            "rps": 0.07467522472143173,
+            "total": 3.2153632640838623
+          },
+          "max_seconds": 4.980630898999948,
+          "measured_batches": 1,
+          "median_seconds": 4.980630898999948,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            4.980630898999948
+          ],
+          "step_index": 1100,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 13,
+              "image_rows": 12,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 45458,
+              "trace_tokens": 223
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.7749166488647461,
+            "nll": 2.0431270599365234,
+            "pointer_nll": 1.5711584091186523,
+            "reasoning_ce": 1.3060245513916016,
+            "rps": 0.1350286602973938,
+            "total": 3.3410003185272217
+          },
+          "max_seconds": 9.070265967999944,
+          "measured_batches": 1,
+          "median_seconds": 9.070265967999944,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            9.070265967999944
+          ],
+          "step_index": 1112,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 8,
+              "image_rows": 2,
+              "proposal_tokens": 46,
+              "rows": 64,
+              "text_tokens": 16897,
+              "trace_tokens": 269
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.6651991009712219,
+            "missing": 0.013748174533247948,
+            "nll": 2.180405378341675,
+            "pointer_nll": 1.6536786556243896,
+            "proposal_ce": 0.030789244920015335,
+            "reasoning_ce": 1.1824356317520142,
+            "rps": 0.07487870752811432,
+            "total": 3.399641752243042
+          },
+          "max_seconds": 4.606001849999984,
+          "measured_batches": 1,
+          "median_seconds": 4.606001849999984,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            4.606001849999984
+          ],
+          "step_index": 1136,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        },
+        {
+          "batches": [
+            {
+              "forward_chunks": 13,
+              "image_rows": 14,
+              "proposal_tokens": 0,
+              "rows": 64,
+              "text_tokens": 24254,
+              "trace_tokens": 210
+            }
+          ],
+          "cold_image_features": true,
+          "device": "cuda",
+          "last_losses": {
+            "brier": 0.649306058883667,
+            "missing": 0.005294139496982098,
+            "nll": 1.8097765445709229,
+            "pointer_nll": 1.539225697517395,
+            "reasoning_ce": 1.4912415742874146,
+            "rps": 0.10153727978467941,
+            "total": 3.0804312229156494
+          },
+          "max_seconds": 6.965469124999913,
+          "measured_batches": 1,
+          "median_seconds": 6.965469124999913,
+          "optimizer_state_reserved_bytes": 303200304,
+          "optimizer_steps": 0,
+          "scope": "production forward/backward and input preparation; optimizer/save not timed",
+          "seconds": [
+            6.965469124999913
+          ],
+          "step_index": 1199,
+          "warmup_batches": 0,
+          "weights_unchanged": true
+        }
+      ],
+      "limitations": "proxies are not exact runtime bounds; every selected image batch starts cold",
+      "max_seconds": 9.070265967999944,
+      "median_seconds": 6.489830559999973,
+      "planned_steps": 1200,
+      "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105",
+      "selection": "20 evenly spaced steps plus maxima of six inventory cost proxies"
+    },
+    "overheads": {
+      "checkpoint_bytes": 467432314,
+      "checkpoint_seconds": 1.2587805640000624,
+      "disk_free_bytes": 409600000000,
+      "disposable_optimizer_steps": 4,
+      "max_optimizer_seconds": 0.07469476699998268,
+      "model_optimizer_steps": 0,
+      "optimizer_seconds": [
+        0.07469476699998268,
+        0.005414376999965498,
+        0.00479734499992901,
+        0.004325655999991795
+      ],
+      "probe_is_trained_checkpoint": false,
+      "scope": "same shapes/dtypes/AdamW/clipping on disposable tensors; full adapter/head and optimizer-state IO with fsync",
+      "weights_unchanged": true
+    },
+    "original_measured_bundle_completion_plan": {
+      "all_stress_seconds_estimate": 29245.667544369993,
+      "available_remaining_seconds": 13691.847389607,
+      "checkpoint_writes": 14,
+      "disk_fits": true,
+      "estimated_checkpoint_bytes": 7198457635.6,
+      "estimated_remaining_seconds": 13739.46976236989,
+      "fits": false,
+      "forecast_backward_seconds_per_step": 9.070265967999944,
+      "forecast_basis": "maximum sampled actual scheduled batch",
+      "limitations": "sampled scheduled maxima with margin, not a mathematical upper bound; cold stress checks memory separately; future batches/contention can differ",
+      "observed_max_backward_seconds": 19.40773115600001,
+      "optimizer_seconds_allowance_per_step": 0.07469476699998268,
+      "overheads_measured": true,
+      "planned_steps": 1200,
+      "safety_factor": 1.25,
+      "save_seconds_reserved": 17.622927896000874,
+      "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105",
+      "semantics": "estimate for completing every scheduled step, not a time-based partial curriculum"
+    },
+    "completion_plan": {
+      "planned_steps": 1200,
+      "observed_max_backward_seconds": 19.40773115600001,
+      "forecast_backward_seconds_per_step": 9.070265967999944,
+      "forecast_basis": "maximum sampled actual scheduled batch",
+      "all_stress_seconds_estimate": 29141.833559857467,
+      "optimizer_seconds_allowance_per_step": 0.005414376999965498,
+      "optimizer_cold_start_seconds": 0.07469476699998268,
+      "optimizer_total_seconds_reserved": 6.566532789958615,
+      "optimizer_forecast_basis": "one cold allocation step plus maximum measured warm steps",
+      "safety_factor": 1.25,
+      "save_seconds_reserved": 17.622927896000874,
+      "estimated_remaining_seconds": 13635.635777857366,
+      "available_remaining_seconds": 13691.847389607,
+      "checkpoint_writes": 14,
+      "estimated_checkpoint_bytes": 7198457635.6,
+      "disk_fits": true,
+      "overheads_measured": true,
+      "fits": true,
+      "semantics": "estimate for completing every scheduled step, not a time-based partial curriculum",
+      "limitations": "sampled scheduled maxima with margin, not a mathematical upper bound; cold stress checks memory separately; future batches/contention can differ",
+      "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105"
+    },
+    "native_measurement_reuse_audit": {
+      "measured_bundle": "runs/v2-pretraining-20261002-scheduled-ready",
+      "measured_manifest_sha256": "c8cc47d7310b14882e1ff01287dabf462400f3073e514dea9d5883bddc272627",
+      "measured_implementation_revision": "a750cf70e510af6d7b7ae82635c90526f909a26c",
+      "changed_package_sources": [
+        "training/throughput.py"
+      ],
+      "unchanged_model_data_config_files": true,
+      "all_throughput_module_ast_except_completion_plan_unchanged": true,
+      "semantics": "Reuse native measurement without another GPU run; only CPU completion arithmetic changed. Original raw forecast remains immutable."
+    },
+    "estimated_setup_and_profiling_seconds": 708.1526103929991,
+    "typical_with_25_percent_margin_total_seconds": 10473.135276250408,
+    "sampled_max_with_25_percent_margin_total_seconds": 14343.788388250365,
+    "limitations": "Complete-run estimates from zero-update backward and disposable optimizer/IO probes; not observed full training or a runtime guarantee. Post-training evaluation time is separate and unmeasured."
+  },
+  "earlier_h100_stress_profile": {
+    "summary": {
+      "status": "complete",
+      "exit_code": 0,
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "gpu_memory_bytes": 85017624576,
+      "measured_function_seconds": 478.990727446,
+      "optimizer_steps": 0,
+      "job": "20261001T231501",
+      "preparation": {
+        "status": "cpu_ready_gpu_not_started",
+        "previous_gpu_bound_seconds": 22249.845275706,
+        "reserved_gpu_seconds": 1200
+      }
+    },
+    "ordinary": {
+      "batches": [
+        {
+          "forward_chunks": 12,
+          "image_rows": 6,
+          "proposal_tokens": 0,
+          "rows": 64,
+          "text_tokens": 26610,
+          "trace_tokens": 111
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 10,
+          "proposal_tokens": 48,
+          "rows": 64,
+          "text_tokens": 26044,
+          "trace_tokens": 220
+        },
+        {
+          "forward_chunks": 11,
+          "image_rows": 4,
+          "proposal_tokens": 0,
+          "rows": 64,
+          "text_tokens": 27361,
+          "trace_tokens": 294
+        },
+        {
+          "forward_chunks": 10,
+          "image_rows": 14,
+          "proposal_tokens": 96,
+          "rows": 64,
+          "text_tokens": 24699,
+          "trace_tokens": 297
+        },
+        {
+          "forward_chunks": 12,
+          "image_rows": 10,
+          "proposal_tokens": 48,
+          "rows": 64,
+          "text_tokens": 30675,
+          "trace_tokens": 221
+        },
+        {
+          "forward_chunks": 11,
+          "image_rows": 4,
+          "proposal_tokens": 0,
+          "rows": 64,
+          "text_tokens": 24309,
+          "trace_tokens": 255
+        }
+      ],
+      "cold_image_features": false,
+      "device": "cuda",
+      "effective_policy": {
+        "checkpoint_threshold": 1024,
+        "micro_ckpt_tokens": 8192,
+        "micro_tokens": 4096
+      },
+      "last_losses": {
+        "brier": 0.7002158761024475,
+        "missing": 0.011873362585902214,
+        "nll": 2.09572696685791,
+        "pointer_nll": 1.6035692691802979,
+        "reasoning_ce": 1.0796539783477783,
+        "rps": 0.07713499665260315,
+        "total": 3.2807672023773193
+      },
+      "max_seconds": 18.35734771,
+      "measured_batches": 6,
+      "median_seconds": 5.647108096500006,
+      "oom_policy_changed": true,
+      "optimizer_state_reserved_bytes": 303200304,
+      "optimizer_steps": 0,
+      "scope": "production sample and cold largest-row language/type/route/flag strata including CPU preparation",
+      "seconds": [
+        6.311509969000042,
+        5.10580192599997,
+        5.961151728000004,
+        4.843636932000038,
+        6.285456307999993,
+        5.333064465000007
+      ],
+      "warmup_batches": 1,
+      "weights_unchanged": true
+    },
+    "all_stress_completion_plan": {
+      "available_remaining_seconds": 13931.365652299,
+      "checkpoint_writes": 14,
+      "disk_fits": true,
+      "estimated_checkpoint_bytes": 7198457635.6,
+      "estimated_remaining_seconds": 27662.92499916753,
+      "fits": false,
+      "limitations": "measured cold/warm stress and isolated optimizer/save; future hardware contention can differ",
+      "observed_max_backward_seconds": 18.35734771,
+      "optimizer_seconds_allowance_per_step": 0.07008749800002079,
+      "overheads_measured": true,
+      "planned_steps": 1200,
+      "safety_factor": 1.25,
+      "save_seconds_reserved": 17.41774973400038,
+      "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105",
+      "semantics": "estimate for completing every scheduled step, not a time-based partial curriculum"
+    },
+    "raw_report_directory": "runs/v2-h100-pretraining-profile-20261002"
+  },
+  "exploration_budget": {
+    "original_ceiling_gpu_seconds": 28800,
+    "remote_prior_conservative_bound_seconds": 22249.845275706,
+    "new_profile_reservations_seconds": 2400,
+    "cumulative_conservative_bound_seconds": 24649.845275706,
+    "new_completed_profile_function_seconds": 1196.582190265,
+    "semantics": "Reservations and unreconciled remote prior entries are conservative limits, not an invoice. Earlier local dated audit remains unchanged. No main training is charged or performed."
+  },
+  "validation": {
+    "pytest": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "1",
+      "tests": "438",
+      "time": "91.603",
+      "timestamp": "2026-10-02T08:52:57.731237+09:00"
+    },
+    "passed": 437,
+    "pytest_xml_sha256": "dd10dcd1f432f4375542a5477fe8c2e4e8a9f7252f7366023054b372b64e2e65",
+    "ruff_python_files": 136,
+    "ruff_lint_and_format": "pass",
+    "raw_report_sha256": {
+      "summary.json": "c3c2870c538dda08bd304f3107e73d1c28b7403ff1d55e4d88c79bb2d47c8b04",
+      "weight_cache.json": "8c630e4b0a67b8f356322be0785e34c97774a3a5c5e20ed312b543eff7214ebc",
+      "measurement/completion_plan.json": "c1c15f4a1b1c135e74abc6e99c90bd7f8c68a40e301ee3e2370f77d08c4afe9b",
+      "measurement/overheads.json": "05b980fd604efa58f3178726119a6bb43c85684c58a8708068b7304bd32ece53",
+      "measurement/preflight.json": "eab0a5b4b4078b7b89c4f24de2b94019df5dcf3eab1654c101ed90de28f2ee2d",
+      "measurement/throughput.json": "bb30bd25f9f0803b819fe683cbff41e882124db01c399bd5ba76752393eefe43",
+      "measurement/workload.json": "3e7fb4ed264e5b94a76341daad4e8deb0d9ae59a8c7838bea22b0433c6e7f1f8"
+    }
+  },
+  "remaining_trained_validation": [
+    "independent EN/KO/JA regression after full training",
+    "perception-versus-reasoning image evaluation",
+    "arbitrary generated candidate equivalence/coverage/sufficiency",
+    "reserved calibration and dev-only router promotion",
+    "one final independent test and JevBench evaluation"
+  ]
+}

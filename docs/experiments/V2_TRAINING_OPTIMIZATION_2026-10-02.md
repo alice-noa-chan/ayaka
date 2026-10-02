@@ -1,5 +1,10 @@
 # Ayaka v2 training optimization — 2026-10-02
 
+This is the earlier CPU-only optimization record. The subsequent
+[training readiness and H100 profile](V2_TRAINING_READY_2026-10-02.md) adds pinned
+natural rehearsal, full-workload accounting and actual zero-update H100 timing.
+The measurements below remain unchanged as historical results.
+
 The training implementation now batches supervised work, reuses frozen image
 features and prepared CPU inputs, and forecasts completion of the entire fixed
 step schedule before the first optimizer update. The equal-work tiny CPU

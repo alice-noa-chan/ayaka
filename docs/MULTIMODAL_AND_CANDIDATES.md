@@ -196,6 +196,14 @@ The subsequent [training optimization report](experiments/V2_TRAINING_OPTIMIZATI
 records the updated bundle, batched image/proposal paths and bounded caches;
 its full CPU suite passes 421 tests with one existing skip.
 
+The [latest preparation and H100 profiling report](experiments/V2_TRAINING_READY_2026-10-02.md)
+adds pinned natural rehearsal, old evaluation exclusion, exact complete-workload
+accounting and real zero-update pretrained H100 backward/IO measurements. Its
+full CPU suite passes 437 tests with one existing skip. Earlier CUDA-unmeasured
+statements above describe those dated preparation records; trained perception,
+multilingual preservation and arbitrary candidate coverage still require the
+post-training evaluation gates.
+
 Windows loopback HTTP intermittently reset connections even for a model-free
 health handler. Process-local idempotency now lets keyed requests replay their
 result and usage after response loss, with bounded memory and no live-key eviction.
