@@ -1,0 +1,353 @@
+{
+  "date": "2026-10-02",
+  "status": "three_native_gpus_complete_no_main_training",
+  "app_id": "ap-SuCqeWun7UA65bt5gQnKLj",
+  "pretrained_optimizer_steps": 0,
+  "parity_checks": [
+    "benchmark_sha256",
+    "bundle_manifest_sha256",
+    "initial_trainable_sha256",
+    "workload",
+    "selected_steps",
+    "regular_steps",
+    "effective_policy",
+    "cpu_threads",
+    "torch_version",
+    "cuda_version",
+    "per-step rows/chunks/image/trace/proposal counts"
+  ],
+  "shared": {
+    "benchmark_sha256": "4efedefcb1d85575788c58c9d40d1b2f44dd534f9a1732ad39a8ae0343feca38",
+    "bundle_manifest_sha256": "7b11be347d7a319663102b26aa6ec91de5947f23ae9efc6d6ed3aaabad9cad7e",
+    "initial_trainable_sha256": "f15d1f5e0c69a34d6a3a06e4bfa8397b4d872cd348eb7816495cffa6d98eebed",
+    "workload": {
+      "available_prepared_rows": 5024,
+      "counts": {
+        "data_kind": {
+          "authored": 34839,
+          "natural": 41961
+        },
+        "language": {
+          "en": 55971,
+          "ja": 10482,
+          "ko": 10347
+        },
+        "route": {
+          "direct": 55458,
+          "image": 4956,
+          "image_trace": 4956,
+          "proposal": 685,
+          "trace": 10745
+        },
+        "type": {
+          "choice": 28736,
+          "noul": 11550,
+          "score": 36514
+        }
+      },
+      "inventory_sha256": "ef7f8cb2fd35bfde4a524e63242f2c7ba1a02547ef0b4d10e56eacd1f7e4ed37",
+      "optimizer_steps_executed": 0,
+      "rows_per_step": 64,
+      "schedule_sha256": "0854216412c77fad34cdacf36c46eff46c9a60d308a388edd8284e2ebc220105",
+      "seed": 20261001,
+      "semantics": "fixed complete schedule; repeated prepared rows are not independent questions or epochs",
+      "steps": 1200,
+      "tokens": {
+        "proposal_tokens": 32450,
+        "text_tokens": 31271215,
+        "trace_tokens": 294602
+      },
+      "total_rows": 76800,
+      "unique_prepared_rows": 5024,
+      "unique_source_lineages": 1780
+    },
+    "selected_steps": [
+      0,
+      31,
+      171,
+      343,
+      351,
+      514,
+      547,
+      685,
+      856,
+      1028,
+      1100,
+      1112,
+      1199
+    ],
+    "regular_steps": [
+      0,
+      171,
+      343,
+      514,
+      685,
+      856,
+      1028,
+      1199
+    ],
+    "effective_policy": {
+      "checkpoint_threshold": 1024,
+      "micro_ckpt_tokens": 8192,
+      "micro_tokens": 4096
+    },
+    "cpu_threads": 4,
+    "torch_version": "2.8.0+cu128",
+    "cuda_version": "12.8"
+  },
+  "budget": {
+    "previous_cumulative_bound_seconds": 24649.845275706,
+    "comparison_reserved_gpu_seconds": 3900,
+    "cumulative_gpu_bound_seconds": 28549.845275706,
+    "job": "20261002T002239"
+  },
+  "forecast_assumptions": {
+    "steps": 1200,
+    "rows_per_step": 64,
+    "safety_factor": 1.25,
+    "checkpoint_writes": 14,
+    "cpu_cores": 4,
+    "ram_gib": 32,
+    "baseline_setup_seconds": 708.152610393,
+    "setup_basis": "previous full H100 preflight; other GPUs scaled by matched mean ratio, not measured full preflights",
+    "typical_basis": "mean of eight evenly spaced schedule-step medians",
+    "conservative_basis": "maximum of 26 timed backward passes; not a guaranteed bound",
+    "cross_provider_basis": "Runpod Pod rates applied to Modal timing; Runpod not tested",
+    "excluded": "credits, taxes, persistent storage/network, evaluation and additional training; not an invoice"
+  },
+  "gpus": {
+    "h100": {
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "gpu_memory_bytes": 85017624576,
+      "compute_capability": [
+        9,
+        0
+      ],
+      "representative_mean_seconds": 4.915469378562495,
+      "max_seconds": 7.233403994000014,
+      "peak_allocated_bytes": 45504137728,
+      "peak_reserved_bytes": 45887782912,
+      "memory_scope": "PyTorch allocator peaks including lazy AdamW moment reservation; not total driver-process memory",
+      "elapsed_seconds": 245.08430719100002,
+      "overheads": {
+        "checkpoint_bytes": 467432314,
+        "checkpoint_seconds": 2.7381830859999923,
+        "disk_free_bytes": 409600000000,
+        "disposable_optimizer_steps": 4,
+        "max_optimizer_seconds": 0.07952752499997473,
+        "model_optimizer_steps": 0,
+        "optimizer_seconds": [
+          0.07952752499997473,
+          0.005662893999982543,
+          0.004175102999994351,
+          0.004220830000008391
+        ],
+        "probe_is_trained_checkpoint": false,
+        "scope": "same shapes/dtypes/AdamW/clipping on disposable tensors; full adapter/head and optimizer-state IO with fsync",
+        "weights_unchanged": true
+      },
+      "summary": {
+        "status": "complete",
+        "exit_code": 0,
+        "gpu": "NVIDIA H100 80GB HBM3",
+        "gpu_memory_bytes": 85017624576,
+        "function_seconds": 256.920830862,
+        "optimizer_steps": 0
+      },
+      "comparison_json_sha256": "81f55d3df51ee42ccb861f559f94f262df68105cf0cf1c186100487d1f0b30da",
+      "slowdown_vs_h100": 1.0,
+      "modal_compute_hourly_usd": 4.393584000000001,
+      "runpod_pod_hourly_usd": 3.49,
+      "maximum_absolute_total_loss_difference_vs_h100": 0.0,
+      "step_medians": {
+        "0": 5.379999712500005,
+        "31": 6.439308615500003,
+        "171": 6.188184162500001,
+        "343": 4.343557599499995,
+        "351": 4.3967972004999964,
+        "514": 4.687700316499985,
+        "547": 3.460966694999982,
+        "685": 4.733419883499977,
+        "856": 3.8300095124999984,
+        "1028": 5.290657232499996,
+        "1100": 3.5720245960000057,
+        "1112": 7.11480715350001,
+        "1199": 4.8702266089999995
+      },
+      "forecasts": {
+        "typical": {
+          "training_seconds": 7429.708943637465,
+          "setup_estimate_seconds": 708.152610393,
+          "total_seconds": 8137.861554030465,
+          "modal_compute_usd": 9.931771755000943,
+          "runpod_unmeasured_projection_usd": 7.889204673212869
+        },
+        "conservative": {
+          "training_seconds": 10906.610866793744,
+          "setup_estimate_seconds": 708.152610393,
+          "total_seconds": 11614.763477186745,
+          "modal_compute_usd": 14.175121938097792,
+          "runpod_unmeasured_projection_usd": 11.259867926494929
+        }
+      }
+    },
+    "a100": {
+      "gpu": "NVIDIA A100 80GB PCIe",
+      "gpu_memory_bytes": 85094825984,
+      "compute_capability": [
+        8,
+        0
+      ],
+      "representative_mean_seconds": 8.280524281124999,
+      "max_seconds": 12.836120349999987,
+      "peak_allocated_bytes": 45458583040,
+      "peak_reserved_bytes": 45845839872,
+      "memory_scope": "PyTorch allocator peaks including lazy AdamW moment reservation; not total driver-process memory",
+      "elapsed_seconds": 364.084508362,
+      "overheads": {
+        "checkpoint_bytes": 467432314,
+        "checkpoint_seconds": 1.876064843999984,
+        "disk_free_bytes": 409600000000,
+        "disposable_optimizer_steps": 4,
+        "max_optimizer_seconds": 0.11597969600001079,
+        "model_optimizer_steps": 0,
+        "optimizer_seconds": [
+          0.11597969600001079,
+          0.007376108000016757,
+          0.00624283600001263,
+          0.005433417999995527
+        ],
+        "probe_is_trained_checkpoint": false,
+        "scope": "same shapes/dtypes/AdamW/clipping on disposable tensors; full adapter/head and optimizer-state IO with fsync",
+        "weights_unchanged": true
+      },
+      "summary": {
+        "status": "complete",
+        "exit_code": 0,
+        "gpu": "NVIDIA A100 80GB PCIe",
+        "gpu_memory_bytes": 85094825984,
+        "function_seconds": 372.77655255099995,
+        "optimizer_steps": 0
+      },
+      "comparison_json_sha256": "14e2b31d6fd5a959bbd6c66065e5dec26a4b3f2cf69387d17ac11deaf1dd9f22",
+      "slowdown_vs_h100": 1.6845846537541849,
+      "modal_compute_hourly_usd": 2.9427839999999996,
+      "runpod_pod_hourly_usd": 1.59,
+      "maximum_absolute_total_loss_difference_vs_h100": 0.015407323837280273,
+      "step_medians": {
+        "0": 9.284602590999999,
+        "31": 10.962591875000001,
+        "171": 10.546834796999995,
+        "343": 6.819446454000001,
+        "351": 7.414245184999999,
+        "514": 7.605820455000014,
+        "547": 5.6936758115,
+        "685": 7.965769581999993,
+        "856": 6.776922921000008,
+        "1028": 8.944473446499984,
+        "1100": 6.206550553499994,
+        "1112": 12.76033174349999,
+        "1199": 8.300324002499991
+      },
+      "forecasts": {
+        "typical": {
+          "training_seconds": 12464.817472942523,
+          "setup_estimate_seconds": 1192.9430199840142,
+          "total_seconds": 13657.760492926536,
+          "modal_compute_usd": 11.164399737337865,
+          "runpod_unmeasured_projection_usd": 6.032177551042554
+        },
+        "conservative": {
+          "training_seconds": 19298.211576255006,
+          "setup_estimate_seconds": 1192.9430199840142,
+          "total_seconds": 20491.15459623902,
+          "modal_compute_usd": 16.750289413149623,
+          "runpod_unmeasured_projection_usd": 9.050259946672234
+        }
+      }
+    },
+    "rtxpro6000": {
+      "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+      "gpu_memory_bytes": 101974081536,
+      "compute_capability": [
+        12,
+        0
+      ],
+      "representative_mean_seconds": 4.2119167623125,
+      "max_seconds": 7.2329149360000144,
+      "peak_allocated_bytes": 45458583040,
+      "peak_reserved_bytes": 45845839872,
+      "memory_scope": "PyTorch allocator peaks including lazy AdamW moment reservation; not total driver-process memory",
+      "elapsed_seconds": 197.66816800799998,
+      "overheads": {
+        "checkpoint_bytes": 467432314,
+        "checkpoint_seconds": 2.0915879810000035,
+        "disk_free_bytes": 409600000000,
+        "disposable_optimizer_steps": 4,
+        "max_optimizer_seconds": 0.06689170699999636,
+        "model_optimizer_steps": 0,
+        "optimizer_seconds": [
+          0.06689170699999636,
+          0.00844028499997762,
+          0.00793760600001292,
+          0.006984426999991911
+        ],
+        "probe_is_trained_checkpoint": false,
+        "scope": "same shapes/dtypes/AdamW/clipping on disposable tensors; full adapter/head and optimizer-state IO with fsync",
+        "weights_unchanged": true
+      },
+      "summary": {
+        "status": "complete",
+        "exit_code": 0,
+        "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+        "gpu_memory_bytes": 101974081536,
+        "function_seconds": 203.632915709,
+        "optimizer_steps": 0
+      },
+      "comparison_json_sha256": "dc283a479d0e6c5336a30ffcbad09304087dcb26671bf16c79e3c279e927e191",
+      "slowdown_vs_h100": 0.8568696980763726,
+      "modal_compute_hourly_usd": 3.4755839999999996,
+      "runpod_pod_hourly_usd": 2.09,
+      "maximum_absolute_total_loss_difference_vs_h100": 0.026546955108642578,
+      "step_medians": {
+        "0": 4.952567093499999,
+        "31": 5.972969015500002,
+        "171": 6.114861336999997,
+        "343": 2.8796878109999966,
+        "351": 5.464620642500002,
+        "514": 3.6428538449999976,
+        "547": 3.0909148380000033,
+        "685": 3.842298728500012,
+        "856": 3.3299435915000117,
+        "1028": 4.0912037774999845,
+        "1100": 3.2399125304999927,
+        "1112": 7.076197761500012,
+        "1199": 4.8419179145000015
+      },
+      "forecasts": {
+        "typical": {
+          "training_seconds": 6367.211424913718,
+          "setup_estimate_seconds": 606.794513459445,
+          "total_seconds": 6974.005938373162,
+          "modal_compute_usd": 6.7329842931429855,
+          "runpod_unmeasured_projection_usd": 4.048797891999975
+        },
+        "conservative": {
+          "training_seconds": 10898.708685444988,
+          "setup_estimate_seconds": 606.794513459445,
+          "total_seconds": 11505.503198904433,
+          "modal_compute_usd": 11.107873008350294,
+          "runpod_unmeasured_projection_usd": 6.679583801586184
+        }
+      }
+    }
+  },
+  "sources": [
+    "https://modal.com/pricing",
+    "https://www.runpod.io/pricing"
+  ],
+  "verification": {
+    "cpu_tests_passed": 440,
+    "cpu_tests_skipped": 1
+  }
+}

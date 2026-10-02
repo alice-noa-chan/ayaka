@@ -531,3 +531,6 @@ adds pinned natural EN/KO/JA rehearsal, preserves previous evaluation examples,
 accounts for every row in the fixed training plan, and measures production
 backward, optimizer memory and checkpoint IO without live optimizer updates.
 Full trained quality and end-to-end training completion remain unmeasured.
+The [matched H100/A100/RTX PRO comparison](docs/experiments/V2_GPU_COMPARISON_2026-10-02.md)
+measures the same native training batches on three GPUs and records complete-work
+time/cost forecasts. RTX PRO 6000 is the preferred measured option for this recipe.
