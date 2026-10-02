@@ -168,11 +168,20 @@ def measure(checkpoint, name, dev, calibration, out, *, public_modes=("off",), d
         if not parity["passed"]:
             raise ValueError("pretrained v1/native parity failed; refuse continuation")
     raw_temperatures(decision)
-    cal = save("calibration", evaluate_tracks(decision, calibration, ("off", "low")), "calibration")
+    cal = evaluate_tracks(decision, calibration, ("off",))
+    reasoning_calibration = selection(calibration, 32, 8)
+    cal["rows"]["low"] = evaluate_tracks(decision, reasoning_calibration, ("low",))["rows"]["low"]
+    cal = save("calibration", cal, "calibration")
     fits = fit_report_calibrations(cal)
     for domain, artifact in fits.items():
         artifact.save(out / f"{name}-temperature-{'-'.join(domain)}.json")
-    raw = save("raw-dev", evaluate_tracks(decision, dev, ("off", "low")), "dev")
+    raw = evaluate_tracks(decision, dev, ("off",))
+    reasoning_dev = selection(dev, 32, 8)
+    secondary = evaluate_tracks(decision, reasoning_dev, ("low", "high"))
+    raw["rows"].update(secondary["rows"])
+    raw["summary"].update(secondary["summary"])
+    raw["reasoning_scope"] = "secondary preselected subset; high calibration is not fitted"
+    raw = save("raw-dev", raw, "dev")
     calibrated = save("calibrated-dev", recalibrate_report(raw, fits), "dev")
     if diagnostics:
         rich = [
