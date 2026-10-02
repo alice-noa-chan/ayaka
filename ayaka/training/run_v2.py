@@ -217,6 +217,10 @@ def main(argv=None):
     parser.add_argument("--allow-weight-downloads", action="store_true")
     parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--init-checkpoint", help="immutable trained adapter/head for continuation")
+    parser.add_argument(
+        "--profile-reference",
+        help="bound previous zero-update profile, revalidated on identical fresh batches",
+    )
     args = parser.parse_args(argv)
     manifest, splits = validate_bundle(args.bundle)
     recipe = json.loads((Path(args.bundle) / "training_config.json").read_text(encoding="utf-8"))
@@ -366,16 +370,23 @@ def execute_training(args, cfg, recipe, splits):
     planned_steps = (
         getattr(args, "planned_steps", 1200) if getattr(args, "profile_only", False) else args.steps
     )
-    profile = profile_production(
-        trainer,
-        stream(),
-        splits["train"],
-        inventory,
-        lambda sample: prepared_items(sample, tok, cfg, backend),
-        steps=planned_steps,
-        seed=trainer.cfg.seed,
-        weights=recipe["language_sampling"],
-    )
+    if getattr(args, "profile_reference", None):
+        from .reference_profile import reuse_profile
+
+        profile = reuse_profile(
+            args.profile_reference, trainer, stream(), cfg, recipe, inventory, planned_steps
+        )
+    else:
+        profile = profile_production(
+            trainer,
+            stream(),
+            splits["train"],
+            inventory,
+            lambda sample: prepared_items(sample, tok, cfg, backend),
+            steps=planned_steps,
+            seed=trainer.cfg.seed,
+            weights=recipe["language_sampling"],
+        )
     (root / "throughput.json").write_bytes(canonical(profile) + b"\n")
     overheads = profile_overheads(trainer, root / "io_profile")
     (root / "overheads.json").write_bytes(canonical(overheads) + b"\n")

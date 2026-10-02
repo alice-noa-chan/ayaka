@@ -24,7 +24,9 @@ from .scoped_calibration import checkpoint_fingerprint
 from .workload import describe_rows, finite_workload
 
 
-def prepare_recovery(source_bundle, checkpoint, out):
+def prepare_recovery(source_bundle, checkpoint, out, *, training_window_seconds=2400):
+    if type(training_window_seconds) is not int or not 1 <= training_window_seconds <= 28800:
+        raise ValueError("training window must be a positive integer within eight hours")
     root = Path(out)
     if root.exists():
         raise ValueError("recovery preparation requires a new directory")
@@ -65,7 +67,7 @@ def prepare_recovery(source_bundle, checkpoint, out):
         model=asdict(cfg),
         initialization="checkpoint_continuation",
         initial_checkpoint_sha256=identity,
-        completion_target_seconds=2400,
+        completion_target_seconds=training_window_seconds,
     )
     recipe["training"].update(
         lr=2e-5, head_lr=5e-5, micro_batch_tokens=4096, grad_checkpointing=True, seed=20261002
@@ -132,8 +134,14 @@ def main(argv=None):
     parser.add_argument("--source-bundle", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--training-window-seconds", type=int, default=2400)
     args = parser.parse_args(argv)
-    return prepare_recovery(args.source_bundle, args.checkpoint, args.out)
+    return prepare_recovery(
+        args.source_bundle,
+        args.checkpoint,
+        args.out,
+        training_window_seconds=args.training_window_seconds,
+    )
 
 
 if __name__ == "__main__":
