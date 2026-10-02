@@ -16,11 +16,13 @@ from .reasoning_v2 import SPLITS
 from .schema import Candidate, Question, Sample
 
 
-def verified_case(split, index):
+def verified_case(split, index, *, generation=1):
     if split not in SPLITS or index < 0:
         raise ValueError("unknown split or negative case")
     variant = SPLITS.index(split)
-    rng = random.Random(f"ayaka-recovery-1/{split}/{index}")
+    if type(generation) is not int or generation < 1:
+        raise ValueError("positive integer generation required")
+    rng = random.Random(f"ayaka-recovery-{generation}/{split}/{index}")
     family = ("temporal_numeric", "numeric", "rule_revision")[index % 3]
     year = 2028 + variant * 7 + index % 6
     month = rng.choice([1, 2, 3, 11, 12])
@@ -180,16 +182,17 @@ def candidate_numbers(facts, value, rng):
         numbers = list(range(7))
     else:
         rank = rng.randrange(5)
-        lower = rng.sample(range(1, 10), rank)
-        upper = rng.sample(range(1, 10), 4 - rank)
+        spread = max(10, value // 3)
+        lower = rng.sample(range(1, spread), rank)
+        upper = rng.sample(range(1, spread), 4 - rank)
         numbers = [value, *(value - n for n in lower), *(value + n for n in upper)]
     rng.shuffle(numbers)
     return numbers
 
 
-def noul_probe(split, index, family, value):
+def noul_probe(split, index, family, value, *, generation=1):
     """Truth is independent of index parity and its visible timestamp year."""
-    rng = random.Random(f"recovery-noul-2/{split}/{index}")
+    rng = random.Random(f"recovery-noul-3/{generation}/{split}/{index}")
     truth = bool(rng.getrandbits(1))
     if truth:
         return value, True
@@ -201,20 +204,22 @@ def noul_probe(split, index, family, value):
     return rng.choice(alternatives), False
 
 
-def recovery_curriculum(split, cases=128):
+def recovery_curriculum(split, cases=128, *, generation=1):
     if split not in SPLITS or type(cases) is not int or cases < 1:
         raise ValueError("positive cases and known split required")
     samples = []
     for index in range(cases):
-        facts, value, trace = verified_case(split, index)
-        lineage = hashlib.sha256(f"recovery-1/{split}/{index}".encode()).hexdigest()
+        facts, value, trace = verified_case(split, index, generation=generation)
+        lineage = hashlib.sha256(f"recovery-{generation}/{split}/{index}".encode()).hexdigest()
         for language in ("en", "ko", "ja"):
             questions, traces = [], {}
-            rng = random.Random(f"distractors/{split}/{index}")
+            rng = random.Random(f"distractors/{generation}/{split}/{index}")
             numbers = candidate_numbers(facts, value, rng)
             for kind in ("choice", "noul", "score"):
                 if kind == "noul":
-                    asked, truth = noul_probe(split, index, facts["family"], value)
+                    asked, truth = noul_probe(
+                        split, index, facts["family"], value, generation=generation
+                    )
                     question = Question.noul(
                         kind, f"Is the requested result {asked}?", float(truth)
                     )
@@ -242,14 +247,15 @@ def recovery_curriculum(split, cases=128):
                     evidence(facts, language),
                     questions,
                     {
-                        "source": "ayaka-recovery-verified-2",
-                        "candidate_design_version": 2,
+                        "source": "ayaka-recovery-verified-3",
+                        "candidate_design_version": 3,
                         "license": "MIT",
                         "split": split,
                         "language": language,
                         "modality": "text",
                         "source_lineage": lineage,
-                        "source_example_id": f"recovery-1/{split}/{index}/{language}",
+                        "source_example_id": f"recovery-{generation}/{split}/{index}/{language}",
+                        "generation": generation,
                         "task_family": facts["family"],
                         "generator_template_id": f"recovery/{split}/{facts['family']}",
                         "rule_combination": f"recovery/{split}/{facts['family']}",
