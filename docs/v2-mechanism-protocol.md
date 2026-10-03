@@ -1,5 +1,8 @@
 # Frozen Ayaka / Jeeves mechanism diagnosis
 
+The completed v1-only [results and execution ledger](v2-mechanism-results-20261004.md)
+are recorded separately, including incomplete attempts and control limitations.
+
 **Execution scope amendment:** the paired checkpoint forecast did not fit its
 full-cap time allowance, even after correcting fixed overhead. Neither attempt
 completed the cohort. The final admitted scope is **published v1 only**, with
