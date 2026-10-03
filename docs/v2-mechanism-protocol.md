@@ -24,18 +24,23 @@ These are their measurements, not an Ayaka replication or an official composite.
 ## Predeclared comparison
 
 Freeze published v1 and the delivered clean 200-step continuation. Use seed
-20261003 and the lowest SHA256(seed/lineage) **three independent English dev
-cases per each of six rules**: 18 cases, 54 typed questions per checkpoint.
+20261003 and the lowest SHA256(seed/lineage) **two independent English dev
+cases per each of six rules**: 12 cases, 36 typed questions per checkpoint.
+This reduction from the initial three-case design is made before any new model
+output, to leave time for complete evaluation and delivery within existing credit.
 Translations do not inflate the independent sample count. Calibration and test
 are never opened. Choose cases before looking at any model outputs.
 
-Each question has five contexts: production direct; an empty, closed reasoning
+Each question has five contexts: production direct; an empty, matched reasoning
 context; a greedy model-generated trace with 512 maximum tokens; a complete
 reference derivation; and a cyclic derivation from another selected case of the
 same rule. Reference notes are independently recomputed from the visible rule
 and facts and checked against every prepared target. They are **privileged
 interventions**, not inference capabilities. Identical oracle/distractor notes
 are flagged rather than replaced after evaluation.
+Generate first, then use its exact EOS token to close all three teacher-forced
+controls. When generation reaches the cap, leave every control unclosed as well.
+This avoids confusing different native EOS/turn markers with trace content.
 
 Read the same hidden states through native LM labels, the **existing trained
 Ayaka Set Mixer pointer**, and their inherited hybrid gate. This pointer is not
@@ -48,7 +53,8 @@ results. Each question has its own trace cache. Save raw distributions, trace
 text/hash, EOS/cap termination, token counts, and checkpoint/cohort identities.
 
 Report typed chance-corrected competence, NLL and Score RPS. Compare reasoning
-against **both direct and empty**: the latter controls for prompt/suffix changes.
+against **both direct and empty**: the latter controls for prompt/suffix changes
+and termination token. Content lengths still differ and remain a limitation.
 Compute paired 2,000-replicate underlying-case bootstrap intervals and the
 difference between LM and hybrid gains, relative to empty, on identical cases.
 The small, previously used dev domain makes these diagnostic intervals

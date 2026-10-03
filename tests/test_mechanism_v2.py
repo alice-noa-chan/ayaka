@@ -11,6 +11,7 @@ from ayaka.data.recovery_holdout import independent_holdout
 from ayaka.eval.mechanism_v2 import (
     CONDITIONS,
     HEADS,
+    complete_run_bound,
     evaluate_frozen,
     forced_trace,
     interaction_interval,
@@ -18,6 +19,7 @@ from ayaka.eval.mechanism_v2 import (
     reference_notes,
     score_heads,
     score_trace,
+    validate_plan,
 )
 from ayaka.model.electra import ElectraDecisionModel
 from ayaka.model.ragged import ragged_softmax
@@ -78,12 +80,37 @@ def test_oracle_refuses_corrupted_gold_or_visible_policy():
         reference_notes(sample)
 
 
+def test_complete_frozen_plan_and_full_cap_time_admission(tmp_path):
+    from ayaka.training.prepare_v2 import canonical, sha256
+
+    records = cohort(tmp_path, 2)
+    plan = {
+        "records": records,
+        "budget": 512,
+        "independent_cases": 12,
+        "questions_per_checkpoint": 36,
+        "cohort_sha256": sha256(canonical(records)),
+    }
+    validate_plan(plan)
+    corrupted = copy.deepcopy(plan)
+    corrupted["records"][0]["distractor"] = "Invented answer"
+    corrupted["cohort_sha256"] = sha256(canonical(corrupted["records"]))
+    with pytest.raises(ValueError, match="distractor"):
+        validate_plan(corrupted)
+    bound = complete_run_bound(
+        {"generated": {"tokens": 100, "seconds": 10}, "question_s": 12}, 71, 1
+    )
+    assert bound == pytest.approx((51.2 + 2) * 71 * 1.10 + 240)
+
+
 @pytest.mark.parametrize("gate", [0, 0.7])
-def test_three_heads_same_encoding_match_production_and_full_cache(gate):
+@pytest.mark.parametrize("kind", ["noul", "choice", "score"])
+def test_three_heads_same_encoding_match_production_and_full_cache(gate, kind):
     model, tok = tiny(), Tok()
     with torch.no_grad():
         model.gate.fill_(gate)
-    q = QuestionSpec("choice", "Which?", ["first", "second", "third"])
+    candidates = ["false", "true"] if kind == "noul" else ["first", "second", "third"]
+    q = QuestionSpec(kind, "Which?", candidates, [0, 1, 2] if kind == "score" else None)
     prefix, items = encode_decision("State", [q.view()], tok, 8192)
     batch = full_rows(items, tok.pad_id)
     before = {k: v.clone() for k, v in model.state_dict().items()}
@@ -101,7 +128,14 @@ def test_three_heads_same_encoding_match_production_and_full_cache(gate):
     from ayaka.reasoning_pipeline import readout_suffix
 
     full = full_rows(
-        [EncodedQuestion(trace.input_ids + trace.token_ids, readout_suffix(tok, q), 1)], tok.pad_id
+        [
+            EncodedQuestion(
+                trace.input_ids + trace.token_ids,
+                readout_suffix(tok, q),
+                {"noul": 0, "choice": 1, "score": 2}[kind],
+            )
+        ],
+        tok.pad_id,
     )
     cached = score_trace(gen, trace, q)
     uncached = score_heads(model, full, None)
@@ -126,6 +160,12 @@ def test_readout_restored_on_failure_and_context_never_truncated(monkeypatch):
     assert model.cfg.readout == "hybrid"
     with pytest.raises(ValueError, match="refuse truncation"):
         forced_trace(TraceGenerator(model, tok, max_context=8), "State", q, "Notes")
+    gen = TraceGenerator(model, tok)
+    gen.eos = {1}
+    assert forced_trace(gen, "State", q, "", termination_token=1).token_ids == [1]
+    assert forced_trace(gen, "State", q, "").token_ids == []
+    with pytest.raises(ValueError, match="recognized EOS"):
+        forced_trace(gen, "State", q, "Notes", termination_token=3)
 
 
 def test_end_to_end_one_generation_per_question_frozen_and_paired(tmp_path, monkeypatch):

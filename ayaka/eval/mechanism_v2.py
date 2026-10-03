@@ -35,6 +35,58 @@ CONDITIONS = ("direct", "empty", "generated", "oracle", "distractor")
 SEED = 20261003
 
 
+def validate_plan(plan):
+    records = plan["records"]
+    if (
+        plan["budget"] != 512
+        or plan["independent_cases"] != 12
+        or plan["questions_per_checkpoint"] != 36
+        or len(records) != 12
+        or sha256(canonical(records)) != plan["cohort_sha256"]
+    ):
+        raise ValueError("require the complete frozen 12-case, 36-question plan")
+    counts, identities = defaultdict(int), set()
+    for record in records:
+        sample = Sample.from_json(record["sample"])
+        m = sample.metadata
+        if (
+            m.get("source") != "ayaka-independent-recovery-1"
+            or m.get("split") != "dev"
+            or m.get("language") != "en"
+            or not m.get("evaluation_only")
+            or m["source_lineage"] in identities
+            or sorted(q.type for q in sample.questions) != ["choice", "noul", "score"]
+        ):
+            raise ValueError("plan contains a duplicate case or unsupported partition")
+        identities.add(m["source_lineage"])
+        counts[m["semantic_rule"]] += 1
+        if record["oracle"] != reference_notes(sample):
+            raise ValueError("oracle differs from the visible-fact reference")
+    if dict(counts) != dict.fromkeys(POLICIES["en"], 2):
+        raise ValueError("plan must preserve every predeclared rule stratum")
+    by_id = {r["sample"]["metadata"]["source_example_id"]: r for r in records}
+    for record in records:
+        source = by_id.get(record["distractor_source"])
+        if (
+            source is None
+            or source is record
+            or source["oracle"] != record["distractor"]
+            or source["sample"]["metadata"]["semantic_rule"]
+            != record["sample"]["metadata"]["semantic_rule"]
+        ):
+            raise ValueError("distractor must come from the other selected case in the same rule")
+
+
+def complete_run_bound(progress, remaining_questions, future_checkpoints=0):
+    """Use the observed first-question rate at the full cap, without an extra GPU probe."""
+    generated = progress["generated"]
+    if generated["tokens"] <= 0:
+        raise ValueError("cannot estimate a complete run without measured generation")
+    full_cap = generated["seconds"] / generated["tokens"] * 512
+    other = max(0, progress["question_s"] - generated["seconds"])
+    return (full_cap + other) * remaining_questions * 1.10 + 120 + 120 * future_checkpoints
+
+
 def reference_notes(sample):
     """Recompute from visible facts; never copy a target into the diagnostic trace."""
     import calendar
@@ -209,14 +261,15 @@ def score_trace(generator, trace, spec):
 
 
 @torch.inference_mode()
-def forced_trace(generator, state, spec, text):
+def forced_trace(generator, state, spec, text, termination_token=None):
     ids, payload = generator.prepare(generator.messages_for(state, spec))
     if payload is not None:
         raise ValueError("text-only intervention required")
     tokens = generator.tok.encode(text)
-    eos = getattr(getattr(generator.tok, "hf", None), "eos_token_id", None)
-    if eos is not None:
-        tokens.append(eos)
+    if termination_token is not None:
+        if termination_token not in generator.eos:
+            raise ValueError("matched termination token must be a recognized EOS")
+        tokens.append(termination_token)
     suffix = readout_suffix(generator.tok, spec, generator.model.cfg.max_label_candidates)
     if len(tokens) > 512 or len(ids) + len(tokens) + len(suffix.suffix_ids) > generator.max_context:
         raise ValueError("complete intervention does not fit; refuse truncation")
@@ -276,6 +329,7 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
         if record["oracle"] != reference_notes(sample):
             raise ValueError("oracle intervention differs from verified visible facts")
         for question in sample.questions:
+            question_start = monotonic()
             if deadline is not None and monotonic() >= deadline:
                 raise TimeoutError("diagnostic deadline reached; cohort remains incomplete")
             q = _noul_canonical(question)
@@ -315,7 +369,10 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
                 raise ValueError("diagnostic hybrid output differs from production")
             del cache, output
             trace_info = {}
-            for condition in CONDITIONS[1:]:
+            termination_token = None
+            # Generate first so interventions use the exact same closing token.
+            # A length-capped generated trace has no closer in any matched arm.
+            for condition in ("generated", "empty", "oracle", "distractor"):
                 start = monotonic()
                 if condition == "generated":
                     suffix = readout_suffix(tok, spec, model.cfg.max_label_candidates)
@@ -328,9 +385,11 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
                         raise ValueError(
                             "empty generated trace; refuse to hide fallback in an ablation"
                         )
+                    if trace.finish_reason == "eos":
+                        termination_token = trace.token_ids[-1]
                 else:
                     text = "" if condition == "empty" else record[condition]
-                    trace = forced_trace(generator, sample.state, spec, text)
+                    trace = forced_trace(generator, sample.state, spec, text, termination_token)
                 probabilities[condition] = score_trace(generator, trace, spec)
                 trace_info[condition] = {
                     "tokens": trace.generated_tokens,
@@ -338,6 +397,7 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
                     "seconds": monotonic() - start,
                     "trace_sha256": sha256(trace.text.encode()),
                     "text": trace.text,
+                    "matched_termination_token": termination_token,
                 }
                 del trace
             identity = sample.metadata["source_example_id"] + "/" + q.id
@@ -375,6 +435,8 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
                         "total_cases": len(records),
                         "completed_questions": len(diagnostics),
                         "generated": trace_info["generated"],
+                        "question_s": monotonic() - question_start,
+                        "rows": {key: rows[-1] for key, rows in cells.items()},
                     }
                 )
     return {
@@ -412,6 +474,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=3600)
     args = ap.parse_args()
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
+    validate_plan(plan)
     if args.out.exists() or sha256(canonical(plan["records"])) != plan["cohort_sha256"]:
         raise ValueError("require a new output and an intact frozen cohort")
     args.out.mkdir(parents=True)
@@ -423,13 +486,48 @@ def main():
             raise ValueError("checkpoint differs from the frozen plan")
         model = load_checkpoint(str(path), device="cuda", dtype=torch.bfloat16, merge=False).eval()
         decision = controlled_decision(model, HFTokenizer.for_config(model.cfg))
+
+        def emit(p, checkpoint=name):
+            with (args.out / (checkpoint + ".progress.jsonl")).open("a", encoding="utf-8") as file:
+                file.write(json.dumps(p, ensure_ascii=False) + "\n")
+            brief = {k: v for k, v in p.items() if k not in {"rows", "generated"}}
+            print(
+                json.dumps(
+                    {
+                        "checkpoint": checkpoint,
+                        **brief,
+                        "tokens": p["generated"]["tokens"],
+                        "finish_reason": p["generated"]["finish_reason"],
+                    }
+                ),
+                flush=True,
+            )
+            if p["completed_questions"] == 1:
+                left = plan["questions_per_checkpoint"] - 1
+                future = int(checkpoint == "parent")
+                bound = complete_run_bound(
+                    p, left + future * plan["questions_per_checkpoint"], future
+                )
+                print(
+                    json.dumps(
+                        {
+                            "checkpoint": checkpoint,
+                            "full_cap_remaining_seconds": bound,
+                            "available_seconds": deadline - monotonic(),
+                        }
+                    ),
+                    flush=True,
+                )
+                if bound > deadline - monotonic():
+                    raise TimeoutError(
+                        "measured complete-cohort envelope exceeds remaining time; no partial success"
+                    )
+
         report = evaluate_frozen(
             decision,
             plan["records"],
             deadline=deadline,
-            progress=lambda p, checkpoint=name: print(
-                json.dumps({"checkpoint": checkpoint, **p}), flush=True
-            ),
+            progress=emit,
         )
         report["model_id"] = identity
         (args.out / (name + ".json")).write_bytes(canonical(report) + b"\n")

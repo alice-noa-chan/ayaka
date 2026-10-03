@@ -8,10 +8,12 @@ from pathlib import Path
 from scripts.beam_v2.worker import digest
 
 
-def verify_delivery(archive, receipt, destination):
+def verify_delivery(archive, receipt, destination, *, completion="training"):
     import zstandard
 
     archive, destination = Path(archive), Path(destination)
+    if completion not in {"training", "mechanism"}:
+        raise ValueError("unsupported result completion type")
     if archive.stat().st_size != receipt["bytes"] or digest(archive) != receipt["sha256"]:
         raise ValueError("downloaded result archive does not match its durable receipt")
     destination.mkdir(exist_ok=False, parents=True)
@@ -39,7 +41,35 @@ def verify_delivery(archive, receipt, destination):
     if outcome["status"] != receipt["status"]:
         raise ValueError("result status differs from the durable receipt")
     complete = None
-    if receipt["status"] == "complete":
+    if receipt["status"] == "complete" and completion == "mechanism":
+        complete = json.loads((root / "mechanism/complete.json").read_text())
+        if complete != {
+            "complete": True,
+            "optimizer_steps": 0,
+            "full_training_started": False,
+            "test_evaluated": False,
+        }:
+            raise ValueError("diagnostic receipt claims training or lacks completion")
+        plan = json.loads((root / "plan.json").read_text())
+        for checkpoint in ("parent", "pilot"):
+            report = json.loads((root / ("mechanism/" + checkpoint + ".json")).read_text())
+            if (
+                not report["complete"]
+                or report["model_id"] != plan["checkpoints"][checkpoint]
+                or report["cohort_sha256"] != plan["cohort_sha256"]
+                or report["optimizer_steps"] != 0
+            ):
+                raise ValueError("diagnostic report differs from the frozen plan")
+            expected_keys = {
+                f"{c}/{h}"
+                for c in ("direct", "empty", "generated", "oracle", "distractor")
+                for h in ("lm", "pointer", "hybrid")
+            }
+            if set(report["rows"]) != expected_keys or any(
+                len(rows) != plan["questions_per_checkpoint"] for rows in report["rows"].values()
+            ):
+                raise ValueError("diagnostic did not finish every context and head")
+    elif receipt["status"] == "complete":
         complete = json.loads((root / "recovery/complete.json").read_text())
         if not complete["complete"] or complete["training_steps"] != 200:
             raise ValueError("successful delivery did not complete the fixed 200-step schedule")
@@ -74,9 +104,15 @@ if __name__ == "__main__":
     parser.add_argument("--receipt", required=True, type=Path)
     parser.add_argument("--destination", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--completion", choices=("training", "mechanism"), default="training")
     args = parser.parse_args()
-    result = verify_delivery(args.archive, json.loads(args.receipt.read_text()), args.destination)
-    if result["completion"]:
+    result = verify_delivery(
+        args.archive,
+        json.loads(args.receipt.read_text()),
+        args.destination,
+        completion=args.completion,
+    )
+    if result["completion"] and args.completion == "training":
         result["tensors"] = verify_tensors(args.destination / "result/recovery/pilot/checkpoint")
     args.report.write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
