@@ -43,15 +43,20 @@ def verify_delivery(archive, receipt, destination, *, completion="training"):
     complete = None
     if receipt["status"] == "complete" and completion == "mechanism":
         complete = json.loads((root / "mechanism/complete.json").read_text())
-        if complete != {
+        plan = json.loads((root / "plan.json").read_text())
+        expected_complete = {
             "complete": True,
             "optimizer_steps": 0,
             "full_training_started": False,
             "test_evaluated": False,
-        }:
+        }
+        if "active_checkpoints" in plan:
+            if plan["active_checkpoints"] not in [["parent"], ["parent", "pilot"]]:
+                raise ValueError("diagnostic checkpoint scope is invalid")
+            expected_complete["checkpoints_evaluated"] = plan["active_checkpoints"]
+        if complete != expected_complete:
             raise ValueError("diagnostic receipt claims training or lacks completion")
-        plan = json.loads((root / "plan.json").read_text())
-        for checkpoint in ("parent", "pilot"):
+        for checkpoint in plan.get("active_checkpoints", ["parent", "pilot"]):
             report = json.loads((root / ("mechanism/" + checkpoint + ".json")).read_text())
             if (
                 not report["complete"]

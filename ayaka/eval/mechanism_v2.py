@@ -66,6 +66,8 @@ class TimedTraceGenerator(TraceGenerator):
 
 def validate_plan(plan):
     records = plan["records"]
+    if plan.get("active_checkpoints", ["parent", "pilot"]) not in [["parent"], ["parent", "pilot"]]:
+        raise ValueError("require predeclared v1-only or paired checkpoint scope")
     if (
         plan["budget"] != 512
         or plan["independent_cases"] != 12
@@ -525,14 +527,17 @@ def main():
     args.out.mkdir(parents=True)
     deadline = monotonic() + args.seconds
     torch.set_num_threads(4)
-    for name, path in [("parent", args.parent), ("pilot", args.pilot)]:
+    active = plan.get("active_checkpoints", ["parent", "pilot"])
+    for index, name in enumerate(active):
+        path = getattr(args, name)
         identity = checkpoint_fingerprint(path)
         if identity != plan["checkpoints"][name]:
             raise ValueError("checkpoint differs from the frozen plan")
         model = load_checkpoint(str(path), device="cuda", dtype=torch.bfloat16, merge=False).eval()
         decision = controlled_decision(model, HFTokenizer.for_config(model.cfg))
+        future_count = len(active) - index - 1
 
-        def emit(p, checkpoint=name):
+        def emit(p, checkpoint=name, future=future_count):
             with (args.out / (checkpoint + ".progress.jsonl")).open("a", encoding="utf-8") as file:
                 file.write(json.dumps(p, ensure_ascii=False) + "\n")
             brief = {k: v for k, v in p.items() if k not in {"rows", "generated"}}
@@ -549,7 +554,6 @@ def main():
             )
             if p["completed_questions"] == 1:
                 left = plan["questions_per_checkpoint"] - 1
-                future = int(checkpoint == "parent")
                 bound = complete_run_bound(
                     p, left + future * plan["questions_per_checkpoint"], future
                 )
@@ -588,6 +592,7 @@ def main():
                 "optimizer_steps": 0,
                 "full_training_started": False,
                 "test_evaluated": False,
+                "checkpoints_evaluated": active,
             }
         )
         + b"\n"

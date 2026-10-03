@@ -16,7 +16,7 @@ from scripts.beam_v2.worker import ARCHIVE_SHA, canonical, digest, write_json
 
 PARENT = "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2"
 PILOT = "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d"
-RUN_NAME = "ayaka-mechanism-20261003-corrected"
+RUN_NAME = "ayaka-mechanism-20261003-v1"
 
 
 def build_overlay(dev, parent, pilot, out):
@@ -35,6 +35,7 @@ def build_overlay(dev, parent, pilot, out):
         "seed": 20261003,
         "budget": 512,
         "checkpoints": {"parent": PARENT, "pilot": PILOT},
+        "active_checkpoints": ["parent"],
         "archive_sha256": ARCHIVE_SHA,
         "dev_sha256": digest(dev),
         "code_revision": subprocess.check_output(
@@ -50,12 +51,6 @@ def build_overlay(dev, parent, pilot, out):
         "ayaka/eval/mechanism_v2.py": root / "ayaka/eval/mechanism_v2.py",
         "ayaka/eval/v2.py": root / "ayaka/eval/v2.py",
     }
-    pilot = Path(pilot)
-    for name in ["ayaka_config.json", "electra_config.json", "head.safetensors"]:
-        files["diagnostic-pilot/" + name] = pilot / name
-    for path in sorted((pilot / "adapter").iterdir()):
-        if path.suffix in {".json", ".safetensors"}:
-            files["diagnostic-pilot/adapter/" + path.name] = path
     manifest = {
         "files": {
             name: {"bytes": p.stat().st_size, "sha256": digest(p)} for name, p in files.items()

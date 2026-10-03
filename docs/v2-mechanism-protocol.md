@@ -1,5 +1,14 @@
 # Frozen Ayaka / Jeeves mechanism diagnosis
 
+**Execution scope amendment:** the paired checkpoint forecast did not fit its
+full-cap time allowance, even after correcting fixed overhead. Neither attempt
+completed the cohort. The final admitted scope is **published v1 only**, with
+all 12 preselected cases, 36 questions, five contexts and three readouts
+unchanged. No pilot comparison is claimed. The failed receipts remain separate.
+The v1-only task has a 3,400-second backend limit: $2.35 maximum conservative
+compute plus $0.10 margin, admitted after both earlier actual charges. This
+reduces checkpoint scope, not the reasoning budget or completed-case requirement.
+
 This is a diagnostic on English **dev**, not a new training run, release gate,
 JevBench score, or reproduction of Jeeves. The previous clean pilot's main
 comparison used reasoning **off**; three on/high probes cannot establish the
@@ -16,6 +25,12 @@ uses Qwen3.5-9B, half-trace SFT, then CISPO reinforcement learning. Questions an
 options are repeated after a closed thinking region. The diffusion drafter is a
 separate latency optimization. Ayaka's failed continuation used Gemma 4 E4B,
 the inherited hybrid head, and 200 joint-SFT steps, without CISPO.
+Ayaka's `chat_ids` explicitly sets `enable_thinking=False` and requests ordinary
+worked steps. Gemma's pinned native template instead injects `<|think|>` when
+its thinking mode is enabled. Native thinking is not evaluated by this protocol.
+The SFT builder appends tokenizer EOS (1), while the first observed v1 trace
+ended with native turn EOS (106). Controls match the actual generated closer;
+the causal effect of the SFT/inference closer difference is not isolated here.
 
 The authors report no-thinking 0.804 and thinking 0.840 on the same 2,962-question
 test in their [README](https://github.com/PostHog/jeeves/blob/3f948dec68187ed3ced9152ed3d84b73e498665c/README.md).

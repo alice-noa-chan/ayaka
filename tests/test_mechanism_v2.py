@@ -93,6 +93,9 @@ def test_complete_frozen_plan_and_full_cap_time_admission(tmp_path):
         "cohort_sha256": sha256(canonical(records)),
     }
     validate_plan(plan)
+    validate_plan({**plan, "active_checkpoints": ["parent"]})
+    with pytest.raises(ValueError, match="checkpoint scope"):
+        validate_plan({**plan, "active_checkpoints": ["pilot"]})
     corrupted = copy.deepcopy(plan)
     corrupted["records"][0]["distractor"] = "Invented answer"
     corrupted["cohort_sha256"] = sha256(canonical(corrupted["records"]))

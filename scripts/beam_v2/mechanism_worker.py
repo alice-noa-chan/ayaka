@@ -14,8 +14,8 @@ try:
 except ImportError:  # Beam syncs this directory, not its parent package.
     import worker
 
-RUN_NAME = "ayaka-mechanism-20261003-corrected"
-SECONDS = 4800
+RUN_NAME = "ayaka-mechanism-20261003-v1"
+SECONDS = 3400
 
 
 def overlay_allowed(name):
@@ -112,8 +112,8 @@ def validate_admission(admission):
     ):
         raise ValueError("invalid resource budget")
     if (
-        admission.get("compute_ceiling_usd") != "3.31"
-        or admission.get("planned_ceiling_usd") != "3.41"
+        admission.get("compute_ceiling_usd") != "2.35"
+        or admission.get("planned_ceiling_usd") != "2.45"
     ):
         raise ValueError("require the frozen conservative cost envelope")
 
@@ -139,7 +139,7 @@ def execute(volume, overlay_sha, plan_sha, admission):
         archive = worker.stage_archive(volume / worker.ARCHIVE, root / worker.ARCHIVE)
         progress("verify_and_extract_immutable_kit")
         kit = worker.extract_kit(archive, root)
-        overlay = root / "mechanism-overlay-corrected.tar.zst"
+        overlay = root / "mechanism-overlay-v1.tar.zst"
         shutil.copyfile(volume / overlay.name, overlay)
         manifest = apply_overlay(overlay, kit, overlay_sha)
         if worker.digest(kit / "mechanism-plan.json") != plan_sha:
@@ -161,7 +161,7 @@ def execute(volume, overlay_sha, plan_sha, admission):
         worker.validate_hardware("RTX5090", observed)
         worker.write_json(output / "hardware.json", observed)
         remaining = SECONDS - (time.monotonic() - started) - 180
-        if remaining < 3600:
+        if remaining < 2300:
             raise TimeoutError(
                 "insufficient complete-cohort envelope after staging; no inference started"
             )
@@ -193,6 +193,7 @@ def execute(volume, overlay_sha, plan_sha, admission):
             "optimizer_steps": 0,
             "full_training_started": False,
             "test_evaluated": False,
+            "checkpoints_evaluated": ["parent"],
         }:
             raise ValueError("diagnostic completion receipt is invalid")
         status = "complete"
