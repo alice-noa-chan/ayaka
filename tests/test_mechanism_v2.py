@@ -11,6 +11,7 @@ from ayaka.data.recovery_holdout import independent_holdout
 from ayaka.eval.mechanism_v2 import (
     CONDITIONS,
     HEADS,
+    TimedTraceGenerator,
     complete_run_bound,
     evaluate_frozen,
     forced_trace,
@@ -98,9 +99,48 @@ def test_complete_frozen_plan_and_full_cap_time_admission(tmp_path):
     with pytest.raises(ValueError, match="distractor"):
         validate_plan(corrupted)
     bound = complete_run_bound(
-        {"generated": {"tokens": 100, "seconds": 10}, "question_s": 12}, 71, 1
+        {
+            "generated": {
+                "tokens": 100,
+                "seconds": 11.5,
+                "decode_seconds": 10,
+                "prefill_seconds": 1,
+                "readout_seconds": 0.5,
+            },
+            "question_s": 13.5,
+        },
+        71,
+        1,
     )
-    assert bound == pytest.approx((51.2 + 2) * 71 * 1.10 + 240)
+    assert bound == pytest.approx((51.2 + 1.5 + 2) * 71 * 1.10 + 240)
+    short = complete_run_bound(
+        {
+            "generated": {
+                "tokens": 7,
+                "seconds": 2.2,
+                "decode_seconds": 0.7,
+                "prefill_seconds": 1,
+                "readout_seconds": 0.5,
+            },
+            "question_s": 4.2,
+        },
+        71,
+        1,
+    )
+    assert short == pytest.approx(bound)
+
+
+def test_timed_generation_preserves_trace_and_cache_probabilities():
+    model, tok = tiny(), Tok()
+    spec = QuestionSpec("choice", "Which?", ["first", "second"])
+    ordinary, timed = TraceGenerator(model, tok), TimedTraceGenerator(model, tok)
+    messages = ordinary.messages_for("State", spec)
+    ordinary.eos = timed.eos = set()
+    first = ordinary.generate_trace(messages, 3)
+    second = timed.generate_trace(messages, 3)
+    assert first.token_ids == second.token_ids and first.text == second.text
+    assert timed.prefill_seconds > 0 and timed.decode_seconds > 0
+    assert ordinary.readout(first, spec) == pytest.approx(timed.readout(second, spec))
 
 
 @pytest.mark.parametrize("gate", [0, 0.7])

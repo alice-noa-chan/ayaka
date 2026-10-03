@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from time import monotonic
+from time import monotonic, perf_counter
 
 import torch
 
@@ -33,6 +33,35 @@ from .v2 import paired_report, summarize, typed_row
 HEADS = ("lm", "pointer", "hybrid")
 CONDITIONS = ("direct", "empty", "generated", "oracle", "distractor")
 SEED = 20261003
+
+
+class TimedTraceGenerator(TraceGenerator):
+    """Separate fixed prefill from per-token decoding; generation is unchanged."""
+
+    prefill_seconds = 0.0
+    decode_seconds = 0.0
+
+    def synchronize(self):
+        device = self.model.embed_weight().device
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+
+    def prefill(self, ids, payload):
+        self.synchronize()
+        start = perf_counter()
+        result = super().prefill(ids, payload)
+        self.synchronize()
+        self.prefill_seconds = perf_counter() - start
+        return result
+
+    def generate_trace(self, messages, budget, reserve=0):
+        self.synchronize()
+        self.prefill_seconds = 0.0
+        start = perf_counter()
+        trace = super().generate_trace(messages, budget, reserve)
+        self.synchronize()
+        self.decode_seconds = max(0, perf_counter() - start - self.prefill_seconds)
+        return trace
 
 
 def validate_plan(plan):
@@ -82,7 +111,11 @@ def complete_run_bound(progress, remaining_questions, future_checkpoints=0):
     generated = progress["generated"]
     if generated["tokens"] <= 0:
         raise ValueError("cannot estimate a complete run without measured generation")
-    full_cap = generated["seconds"] / generated["tokens"] * 512
+    full_cap = (
+        generated["decode_seconds"] / generated["tokens"] * 512
+        + generated["prefill_seconds"]
+        + generated["readout_seconds"]
+    )
     other = max(0, progress["question_s"] - generated["seconds"])
     return (full_cap + other) * remaining_questions * 1.10 + 120 + 120 * future_checkpoints
 
@@ -321,7 +354,7 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
         raise ValueError("use the predeclared 512-token diagnostic budget")
     model, tok = decision.model, decision.tok
     model.eval()
-    generator = TraceGenerator(model, tok, apply_temperature=False)
+    generator = TimedTraceGenerator(model, tok, apply_temperature=False)
     cells = {f"{condition}/{head}": [] for condition in CONDITIONS for head in HEADS}
     diagnostics = []
     for case_index, record in enumerate(records):
@@ -329,7 +362,7 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
         if record["oracle"] != reference_notes(sample):
             raise ValueError("oracle intervention differs from verified visible facts")
         for question in sample.questions:
-            question_start = monotonic()
+            question_start = perf_counter()
             if deadline is not None and monotonic() >= deadline:
                 raise TimeoutError("diagnostic deadline reached; cohort remains incomplete")
             q = _noul_canonical(question)
@@ -373,7 +406,7 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
             # Generate first so interventions use the exact same closing token.
             # A length-capped generated trace has no closer in any matched arm.
             for condition in ("generated", "empty", "oracle", "distractor"):
-                start = monotonic()
+                start = perf_counter()
                 if condition == "generated":
                     suffix = readout_suffix(tok, spec, model.cfg.max_label_candidates)
                     trace = generator.generate_trace(
@@ -390,14 +423,26 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
                 else:
                     text = "" if condition == "empty" else record[condition]
                     trace = forced_trace(generator, sample.state, spec, text, termination_token)
+                generation_timing = (
+                    {
+                        "prefill_seconds": generator.prefill_seconds,
+                        "decode_seconds": generator.decode_seconds,
+                    }
+                    if condition == "generated"
+                    else {}
+                )
+                readout_start = perf_counter()
                 probabilities[condition] = score_trace(generator, trace, spec)
                 trace_info[condition] = {
                     "tokens": trace.generated_tokens,
                     "finish_reason": trace.finish_reason,
-                    "seconds": monotonic() - start,
+                    "seconds": perf_counter() - start,
                     "trace_sha256": sha256(trace.text.encode()),
                     "text": trace.text,
                     "matched_termination_token": termination_token,
+                    "input_tokens": len(trace.input_ids),
+                    "readout_seconds": perf_counter() - readout_start,
+                    **generation_timing,
                 }
                 del trace
             identity = sample.metadata["source_example_id"] + "/" + q.id
@@ -435,7 +480,7 @@ def evaluate_frozen(decision, records, budget=512, progress=None, deadline=None)
                         "total_cases": len(records),
                         "completed_questions": len(diagnostics),
                         "generated": trace_info["generated"],
-                        "question_s": monotonic() - question_start,
+                        "question_s": perf_counter() - question_start,
                         "rows": {key: rows[-1] for key, rows in cells.items()},
                     }
                 )

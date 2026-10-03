@@ -89,3 +89,16 @@ invoking. No top-up, training, marketplace substitution or paid automatic retry.
 Return an incomplete receipt if the whole cohort cannot finish. Download and
 verify every result byte, confirm compute stops, then remove only this run's
 temporary volume. Preserve the public v1 and unrelated resources.
+
+### Timing correction, before any completed comparison
+
+The initial diagnostic produced only one v1 question before its admission
+estimate rejected further work. That estimate incorrectly divided prefill and
+readout costs by seven generated tokens and multiplied them by 512. The failed
+receipt and all 15 first-question rows are preserved; no aggregate comparison
+was completed. Separate fixed prefill/readout latency from synchronized decode
+latency and extrapolate only the latter. A deliberate corrected run keeps the
+same cases, weights, contexts and budget; no outcome-dependent selection is
+made. Its separately named receipt preserves the failure, and fresh admission
+must subtract the first run's actual charge. The backend still has zero automatic
+retries and the original balance remains the total spending limit.

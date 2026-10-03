@@ -14,7 +14,7 @@ try:
 except ImportError:  # Beam syncs this directory, not its parent package.
     import worker
 
-RUN_NAME = "ayaka-mechanism-20261003"
+RUN_NAME = "ayaka-mechanism-20261003-corrected"
 SECONDS = 4800
 
 
@@ -139,11 +139,13 @@ def execute(volume, overlay_sha, plan_sha, admission):
         archive = worker.stage_archive(volume / worker.ARCHIVE, root / worker.ARCHIVE)
         progress("verify_and_extract_immutable_kit")
         kit = worker.extract_kit(archive, root)
-        overlay = root / "mechanism-overlay.tar.zst"
+        overlay = root / "mechanism-overlay-corrected.tar.zst"
         shutil.copyfile(volume / overlay.name, overlay)
         manifest = apply_overlay(overlay, kit, overlay_sha)
         if worker.digest(kit / "mechanism-plan.json") != plan_sha:
             raise ValueError("plan checksum differs from the admitted plan")
+        if json.loads((kit / "mechanism-plan.json").read_text())["run_name"] != RUN_NAME:
+            raise ValueError("plan does not identify this separately admitted run")
         worker.write_json(output / "overlay.json", manifest)
         worker.write_json(output / "admission.json", admission)
         shutil.copyfile(kit / "mechanism-plan.json", output / "plan.json")

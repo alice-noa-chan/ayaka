@@ -16,7 +16,7 @@ from scripts.beam_v2.worker import ARCHIVE_SHA, canonical, digest, write_json
 
 PARENT = "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2"
 PILOT = "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d"
-RUN_NAME = "ayaka-mechanism-20261003"
+RUN_NAME = "ayaka-mechanism-20261003-corrected"
 
 
 def build_overlay(dev, parent, pilot, out):

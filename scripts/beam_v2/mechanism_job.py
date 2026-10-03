@@ -9,7 +9,7 @@ from beam import Image, Volume, function
 image = Image(
     base_image="docker.io/library/ubuntu:24.04", python_version="python3.11"
 ).add_python_packages(["zstandard==0.25.0"])
-volume = Volume(name=mechanism_worker.RUN_NAME, mount_path="/ayaka-volume")
+volume = Volume(name="ayaka-mechanism-20261003", mount_path="/ayaka-volume")
 
 
 @function(
