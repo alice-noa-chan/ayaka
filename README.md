@@ -1,5 +1,13 @@
 # Ayaka: an open, license-clean Jev-class decision model
 
+> **Experimental v2 branch — not a released model.** Stable v1 code and published
+> checkpoints belong to [`main`](https://github.com/alice-noa-chan/ayaka/tree/main).
+> This branch preserves v2 development and experiments, including failed pilots;
+> it does not supersede v1. The clean 200-step continuation regressed on matched
+> dev evaluation (raw CC 9.93 → 2.81) and was not promoted. See the
+> [measured results](docs/experiments/V2_CLEAN_BEAM_2026-10-03.md).
+> The published-model benchmark results below describe v1, not this pilot.
+
 <p align="center"><img src="docs/assets/ayaka.png" width="256" alt="Ayaka"></p>
 
 Hand it a **state** and typed questions (`noul` / `choice` / `score`) with
