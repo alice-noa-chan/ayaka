@@ -9,6 +9,10 @@ from ayaka.swift.policy import Policy, temperature_scale
 from ayaka.swift.score import composite, score_reads
 
 
+def fit_exploratory(rows, **kwargs):
+    return fit_policy(rows, exploratory=True, **kwargs)
+
+
 def row(kind, probs, gold, **extra):
     return {
         "type": kind,
@@ -63,7 +67,7 @@ def test_recovers_known_temperature_for_each_primitive():
                     "split": "calibration",
                 }
             )
-    policy = fit_policy(rows, fitted_on="synthetic private")
+    policy = fit_exploratory(rows, fitted_on="synthetic private")
     assert policy.t_choice == pytest.approx(3.4, abs=1e-5)
     assert policy.search["nll_temperatures"]["t_noul"] == pytest.approx(2.1, abs=1e-5)
     assert policy.t_score == pytest.approx(0.7, abs=1e-5)
@@ -85,8 +89,8 @@ def test_public_refusal_override_and_provenance(tmp_path):
         row("score", {"0": 0, "1": 1}, "1"),
     ]
     with pytest.raises(ValueError, match="REFUSING public=True"):
-        fit_policy(rows)
-    policy = fit_policy(rows, allow_public=True)
+        fit_exploratory(rows)
+    policy = fit_exploratory(rows, allow_public=True)
     assert policy.promotable is False
     assert "allow_public=True" in policy.fitted_on
     assert "public=1" in policy.fitted_on
@@ -101,6 +105,7 @@ def test_public_refusal_override_and_provenance(tmp_path):
             str(source),
             "--out",
             str(output),
+            "--exploratory",
             "--allow-public",
             "--speed-axis",
             "82",
@@ -117,7 +122,7 @@ def test_public_refusal_override_and_provenance(tmp_path):
 
 def test_no_commit_when_calibration_cost_outweighs_competence_gain():
     rows = synthetic_reads(5)
-    policy = fit_policy(rows)
+    policy = fit_exploratory(rows)
     assert policy.commit_margin is None
     committed = replace(policy, noul_commit=True, commit_margin=0.0)
     before, after = score_reads(rows, policy), score_reads(rows, committed)
@@ -127,7 +132,7 @@ def test_no_commit_when_calibration_cost_outweighs_competence_gain():
 
 
 def test_commit_when_in_band_accuracy_is_high():
-    policy = fit_policy(synthetic_reads(8))
+    policy = fit_exploratory(synthetic_reads(8))
     assert policy.commit_margin == 0.0
     assert policy.noul_commit
     assert policy.search["chosen"] == policy.search["best"]
@@ -145,7 +150,7 @@ def test_joint_search_can_refit_noul_temperature_for_composite():
     rows += [
         row("noul", {"false": 0.4, "true": 0.6}, "true" if i < 80 else "false") for i in range(100)
     ]
-    policy = fit_policy(rows)
+    policy = fit_exploratory(rows)
     assert policy.t_noul == pytest.approx(2 * policy.search["nll_temperatures"]["t_noul"])
     assert policy.commit_margin == 0.0
     nll_best = max(
@@ -157,7 +162,7 @@ def test_joint_search_can_refit_noul_temperature_for_composite():
 
 
 def test_prefer_no_commit_close_to_best_and_nll_temperature():
-    policy = fit_policy(synthetic_reads(8, total_noul=800))
+    policy = fit_exploratory(synthetic_reads(8, total_noul=800))
     assert policy.search["best"]["commit_margin"] == 0.0
     assert policy.commit_margin is None
     assert policy.t_noul == policy.search["nll_temperatures"]["t_noul"]
@@ -167,8 +172,8 @@ def test_prefer_no_commit_close_to_best_and_nll_temperature():
 
 def test_search_is_complete_deterministic_and_roundtrips(tmp_path):
     rows = synthetic_reads(8)
-    first = fit_policy(rows, fitted_on="private fixture")
-    second = fit_policy(rows, fitted_on="private fixture")
+    first = fit_exploratory(rows, fitted_on="private fixture")
+    second = fit_exploratory(rows, fitted_on="private fixture")
     assert asdict(first) == asdict(second)
     table = first.search["candidates"]
     assert len(table) == 70
@@ -205,7 +210,7 @@ def test_fit_composite_uses_choice_scope_and_reports_it(hard_choice):
         row("noul", {"false": 0, "true": 1}, "true"),
         row("score", {"0": 0, "1": 1}, "1"),
     ]
-    policy = fit_policy(rows)
+    policy = fit_exploratory(rows)
     scope = "hard" if hard_choice else "all_choice_fallback"
     assert policy.search["choice_ece_scope"] == scope
     p = policy.apply("choice", rows[0]["raw_probs"])["a"]
@@ -226,19 +231,19 @@ def test_fit_composite_uses_choice_scope_and_reports_it(hard_choice):
 @pytest.mark.parametrize("kwargs", [{"speed_axis": math.nan}, {"cost_axis": 0}])
 def test_fit_rejects_invalid_fixed_axes(kwargs):
     with pytest.raises(ValueError, match="speed-axis and cost-axis"):
-        fit_policy(synthetic_reads(5), **kwargs)
+        fit_exploratory(synthetic_reads(5), **kwargs)
 
 
 def test_fit_requires_all_primitives_and_nonempty_reads():
     with pytest.raises(ValueError, match="empty"):
-        fit_policy([])
+        fit_exploratory([])
     with pytest.raises(ValueError, match="choice, noul and score"):
-        fit_policy([row("choice", {"a": 0.5, "b": 0.5}, "a")])
+        fit_exploratory([row("choice", {"a": 0.5, "b": 0.5}, "a")])
 
 
 def test_fit_records_variant_and_refuses_mixed_variants():
     rows = [dict(item, prompt_variant="rules") for item in synthetic_reads(8)]
-    assert fit_policy(rows).prompt_variant == "rules"
+    assert fit_exploratory(rows).prompt_variant == "rules"
     rows[0]["prompt_variant"] = "min"
     with pytest.raises(ValueError, match="mixed prompt_variant"):
-        fit_policy(rows)
+        fit_exploratory(rows)

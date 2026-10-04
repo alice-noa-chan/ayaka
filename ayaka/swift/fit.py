@@ -8,6 +8,7 @@ import math
 from collections.abc import Callable
 from dataclasses import asdict
 
+from .binding import validate_bound_reads
 from .collect import load_reads
 from .evaluate import case_bootstrap_composite
 from .losses import row_nll
@@ -57,6 +58,7 @@ def fit_policy(
     *,
     allow_public: bool = False,
     diagnostic: bool = False,
+    exploratory: bool = False,
     include_grouped: bool = False,
     fitted_on: str = "",
     speed_axis: float = 91.0,
@@ -88,14 +90,18 @@ def fit_policy(
         raise ValueError(
             "REFUSING public=True reads; use --allow-public only for an explicit public fit"
         )
+    if (diagnostic or allow_public) and not exploratory:
+        raise ValueError("legacy/diagnostic overrides require explicit --exploratory")
     diagnostic = diagnostic or allow_public
     invalid_split = any(
         row.get("split") != "calibration" or row.get("public") is not False for row in rows
     )
-    if invalid_split and not diagnostic:
+    if invalid_split and not exploratory:
         raise ValueError(
-            "fitting accepts non-public split == calibration only; use --diagnostic for exploration"
+            "fitting accepts non-public split == calibration only; use --exploratory for exploration"
         )
+    if not exploratory:
+        validate_bound_reads(rows)
     grouped = [row for row in rows if row.get("readout") == "grouped_approx"]
     if not include_grouped:
         rows = [row for row in rows if row.get("readout") != "grouped_approx"]
@@ -192,12 +198,14 @@ def fit_policy(
         prompt_variant=prompt_variant,
         promotable=not (
             diagnostic
+            or exploratory
             or invalid_split
             or include_grouped
             or any(row.get("readout") == "alias_sum" for row in rows)
         ),
     )
     policy.search = {
+        "exploratory": exploratory,
         "objective": "local_composite_A",
         "hard_n": sum(
             not isinstance(row["gold"], dict) and row.get("gold_distribution") is None
@@ -237,6 +245,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", "--out", default="policy.json")
     parser.add_argument("--allow-public", action="store_true")
     parser.add_argument(
+        "--exploratory",
+        action="store_true",
+        help="allow unbound/legacy/diagnostic inputs; never promotable",
+    )
+    parser.add_argument(
         "--diagnostic",
         action="store_true",
         help="allow non-calibration data; policy is not promotable",
@@ -255,6 +268,7 @@ def main(argv: list[str] | None = None) -> None:
             load_reads(args.reads),
             allow_public=args.allow_public,
             diagnostic=args.diagnostic,
+            exploratory=args.exploratory,
             include_grouped=args.include_grouped,
             fitted_on=args.fitted_on or ", ".join(args.reads),
             speed_axis=args.speed_axis,

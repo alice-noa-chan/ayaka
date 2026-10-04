@@ -38,7 +38,7 @@ def fixture_reads(tmp_path):
                             "public": False,
                             "split": split,
                             "tier": "hard",
-                            "state": "private fixture",
+                            "state": f"private fixture {split}-{case}",
                             "question": {
                                 "type": kind,
                                 "criteria": {label: label for label in labels},
@@ -159,7 +159,11 @@ def test_paired_case_draws_keep_questions_together_and_use_same_draws(tmp_path):
     for delta in result["vs_min"].values():
         assert delta == {"delta_A": 0, "delta_I": 0, "ci_95_A": [0, 0], "ci_95_I": [0, 0]}
     dev["rules"] = [
-        dict(row, raw_probs={label: 1 / len(row["labels"]) for label in row["labels"]})
+        dict(
+            row,
+            raw_probs={label: 1 / len(row["labels"]) for label in row["labels"]},
+            candidate_log_masses=dict.fromkeys(row["labels"], 0.0),
+        )
         for row in dev["rules"]
     ]
     changed = paired_case_bootstrap(dev, policies, dict.fromkeys(dev, 91), B=30)

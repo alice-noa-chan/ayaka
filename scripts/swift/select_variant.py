@@ -1,6 +1,7 @@
 """Select prompts using matching non-public dev reads, with policies fitted on v2 calibration.
 
-Pass v2 dev plus Cygnet calibration items as --dev; fit only --calibration (v2).
+Pass only recorded dev items as --dev; fit only recorded --calibration.
+Cygnet calibration remains a separate diagnostic and is never relabeled dev.
 Pick the highest local composite A. If its paired case-bootstrap 95% CI against
 the runner-up includes zero, prefer the one with fewer mean input tokens. With
 equal token counts, retain the higher A (then variant name for an exact tie).
@@ -24,6 +25,7 @@ from statistics import mean
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from ayaka.swift.binding import validate_bound_reads  # noqa: E402
 from ayaka.swift.collect import load_reads  # noqa: E402
 from ayaka.swift.evaluate import cluster_strata, percentile  # noqa: E402
 from ayaka.swift.fit import fit_policy  # noqa: E402
@@ -59,14 +61,14 @@ def row_key(row: dict) -> tuple[str, str]:
     return str(row.get("source", "")), str(row["id"])
 
 
-def group_reads(rows: list[dict], split: str) -> dict[str, list[dict]]:
+def group_reads(rows: list[dict], split: str, *, exploratory=False) -> dict[str, list[dict]]:
     """Validate provenance and align by source/id, independently of file order."""
     if not rows:
         raise ValueError(f"empty {split} reads")
+    if split not in ("calibration", "dev"):
+        raise ValueError("selector role must be calibration or dev")
     groups: dict[str, dict[tuple[str, str], dict]] = {}
     for row in rows:
-        if row.get("readout") == "grouped_approx":
-            continue
         source_parts = str(row.get("source", "")).replace("\\", "/").lower().split("/")
         metadata = row.get("metadata") or {}
         if (
@@ -75,6 +77,14 @@ def group_reads(rows: list[dict], split: str) -> dict[str, list[dict]]:
             or any(part in ("public", "jevbench_public") for part in source_parts)
         ):
             raise ValueError("REFUSING public or unmarked reads; require explicit public=False")
+        if "split" in metadata and row.get("split") != metadata["split"]:
+            raise ValueError("row and metadata split conflict")
+        if row.get("split") != split:
+            raise ValueError(f"selector role {split} must match recorded split exactly")
+        if row.get("readout") == "grouped_approx":
+            if not exploratory:
+                raise ValueError("grouped diagnostic reads require --exploratory")
+            continue
         variant = row.get("prompt_variant")
         validate_prompt_variant(variant)
         if not row.get("model") or not row.get("revision"):
@@ -98,7 +108,41 @@ def group_reads(rows: list[dict], split: str) -> dict[str, list[dict]]:
                 group[key].get(field) != groups["min"][key].get(field) for field in MATCH_FIELDS
             ):
                 raise ValueError(f"{split} row metadata differs across variants: {key}")
-    return {variant: [group[key] for key in keys] for variant, group in sorted(groups.items())}
+    aligned = {variant: [group[key] for key in keys] for variant, group in sorted(groups.items())}
+    if not exploratory:
+        for group in aligned.values():
+            validate_bound_reads(group)
+    return aligned
+
+
+def assert_roles_isolated(calibration, dev):
+    """Check every variant's global source lineage and rendered input before fitting."""
+
+    def keys(rows):
+        found = set()
+        for row in rows:
+            source = str(row.get("source", ""))
+            if not source:
+                raise ValueError("selector needs an explicit source namespace")
+            for value in (row.get("case_id"), row.get("cluster_id"), *row.get("lineage_ids", [])):
+                if value:
+                    value = str(value)
+                    found.add(("lineage", value if ":" in value else f"{source}:{value}"))
+            found.add(("question", source, row["id"]))
+            binding = row.get("binding") or {}
+            input_hash = binding.get("rendered_input_sha256") or row.get("rendered_input_sha256")
+            if not input_hash:
+                raise ValueError("selector requires rendered-input hash for overlap checks")
+            found.add(("input", input_hash))
+            for value in binding.get("token_inputs", []):
+                found.add(("tokens", value["input_token_ids_sha256"]))
+        return found
+
+    overlap = keys(calibration) & keys(dev)
+    if overlap:
+        raise ValueError(
+            f"calibration/dev case, lineage or rendered-input overlap: {sorted(overlap)[0]}"
+        )
 
 
 def input_cost(rows: list[dict], usd_in_per_m: float) -> tuple[float, float, float]:
@@ -214,6 +258,7 @@ def select_variants(
     estimated_speed: float = 91.0,
     B: int = 2000,
     seed: int = 15,
+    exploratory: bool = False,
 ) -> dict:
     if not math.isfinite(usd_in_per_m) or usd_in_per_m <= 0:
         raise ValueError("usd-in-per-m must be finite and positive")
@@ -221,16 +266,32 @@ def select_variants(
         raise ValueError("speed-axis must be finite and positive")
     if B < 1:
         raise ValueError("bootstrap repetitions must be positive")
-    cal = group_reads(calibration_rows, "calibration")
-    dev = group_reads(dev_rows, "dev")
+    cal = group_reads(calibration_rows, "calibration", exploratory=exploratory)
+    dev = group_reads(dev_rows, "dev", exploratory=exploratory)
     if set(cal) != set(dev):
         raise ValueError("calibration and dev must contain the same variants")
     identities = {(row["model"], row["revision"]) for row in calibration_rows + dev_rows}
     if len(identities) != 1:
         raise ValueError("all variant reads must use the SAME model and revision")
     model, revision = identities.pop()
-    if {row_key(row) for row in cal["min"]} & {row_key(row) for row in dev["min"]}:
-        raise ValueError("calibration and dev rows overlap")
+    assert_roles_isolated(calibration_rows, dev_rows)
+    if not exploratory:
+        recipes = {
+            json.dumps(
+                {
+                    key: value
+                    for key, value in row["binding"]["runtime"].items()
+                    if key != "prompt_variant"
+                },
+                sort_keys=True,
+            )
+            for row in calibration_rows + dev_rows
+        }
+        if (
+            len(recipes) != 1
+            or len({row["tokenizer_revision"] for row in calibration_rows + dev_rows}) != 1
+        ):
+            raise ValueError("variant reads have different tokenizer/runtime recipes")
     speeds = dict.fromkeys(dev, estimated_speed)
     probes = {}
     for probe in latency or []:
@@ -267,6 +328,7 @@ def select_variants(
             fitted_on="v2 calibration (variant selector)",
             speed_axis=speeds[variant],
             cost_axis=cal_cost,
+            exploratory=exploratory,
         )
         tokens, usd, cost = input_cost(dev[variant], usd_in_per_m)
         report = score_reads(dev[variant], policies[variant])
@@ -295,6 +357,8 @@ def select_variants(
     for variant, report in reports.items():
         report["paired_vs_min"] = bootstrap["vs_min"][variant]
     return {
+        "promotable": not exploratory and all(policy.promotable for policy in policies.values()),
+        "exploratory": exploratory,
         "model": model,
         "revision": revision,
         "split": "non_public_dev",
@@ -315,7 +379,12 @@ def main(argv: list[str] | None = None) -> None:
         "--calibration", nargs="+", required=True, help="v2 calibration reads, all variants"
     )
     parser.add_argument(
-        "--dev", nargs="+", required=True, help="v2 dev + Cygnet reads, all variants"
+        "--dev", nargs="+", required=True, help="recorded v2 dev reads, all variants"
+    )
+    parser.add_argument(
+        "--exploratory",
+        action="store_true",
+        help="accept unbound/legacy diagnostics; policies never promotable",
     )
     parser.add_argument("--latency", nargs="+", help="complete latency.json for every variant")
     parser.add_argument("--usd-in-per-m", type=float, default=0.0403)
@@ -338,6 +407,7 @@ def main(argv: list[str] | None = None) -> None:
             estimated_speed=args.speed_axis,
             B=args.bootstrap,
             seed=args.seed,
+            exploratory=args.exploratory,
         )
     except (ValueError, OSError, KeyError, TypeError) as exc:
         parser.error(str(exc))
