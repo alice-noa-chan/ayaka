@@ -23,7 +23,9 @@ def _native(tokenizer):
     return getattr(tokenizer, "hf", tokenizer)
 
 
-def _configuration(native):
+def configuration_fingerprint(tokenizer):
+    """Template and decode settings absent from backend.to_str(), including EOS."""
+    native = _native(tokenizer)
     return fingerprint(
         {
             "is_fast": getattr(native, "is_fast", False),
@@ -34,6 +36,13 @@ def _configuration(native):
             "eos": getattr(native, "eos_token_id", None),
             "padding_side": getattr(native, "padding_side", None),
             "truncation_side": getattr(native, "truncation_side", None),
+            "clean_up_tokenization_spaces": getattr(native, "clean_up_tokenization_spaces", None),
+            "split_special_tokens": getattr(native, "split_special_tokens", None),
+            "clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output": getattr(
+                native,
+                "clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output",
+                None,
+            ),
         }
     )
 
@@ -58,7 +67,7 @@ class _Snapshot:
         if (
             not self.active
             or getattr(self.native, "backend_tokenizer", None) is not self.backend
-            or _configuration(self.native) != self.configuration_sha256
+            or configuration_fingerprint(self.native) != self.configuration_sha256
             or serialized
             and _serialize(self.backend) != self.fingerprints
         ):
@@ -96,7 +105,7 @@ def tokenizer_identity_scope(tokenizer):
             existing.check()
             yield
             return
-    snapshot = _Snapshot(native, backend, _configuration(native), _serialize(backend))
+    snapshot = _Snapshot(native, backend, configuration_fingerprint(native), _serialize(backend))
     token = _SCOPES.set((*_SCOPES.get(), snapshot))
     try:
         yield

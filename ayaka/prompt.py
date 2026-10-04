@@ -50,6 +50,7 @@ class QuestionView:
     instruction: str
     descriptions: list[str]
     ordinals: list[int] | None = None
+    candidate_ids: list[str] | None = None
 
 
 @dataclass

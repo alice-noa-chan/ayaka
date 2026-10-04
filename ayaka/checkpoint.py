@@ -22,6 +22,7 @@ from dataclasses import asdict
 import torch
 
 from .config import ElectraConfig
+from .input_contract import checkpoint_metadata, read_contract
 from .model.electra import ElectraDecisionModel
 
 
@@ -82,13 +83,14 @@ def load_head(path: str, device="cpu") -> dict:
 
 
 def save_checkpoint(model: ElectraDecisionModel, path: str, meta: dict | None = None) -> str:
+    meta = checkpoint_metadata(model, meta)
     os.makedirs(path, exist_ok=True)
-    write_config(asdict(model.cfg), path)
+    write_config({**asdict(model.cfg), "input_contract_required": "input_encoding" in meta}, path)
     if hasattr(model.backbone, "save_pretrained") and hasattr(model.backbone, "peft_config"):
         model.backbone.save_pretrained(os.path.join(path, "adapter"))
     save_head(model.head_state_dict(), path)
     with open(os.path.join(path, "meta.json"), "w") as f:
-        json.dump(meta or {}, f, indent=2, default=str)
+        json.dump(meta, f, indent=2, default=str)
     return path
 
 
@@ -126,6 +128,7 @@ def load_checkpoint(
     """Rebuild a model from a checkpoint dir. ``trainable`` keeps the
     adapter unmerged and trainable (resume / continue training)."""
     cfg = load_config(path)
+    contract = read_contract(path, cfg)
     model = ElectraDecisionModel.from_config(
         cfg,
         dtype=dtype,
@@ -142,6 +145,7 @@ def load_checkpoint(
         if merge and not trainable:
             model.backbone = model.backbone.merge_and_unload()
     model.load_head_state_dict(load_head(path, device))
+    model.input_contract = contract
     return model.to(device)
 
 

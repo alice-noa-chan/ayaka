@@ -19,6 +19,7 @@ from ayaka.eval.read_artifact import fingerprint
 from ayaka.model.electra import PRIMITIVE_INDEX, at_least_fp32
 from ayaka.prompt import QuestionView, render_prefix, render_question
 
+from ..input_errors import ContextLimitError
 from .evidence_cache import branch_evidence_cache, dynamic_kv_bytes
 
 
@@ -162,7 +163,7 @@ def _validate_inputs(inputs: EvidenceInputs) -> None:
             not question.suffix_ids
             or len(inputs.prefix_ids) + len(question.suffix_ids) >= inputs.context_limit
         ):
-            raise ValueError(
+            raise ContextLimitError(
                 "entire state/question must fit context with one answer token reserved"
             )
         if any(

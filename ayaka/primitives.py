@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import torch
 
 from .collate import EncodedQuestion, encode_decision, suffix_rows
+from .input_contract import encode_serving, validate_tokenizer
 from .model.electra import ElectraDecisionModel
 from .model.ragged import ragged_softmax
 from .prompt import QuestionView, prefix_head
@@ -34,13 +35,24 @@ class QuestionSpec:
     instruction: str
     candidates: list[str]  # noul: [false_description, true_description]
     ordinals: list[int] | None = None  # score only (addendum A3)
+    candidate_ids: list[str] | None = None  # original wire labels, independent of descriptions
 
     def __post_init__(self):
         if self.type == "score" and self.ordinals is None:
             self.ordinals = list(range(len(self.candidates)))
+        if self.candidate_ids is not None and (
+            len(self.candidate_ids) != len(self.candidates)
+            or any(not isinstance(x, str) or not x for x in self.candidate_ids)
+            or len(set(self.candidate_ids)) != len(self.candidate_ids)
+        ):
+            raise ValueError(
+                "candidate IDs must be unique nonempty strings aligned with candidates"
+            )
 
     def view(self) -> QuestionView:
-        return QuestionView(self.type, self.instruction, list(self.candidates), self.ordinals)
+        return QuestionView(
+            self.type, self.instruction, list(self.candidates), self.ordinals, self.candidate_ids
+        )
 
 
 @dataclass
@@ -60,6 +72,16 @@ class Decision:
         # inference budget; checkpoints saved before the field default to 8192
         self.max_seq_len = max_seq_len or max(cfg.serve_max_seq_len, cfg.max_seq_len)
         self.max_labels = model.cfg.max_label_candidates
+        self.input_contract = copy.deepcopy(getattr(model, "input_contract", None))
+        validate_tokenizer(self.input_contract, tok)
+        if (
+            self.input_contract is not None
+            and self.input_contract["input_encoding"]["encoder"] == "swift_canonical"
+        ):
+            self.max_seq_len = min(
+                self.max_seq_len,
+                getattr(model.text_config, "max_position_embeddings", self.max_seq_len),
+            )
         self.apply_temperature = True
         self.reuse_head = True  # encode the constant prompt head once
         self._head: tuple[list[int], object, torch.device] | None = None
@@ -69,8 +91,25 @@ class Decision:
 
     @torch.no_grad()
     def _run(self, state, views: list[QuestionView], device) -> list[list[float]]:
-        prefix, items = encode_decision(state, views, self.tok, self.max_seq_len, self.max_labels)
+        prefix, items = self.encode(state, views)
         return self._run_encoded(prefix, items, device)
+
+    def encode(self, state, views):
+        if (
+            self.input_contract is not None
+            and self.input_contract["input_encoding"]["encoder"] == "swift_canonical"
+        ):
+            return encode_serving(
+                state, views, self.tok, self.model.cfg, self.input_contract, self.max_seq_len
+            )
+        return encode_decision(state, views, self.tok, self.max_seq_len, self.max_labels)
+
+    def input_counts(self, state, questions):
+        prefix, items = self.encode(state, [q.view() for q in questions])
+        return [
+            len(item.rendered.suffix_ids) + (len(prefix) if i == 0 else 0)
+            for i, item in enumerate(items)
+        ]
 
     @torch.no_grad()
     def _run_encoded(
@@ -105,7 +144,10 @@ class Decision:
     def _prefix_cache(self, prefix: list[int], dev: torch.device):
         """KV cache for ``prefix``. The constant head is encoded once per
         Decision and deep-copied, so a request only encodes its own state."""
-        if self.reuse_head:
+        if self.reuse_head and not (
+            self.input_contract is not None
+            and self.input_contract["input_encoding"]["encoder"] == "swift_canonical"
+        ):
             if self._head is None or self._head[2] != dev:
                 head = prefix_head(self.tok)
                 self._head = (head, self.model.encode_prefix(torch.tensor([head], device=dev)), dev)
@@ -117,11 +159,20 @@ class Decision:
 
     @torch.no_grad()
     def decide(self, state, questions: list[QuestionSpec], device=None) -> list[DecisionResult]:
+        if not questions:
+            return []
         self.model.eval()
         views = [q.view() for q in questions]
         probs = self._run(state, views, device)
         for i, v in enumerate(views):
-            if v.type == "choice" and len(v.descriptions) > self.max_labels:
+            if (
+                v.type == "choice"
+                and len(v.descriptions) > self.max_labels
+                and not (
+                    self.input_contract is not None
+                    and self.input_contract["input_encoding"]["encoder"] == "swift_canonical"
+                )
+            ):
                 probs[i] = self._shortlist(state, v, probs[i], device)
         results = []
         for q, p in zip(questions, probs, strict=True):

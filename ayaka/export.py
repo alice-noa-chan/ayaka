@@ -27,6 +27,7 @@ import torch
 import torch.nn as nn
 
 from .checkpoint import load_config
+from .input_contract import checkpoint_metadata, read_contract, validate_tokenizer
 from .model.electra import ElectraDecisionModel
 from .quant import (
     Int8Embedding,
@@ -76,12 +77,12 @@ def _save_sharded(state: dict[str, torch.Tensor], out_dir: str) -> None:
         json.dump({"metadata": {"total_size": total}, "weight_map": weight_map}, f, indent=1)
 
 
-def _save_tokenizer(source: str, out_dir: str) -> None:
+def _save_tokenizer(source: str, out_dir: str, revision: str | None = None) -> None:
     if source == "tiny":
         return
     from transformers import AutoTokenizer
 
-    AutoTokenizer.from_pretrained(source).save_pretrained(out_dir)
+    AutoTokenizer.from_pretrained(source, revision=revision).save_pretrained(out_dir)
 
 
 def export_model(
@@ -92,6 +93,24 @@ def export_model(
     meta: dict | None = None,
 ) -> str:
     """Write one export folder from an in-memory (merged) model."""
+    meta = checkpoint_metadata(model, meta)
+    contract = getattr(model, "input_contract", None)
+    if contract is None:
+        from .input_contract import metadata_contract
+
+        contract = metadata_contract(meta, model.cfg)
+    if contract is not None and contract["input_encoding"]["encoder"] == "swift_canonical":
+        from .tokenization import HFTokenizer
+
+        if tokenizer_source == "tiny":
+            raise ValueError("Swift exports require their exact native tokenizer")
+        validate_tokenizer(
+            contract,
+            HFTokenizer.from_pretrained(
+                tokenizer_source,
+                model.cfg.backbone_revision if tokenizer_source == model.cfg.backbone else None,
+            ),
+        )
     bb_dir = os.path.join(out_dir, "backbone")
     os.makedirs(bb_dir, exist_ok=True)
     text = model.text_model()
@@ -108,13 +127,17 @@ def export_model(
     if quantize:
         with open(os.path.join(bb_dir, QUANT_FILE), "w") as f:
             json.dump({"method": "int8-rowwise-symmetric", "version": 1}, f)
-    _save_tokenizer(tokenizer_source, bb_dir)
-    cfg = replace(model.cfg, backbone="backbone")
+    _save_tokenizer(
+        tokenizer_source,
+        bb_dir,
+        model.cfg.backbone_revision if tokenizer_source == model.cfg.backbone else None,
+    )
+    cfg = replace(model.cfg, backbone="backbone", input_contract_required=contract is not None)
     with open(os.path.join(out_dir, "electra_config.json"), "w") as f:
         json.dump(asdict(cfg), f, indent=2)
     torch.save(model.head_state_dict(), os.path.join(out_dir, "head.pt"))
     with open(os.path.join(out_dir, "export_meta.json"), "w") as f:
-        json.dump({"quantized": quantize, **(meta or {})}, f, indent=2, default=str)
+        json.dump({"quantized": quantize, **meta}, f, indent=2, default=str)
     with open(os.path.join(out_dir, "README.md"), "w", encoding="utf-8") as f:
         f.write(_readme(os.path.basename(os.path.normpath(out_dir)), quantize))
     return out_dir
@@ -239,6 +262,7 @@ def load_exported(
     dev = torch.device(device)
     dtype = dtype or torch.bfloat16
     cfg = load_config(path)
+    contract = read_contract(path, cfg, "export_meta.json")
     bb_dir = os.path.join(path, cfg.backbone)
     if os.path.exists(os.path.join(bb_dir, QUANT_FILE)):
         text, tcfg = load_int8_backbone(bb_dir, dev, dtype, linear_mode)
@@ -252,6 +276,8 @@ def load_exported(
     model.requires_grad_(False).eval()
     has_tok = os.path.exists(os.path.join(bb_dir, "tokenizer_config.json"))
     tok = HFTokenizer.from_pretrained(bb_dir) if has_tok else ToyTokenizer()
+    validate_tokenizer(contract, tok)
+    model.input_contract = contract
     return model.to(dev), tok
 
 
@@ -309,6 +335,16 @@ def main(argv: list[str] | None = None) -> dict:
         "--code-url", default="<code-url>", help="git URL for pip install in the model card"
     )
     args = ap.parse_args(argv)
+
+    if not args.no_int8 and args.parity:
+        from .input_contract import read_contract
+
+        contract = read_contract(args.ckpt, load_config(args.ckpt))
+        if contract is not None and contract["input_encoding"]["encoder"] == "swift_canonical":
+            raise ValueError(
+                "Swift export parity requires original recipe-bound dev items; "
+                "use --no-int8 or --parity 0 and verify the export separately"
+            )
 
     dev = torch.device(args.device)
     model = load_checkpoint(args.ckpt, device=dev, dtype=torch.bfloat16).requires_grad_(False)

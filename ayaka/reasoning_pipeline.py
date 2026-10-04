@@ -74,6 +74,8 @@ class TraceFailure(EvidenceError):
 
 
 class TraceGenerator:
+    cache_eos = True  # legacy continuation includes EOS in its generated prefix
+
     def __init__(self, model, tok, max_context=12288, apply_temperature=True):
         self.model, self.tok = model, tok
         self.apply_temperature = apply_temperature
@@ -107,6 +109,9 @@ class TraceGenerator:
             for _ in range(budget):
                 token = int(self.model.lm_logits(hidden).argmax(-1).item())
                 trace.token_ids.append(token)  # EOS and failed final decode are billable too.
+                if token in self.eos and not self.cache_eos:
+                    trace.finish_reason = "eos"
+                    break
                 out = self.model.text_model()(
                     input_ids=torch.tensor([[token]], device=dev),
                     past_key_values=trace.cache,
@@ -250,15 +255,22 @@ class ControlledDecision:
             if use:
                 start = perf_counter()
                 try:
-                    reserve = len(
-                        readout_suffix(
-                            self.tok, spec, self.model.cfg.max_label_candidates
-                        ).suffix_ids
-                    )
-                    trace = self.generator.generate_trace(
+                    messages = (
                         self.generator.messages_for(state, spec)
                         if hasattr(self.generator, "messages_for")
-                        else trace_messages(state, spec),
+                        else trace_messages(state, spec)
+                    )
+                    reserve = (
+                        self.generator.reserve_tokens(messages, spec)
+                        if hasattr(self.generator, "reserve_tokens")
+                        else len(
+                            readout_suffix(
+                                self.tok, spec, self.model.cfg.max_label_candidates
+                            ).suffix_ids
+                        )
+                    )
+                    trace = self.generator.generate_trace(
+                        messages,
                         setting.budget,
                         reserve=reserve,
                     )
@@ -314,6 +326,12 @@ class ControlledDecision:
 
 
 def controlled_decision(model, tok, max_seq_len=None, router=None, calibration=None):
-    return ControlledDecision(
-        Decision(model, tok, max_seq_len), TraceGenerator(model, tok), router, calibration
-    )
+    original = Decision(model, tok, max_seq_len)
+    contract = original.input_contract
+    if contract is not None and contract["input_encoding"]["encoder"] == "swift_canonical":
+        from .swift_continuation import SwiftTraceGenerator
+
+        generator = SwiftTraceGenerator(model, tok, contract)
+    else:
+        generator = TraceGenerator(model, tok)
+    return ControlledDecision(original, generator, router, calibration)

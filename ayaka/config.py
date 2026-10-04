@@ -54,10 +54,15 @@ class ElectraConfig:
     version: int = 1
     reasoning_defaults: dict = field(default_factory=dict)
     readout: str = "hybrid"  # lm | pointer | hybrid; set_mixer_layers=0 is simple pointer
+    input_contract_required: bool = (
+        False  # saved recipe-bound checkpoints fail closed if meta is lost
+    )
 
     def __post_init__(self):
         if self.readout not in ("lm", "pointer", "hybrid"):
             raise ValueError("readout must be lm, pointer, or hybrid")
+        if type(self.input_contract_required) is not bool:
+            raise ValueError("input_contract_required must be boolean")
 
 
 ELECTRA_SMALL = ElectraConfig(

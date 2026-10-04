@@ -17,9 +17,9 @@ from ..swift.prompt import parse_question, validate_prompt_variant
 from ..swift.readers import READOUT
 from .batching import FLAGGED_EVIDENCE, TrainItem, _noul_canonical, question_view, sample_to_items
 from .swift_evidence import prepare_swift_evidence_inputs, validate_swift_evidence_inputs
-from .tokenizer_identity import backend_fingerprints
+from .tokenizer_identity import backend_fingerprints, configuration_fingerprint
 
-VERSION = "ayaka-swift-direct-inputs-1"
+VERSION = "ayaka-swift-direct-inputs-2"
 
 
 def normalize_input_encoding(value=None):
@@ -69,6 +69,7 @@ def input_serving_recipe(tok, input_encoding=None):
         **{key: value for key, value in encoding.items() if key != "encoder"},
         "chat_template_sha256": fingerprint(native.chat_template),
         "tokenizer_sha256": backend_fingerprints(native)["json_string_sha256"],
+        "tokenizer_config_sha256": configuration_fingerprint(native),
     }
 
 
@@ -192,6 +193,7 @@ def swift_sample_to_items(
                 "chat_template_kwargs",
                 "chat_template_sha256",
                 "tokenizer_sha256",
+                "tokenizer_config_sha256",
             )
         },
     }

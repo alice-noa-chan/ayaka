@@ -51,16 +51,32 @@ class BadRequest(ValidationError):
     pass
 
 
-def parse_question(q: dict) -> tuple[QuestionSpec, list[str]]:
+def parse_question(q: dict, *, native_score=False) -> tuple[QuestionSpec, list[str]]:
     try:
         parsed = parse_jev_question(q)
     except ValidationError as exc:
         raise BadRequest(str(exc), exc.field) from exc
     ordinals = None
     if parsed.type == "score":
-        ordinals = [int(k) if k.lstrip("-").isdigit() else i for i, k in enumerate(parsed.labels)]
+        if native_score:
+            try:
+                ordinals = [int(k) for k in parsed.labels]
+            except ValueError as exc:
+                raise BadRequest(
+                    "Swift Score criteria require integer level keys", "criteria"
+                ) from exc
+            if len(set(ordinals)) != len(ordinals):
+                raise BadRequest("Swift Score levels must be numerically unique", "criteria")
+        else:
+            ordinals = [
+                int(k) if k.lstrip("-").isdigit() else i for i, k in enumerate(parsed.labels)
+            ]
     return QuestionSpec(
-        parsed.type, parsed.instruction, parsed.descriptions, ordinals=ordinals
+        parsed.type,
+        parsed.instruction,
+        parsed.descriptions,
+        ordinals=ordinals,
+        candidate_ids=parsed.labels,
     ), parsed.labels
 
 
@@ -121,7 +137,11 @@ class DecisionService:
             from .candidates import handle_candidates
 
             return handle_candidates(self, body)
-        parsed = [parse_question(qs[n]) for n in names]
+        contract = getattr(getattr(self.decision, "model", None), "input_contract", None)
+        native_score = (
+            contract is not None and contract["input_encoding"]["encoder"] == "swift_canonical"
+        )
+        parsed = [parse_question(qs[n], native_score=native_score) for n in names]
         options = body.get("options", {})
         if not isinstance(options, dict):
             raise BadRequest("options must be an object")
@@ -207,6 +227,8 @@ class DecisionService:
         }
 
     def _count_tokens(self, state, parsed) -> int:
+        if hasattr(self.decision, "input_counts"):
+            return sum(self.decision.input_counts(state, [p[0] for p in parsed]))
         from .collate import encode_decision
 
         prefix, items = encode_decision(
