@@ -78,6 +78,8 @@ weights, generate reasoning or make backend calls.
   per call. Oversize/invalid inputs fail; no silent truncation or invented mass.
   Tensor support above 26 candidates does not supply a new native alphabet readout;
   that adapter must provide legitimate candidate logits with a verified definition.
+  Following Claude's independent review, fully padded attention rows receive one
+  zero null key/value after projection; valid rows cannot attend to that key.
 
 `ayaka/training/evidence_objective.py` provides `evidence_loss`:
 
@@ -111,13 +113,20 @@ different prompts/backends cannot identify whether fine-tuning caused a regressi
 | B | native logits only | none | n/a |
 | S | candidate + question, routing=0, fields=0 | none | 0 |
 | E | S + evidence routing=1, fields=0 | none | 0 |
-| G | E + fields=1 | explicit related groups only | 0 |
-| R | G | same groups as G | 0.05 |
+| R | E | none | 0.05 |
+| G (deferred) | E + fields=1 | explicit related groups only | 0 |
 
 This nested comparison separates learned candidate correction, evidence access,
-group context and reference regularization. Beta 0.05 is a proposed single ablation,
+reference regularization. Related-group experiments are deferred: a single-question
+evaluation cannot benefit from cross-question mixing. Beta 0.05 is a proposed single ablation,
 not an empirically selected optimum. Lexical features and smoothing stay disabled
 in the first comparison; optional arms require a new predeclared workload.
+
+Following independent review, evidence heads are **P5**: only consider opening these
+arms after the cheaper frozen-native + policy path has measured dev and serial
+latency results. They are not automatically added to the current collection job.
+Freeze a trained raw head before fitting temperature/policy on calibration. Raw
+reference KL can preserve base overconfidence; the KL term is not itself calibration.
 
 Training, router training, calibration, dev and test remain separate by case/lineage
 and template/rule family. Fit policy on calibration; choose architectures on dev;
@@ -150,6 +159,9 @@ experiment. Compression savings are unmeasured. vLLM logprob artifacts contain n
 full hidden states, and the existing Gemma fastpath does not expose this memory
 contract. Therefore feature extraction, layer identity, cache layout and native
 logit parity need a separate adapter audit before any real head experiment.
+An opt-in full native-cache reference adapter now exists with actual tiny HF CPU
+parity tests; see [feature adapter](V2_EVIDENCE_FEATURE_ADAPTER_2026-10-04.md). This
+does not establish real-checkpoint CUDA compatibility or update the production fastpath.
 
 First establish the cheapest correct native baseline with the existing reader/policy
 work. Do not expand Claude's current collection job by these arms. If evidence heads
@@ -162,8 +174,11 @@ The time cap is emergency protection, not a plan to stop an unfinished epoch.
 
 No production integration or full Clef compatibility is claimed. CPU optimizer tests
 check mechanics; they do not prove real-model accuracy, speed or JevBench rank.
-Clef review requests and ownership are in `.dev/codex-clef-to-claude-20261004.md`;
-independent acceptance has not yet been received.
+Claude's independent head/objective review found no blocking bug and prompted the
+padding fix, post-training calibration order and P5/group priority changes above.
+Feature-adapter review and Swift preflight/parity work remain separate. Shared
+requests/replies are in `.dev/codex-continue-to-claude-20261004.md` and
+`.dev/claude-to-codex-20261004.md`.
 
 ## Reproduce the CPU verification
 
@@ -173,13 +188,26 @@ independent acceptance has not yet been received.
 .venv/Scripts/python.exe -m pytest tests/test_evidence_head.py tests/test_evidence_objective.py
 ```
 
-Observed: **80 passed in 10.10s** (44 head + 36 objective); lint/format pass.
-The whole-tree lint and format check also passed (220 Python files). Full CPU
-integration: **939 passed, 1 skipped in 281.07s**, with no source changes during
-execution. The test process explicitly used existing Git Bash; the system environment
-was not modified. Its snapshot-bound receipt/log are recorded locally under
-`.dev/codex-clef-full-cpu-20261004.*`. Passing existing Swift tests does not resolve
-the separately reported R12/R13/R14 preflight/parity limitations by itself.
+Initial head/objective verification: **80 passed in 10.10s** (44 head + 36 objective);
+lint/format pass. That initial whole-tree snapshot had **939 passed, 1 skipped in
+281.07s**, with no source changes and 220 Python files passing lint/format. The
+test process explicitly used existing Git Bash; the system environment was not
+modified. Its receipt/log are under `.dev/codex-clef-full-cpu-20261004.*`.
+
+Follow-up null-padding, native fp64 and feature-adapter changes pass **121 related
+tests in 11.90s** (29 adapter + 45 head + 36 objective + 11 native backbone).
+The subsequent integration attempt had 1011 passes, two Swift fixture failures
+and one skip, with three source files changing during execution. It is not a
+stable final pass. After the fixture fixes, the next integrated snapshot passed
+1016 tests with one skip in 144.52s and no source changes. A further adapter
+boundary fix preserves mixed-dtype lexical features and preflights their storage,
+with **124 related tests passing in 5.86s**. See the adapter document for the final
+integration evidence that includes this fix: **1019 passed, 1 skipped in 121.85s**,
+source changes zero, and whole-tree lint/format passing for 225 Python files.
+Separate synthetic counterexamples now show that Swift rejects test-as-dev and
+unbound calibration before fitting, and rejects a 1e-40-to-1e-9 tail change via
+raw-log-mass parity. These checks do not establish real-model GPU parity or a
+budget-complete collection schedule; those remain separate launch conditions.
 
 Pinned source survey: Clef `2f3de3dd85f379784083b0814d997ab627200f0c`, Flash
 `17f0b0ad64efb65d273590632833508766b2aae6`; identical head-source SHA256
