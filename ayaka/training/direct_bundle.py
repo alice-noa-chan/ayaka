@@ -29,7 +29,7 @@ from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .workload import describe_rows, finite_workload, scheduled_batches
 
-VERSION = "ayaka-direct-bundle-2"
+VERSION = "ayaka-direct-bundle-3"
 STATUS = "cpu_prepared_no_model_or_optimizer_execution"
 FILES = {f"{split}.jsonl" for split in SPLITS} | {
     "teacher_reads.json",
@@ -143,9 +143,48 @@ def _tokenizer_identity(tok, cfg):
     )
 
 
-def _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture):
+def _gold_verifier(splits, natural_registry, *, allow_tiny):
+    natural = any(
+        s.metadata.get("data_kind") == "natural" for samples in splits.values() for s in samples
+    )
+    if natural:
+        from ..data.direct_natural import NaturalGoldRegistry
+
+        natural_registry = natural_registry or NaturalGoldRegistry()
+        if not isinstance(natural_registry, NaturalGoldRegistry):
+            raise ValueError("natural gold requires the pinned raw-source registry")
+        if not natural_registry.local_files_verified and not allow_tiny:
+            raise ValueError("injected natural raw fixtures are restricted to tiny CPU mechanics")
+    elif natural_registry is not None:
+        raise ValueError("unused natural registry does not belong to an authored-only bundle")
+
+    def verify(sample, question):
+        return (
+            natural_registry(sample, question)
+            if sample.metadata.get("data_kind") == "natural"
+            else verify_authored_gold(sample, question)
+        )
+
+    return verify, natural_registry.binding if natural else None
+
+
+def _prepare(
+    splits,
+    tok,
+    cfg,
+    teacher_reads,
+    weights,
+    schedule,
+    architecture,
+    *,
+    natural_registry=None,
+    allow_tiny=False,
+):
     # Verify every reserved split too; no holdout answer enters training or teacher selection.
     audit_splits(splits)
+    verify_gold, gold_sources = _gold_verifier(
+        splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
+    )
     contexts = {}
     vocab_size = architecture["native_output_shape"][0]
     for split, samples in splits.items():
@@ -156,7 +195,7 @@ def _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture):
                 raise ValueError("explicit source IDs are required for every reserved split")
             prefix = render_prefix(sample.state, tok)
             for q in sample.questions:
-                gold = verify_authored_gold(sample, q)
+                gold = verify_gold(sample, q)
                 if gold != {c.id: q.target_distribution.get(c.id, 0) for c in q.candidates}:
                     raise ValueError(
                         "independently verified reserved gold disagrees with stored targets"
@@ -196,7 +235,7 @@ def _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture):
             "questions": len(rendered_rows),
         }
     items, report = prepare_direct_distillation(
-        splits, tok, cfg, teacher_reads, verify_authored_gold, weights=weights
+        splits, tok, cfg, teacher_reads, verify_gold, weights=weights
     )
     inventory, groups, offset = [], [], 0
     for sample in splits["train"]:
@@ -206,6 +245,7 @@ def _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture):
         offset += len(group)
     report.update(
         verifier=VERIFIER_VERSION,
+        gold_sources=gold_sources,
         context_audit=contexts,
         workload=finite_workload(inventory, **schedule),
     )
@@ -239,6 +279,7 @@ def prepare_bundle(
     weights=None,
     allow_tiny=False,
     optimizations=None,
+    natural_registry=None,
 ):
     """Validate all data/tokens/settings before creating a fresh output directory."""
     root = Path(out)
@@ -261,7 +302,17 @@ def prepare_bundle(
         official_weight_elements=policy.get("backbone_weight_elements"),
         optimizations=optimizations,
     )
-    items, report, _, _ = _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture)
+    items, report, _, _ = _prepare(
+        splits,
+        tok,
+        cfg,
+        teacher_reads,
+        weights,
+        schedule,
+        architecture,
+        natural_registry=natural_registry,
+        allow_tiny=allow_tiny,
+    )
     recipe = {
         "version": VERSION,
         "model": asdict(cfg),
@@ -270,6 +321,7 @@ def prepare_bundle(
         "tokenizer_sha256": tokenizer_sha256,
         "allow_tiny": allow_tiny,
         "verifier": VERIFIER_VERSION,
+        "gold_sources": report["gold_sources"],
         "model_policy": policy,
         "native_architecture": architecture,
         "optimizations": asdict(optimizations),
@@ -297,7 +349,7 @@ def prepare_bundle(
         "promotable": False,
         "execution_attested": False,
         "optimizer_steps_executed": 0,
-        "data_scope": "versioned authored mechanics; not natural-data or JevBench quality evidence",
+        "data_scope": "authored mechanics plus pinned human rehearsal when supplied; not JevBench quality evidence",
         "pending": [
             "independent review",
             "actual pinned native weights",
@@ -313,7 +365,7 @@ def prepare_bundle(
     return manifest
 
 
-def audit_bundle(path, tok=None, *, allow_tiny=False):
+def audit_bundle(path, tok=None, *, allow_tiny=False, natural_registry=None):
     """Recompute corpus gold, original tokens, teacher filtering and the entire schedule."""
     root = Path(path)
     manifest = json.loads((root / "manifest.json").read_bytes())
@@ -371,8 +423,18 @@ def audit_bundle(path, tok=None, *, allow_tiny=False):
     }
     teachers = json.loads((root / "teacher_reads.json").read_bytes())
     items, report, inventory, groups = _prepare(
-        splits, tok, cfg, teachers, weights, recipe["schedule"], architecture
+        splits,
+        tok,
+        cfg,
+        teachers,
+        weights,
+        recipe["schedule"],
+        architecture,
+        natural_registry=natural_registry,
+        allow_tiny=allow_tiny,
     )
+    if report["gold_sources"] != recipe.get("gold_sources"):
+        raise ValueError("raw human source file binding changed; prepare a new bundle")
     if (
         canonical(report) + b"\n" != (root / "preparation.json").read_bytes()
         or _item_bytes(items) != (root / "train_items.jsonl").read_bytes()
