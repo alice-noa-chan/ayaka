@@ -11,8 +11,10 @@ Response::
 
     {"model": "...", "answers": {
         "<name>": {"type": "noul",   "noul": P(true)},
-        "<name>": {"type": "choice", "choice": "<label>", "probabilities": {"<label>": p}},
-        "<name>": {"type": "score",  "score": E[level], "probabilities": {"0": p, ...}}},
+        "<name>": {"type": "choice", "choice": "<label>", "probabilities": {"<label>": p},
+                   "confidence": c},
+        "<name>": {"type": "score",  "score": E[level], "probabilities": {"0": p, ...},
+                   "confidence": c, "legend": {"0": "<level 0>", ...}}},
      "usage": {"input_tokens": n, "output_tokens": 0}}
 
 All questions of a request share one state encoding (prefix KV cache)
@@ -23,91 +25,83 @@ and are evaluated in one batched forward, isolated from each other.
 
 from __future__ import annotations
 
-import json
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from threading import Lock
 
+from .http_transport import ServiceConfig, add_service_arguments, config_from_args, make_api_handler
+from .jev_api import ModelCatalog, ValidationError, build_answer, render_content
+from .jev_api import parse_question as parse_jev_question
 from .primitives import Decision, QuestionSpec
 
-
-class BadRequest(ValueError):
-    pass
+BadRequest = ValidationError
 
 
-def parse_question(q: dict) -> tuple[QuestionSpec, list[str]]:
+def parse_question(q: dict, *, field="questions") -> tuple[QuestionSpec, list[str]]:
     """TypeSafe question -> (QuestionSpec, exact answer labels)."""
-    if not isinstance(q, dict):
-        raise BadRequest("question must be an object")
-    qtype = q.get("type")
-    instruction = q.get("instructions") or q.get("instruction") or ""
-    crit = q.get("criteria")
-    if qtype == "noul":
-        crit = crit if isinstance(crit, dict) else {}
-        return QuestionSpec(
-            "noul", instruction, [str(crit.get("false", "false")), str(crit.get("true", "true"))]
-        ), ["false", "true"]
-    if qtype == "choice":
-        if isinstance(crit, dict) and len(crit) >= 2:
-            labels = [str(k) for k in crit]
-            descs = [str(v) if v not in (None, "") else str(k) for k, v in crit.items()]
-        elif isinstance(crit, list) and len(crit) >= 2:
-            labels = descs = [str(x) for x in crit]
-        else:
-            raise BadRequest("choice needs criteria with at least two options")
-        if len(set(labels)) != len(labels):
-            raise BadRequest("choice option labels must be unique")
-        return QuestionSpec("choice", instruction, descs), labels
-    if qtype == "score":
-        if isinstance(crit, list) and len(crit) >= 2:
-            labels = [str(i) for i in range(len(crit))]
-            return QuestionSpec(
-                "score", instruction, [str(c) for c in crit], ordinals=list(range(len(crit)))
-            ), labels
-        if isinstance(crit, dict) and len(crit) >= 2:
-            keys = list(crit)
-            ords = [int(k) if str(k).lstrip("-").isdigit() else i for i, k in enumerate(keys)]
-            return QuestionSpec(
-                "score", instruction, [str(crit[k]) for k in keys], ordinals=ords
-            ), [str(k) for k in keys]
-        raise BadRequest("score needs criteria with at least two levels")
-    raise BadRequest(f"unknown question type: {qtype!r}")
+    parsed = parse_jev_question(q, field=field)
+    ordinals = None
+    if parsed.type == "score":
+        # Preserve v1's insertion order and historical Score-map ordinals.
+        ordinals = [int(k) if k.lstrip("-").isdigit() else i for i, k in enumerate(parsed.labels)]
+    return QuestionSpec(
+        parsed.type, parsed.instruction, parsed.descriptions, ordinals
+    ), parsed.labels
 
 
-def answer(spec: QuestionSpec, labels: list[str], probs: list[float]) -> dict:
-    if spec.type == "noul":
-        return {"type": "noul", "noul": float(probs[1])}
+def answer(spec: QuestionSpec, labels: list[str], probs: list[float], *, legend=None) -> dict:
     dist = {lb: float(p) for lb, p in zip(labels, probs, strict=True)}
-    if spec.type == "choice":
-        return {"type": "choice", "choice": max(dist, key=dist.get), "probabilities": dist}
-    expected = sum(o * p for o, p in zip(spec.ordinals, probs, strict=True))
-    return {"type": "score", "score": float(expected), "probabilities": dist}
+    if legend is None and spec.type == "score":
+        legend = dict(zip(labels, spec.candidates, strict=True))
+    return build_answer(spec.type, dist, legend=legend, ordinals=spec.ordinals)
 
 
 class DecisionService:
-    def __init__(self, decision: Decision, model_name: str):
+    def __init__(
+        self,
+        decision: Decision,
+        model_name: str,
+        *,
+        model_id: str | None = None,
+        model_description: str = ModelCatalog.description,
+        model_release_date: str = ModelCatalog.release_date,
+    ):
         self.decision = decision
         self.model_name = model_name
+        self.catalog = ModelCatalog(
+            model_name, model_id or f"{model_name}-1.0.0", model_description, model_release_date
+        )
         self.lock = Lock()  # one forward at a time: predictable latency, no VRAM spikes
 
     def handle(self, body: dict) -> dict:
         if not isinstance(body, dict) or "questions" not in body:
-            raise BadRequest("body needs 'state' and 'questions'")
+            raise BadRequest("body needs 'state' and 'questions'", "body")
         qs = body["questions"]
         if not isinstance(qs, dict) or not qs:
             raise BadRequest("'questions' must be a non-empty object")
+        if not isinstance(body.get("ayaka", {}), dict):
+            raise BadRequest("ayaka must be an object", "ayaka")
+        # Reserve the namespace without enabling any v2 request controls.
+        model_id = self.catalog.resolve(body.get("model"))
         names = list(qs)
-        parsed = [parse_question(qs[n]) for n in names]
+        if any(not isinstance(n, str) for n in names):
+            raise BadRequest("question names must be strings")
+        parsed = [parse_question(qs[n], field=f"questions.{n}") for n in names]
         state = body.get("state", "")
+        render_content(state, "state")
         with self.lock:
             results = self.decision.decide(state, [p[0] for p in parsed])
         answers = {
-            n: answer(spec, labels, r.probs)
+            n: answer(
+                spec,
+                labels,
+                r.probs,
+                legend=parse_jev_question(qs[n]).legend if spec.type == "score" else None,
+            )
             for n, (spec, labels), r in zip(names, parsed, results, strict=True)
         }
         generated = [(r.extras.get("evidence") or {}).get("worked_steps", "") for r in results]
         return {
-            "model": body.get("model") or self.model_name,
+            "model": model_id,
             "answers": answers,
             "usage": {
                 "input_tokens": self._count_tokens(state, parsed),
@@ -124,50 +118,29 @@ class DecisionService:
         return len(prefix) + sum(len(it.rendered.suffix_ids) for it in items)
 
 
-def make_handler(service: DecisionService):
-    class Handler(BaseHTTPRequestHandler):
-        def _send(self, code: int, obj: dict) -> None:
-            data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def do_GET(self):  # noqa: N802
-            if self.path.rstrip("/") in ("/health", "/v1/health"):
-                self._send(200, {"status": "ok", "model": service.model_name})
-            elif self.path.rstrip("/") == "/v1/models":
-                self._send(200, {"data": [{"id": service.model_name}]})
-            else:
-                self._send(404, {"error": "not found"})
-
-        def do_POST(self):  # noqa: N802
-            if self.path.rstrip("/") != "/v1/systemone":
-                self._send(404, {"error": "not found"})
-                return
-            try:
-                n = int(self.headers.get("Content-Length", "0"))
-                body = json.loads(self.rfile.read(n) or b"{}")
-                t0 = time.perf_counter()
-                out = service.handle(body)
-                out["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-                self._send(200, out)
-            except (BadRequest, json.JSONDecodeError) as e:
-                self._send(400, {"error": str(e)})
-            except Exception as e:  # never leak a traceback to the caller
-                self._send(500, {"error": f"internal error: {type(e).__name__}"})
-
-        def log_message(self, *args):  # keep stdout for our own logs
-            pass
-
-    return Handler
+def make_handler(service: DecisionService, *, config: ServiceConfig | None = None):
+    return make_api_handler(service, config=config)
 
 
 def serve(
-    decision: Decision, model_name: str, host: str = "0.0.0.0", port: int = 8000
+    decision: Decision,
+    model_name: str,
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    *,
+    config: ServiceConfig | None = None,
+    model_id: str | None = None,
+    model_description: str = ModelCatalog.description,
+    model_release_date: str = ModelCatalog.release_date,
 ) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(DecisionService(decision, model_name)))
+    service = DecisionService(
+        decision,
+        model_name,
+        model_id=model_id,
+        model_description=model_description,
+        model_release_date=model_release_date,
+    )
+    return ThreadingHTTPServer((host, port), make_handler(service, config=config))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -220,7 +193,9 @@ def main(argv: list[str] | None = None) -> None:
         default=0,
         help="prompt token budget per question (default: the config's serve_max_seq_len)",
     )
+    add_service_arguments(ap)
     args = ap.parse_args(argv)
+    config = config_from_args(args)
     if args.threads:
         torch.set_num_threads(args.threads)
     if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
@@ -255,7 +230,16 @@ def main(argv: list[str] | None = None) -> None:
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
-    httpd = serve(decision, name, args.host, args.port)
+    httpd = serve(
+        decision,
+        name,
+        args.host,
+        args.port,
+        config=config,
+        model_id=args.model_id,
+        model_description=args.model_description,
+        model_release_date=args.model_release_date,
+    )
     print(
         f"[serve] {name} on {args.device} at http://{args.host}:{args.port}/v1/systemone",
         flush=True,

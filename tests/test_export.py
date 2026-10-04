@@ -174,11 +174,12 @@ def test_http_server_roundtrip(model):
         )
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(bad, timeout=60)
-        assert e.value.code == 400
+        assert e.value.code == 422
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=10) as r:
             assert json.loads(r.read())["status"] == "ok"
     finally:
         httpd.shutdown()
+        httpd.server_close()
 
 
 def test_endpoint_client_scores_the_http_path_like_the_direct_decision(model):
@@ -196,6 +197,7 @@ def test_endpoint_client_scores_the_http_path_like_the_direct_decision(model):
             assert g.probs == pytest.approx(r.probs, abs=1e-5)
     finally:
         httpd.shutdown()
+        httpd.server_close()
 
 
 def test_service_reports_generated_worked_steps_as_output_tokens(model):
