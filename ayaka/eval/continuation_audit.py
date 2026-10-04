@@ -14,6 +14,12 @@ from .v2 import paired_report, summarize, typed_row
 
 
 def checked_rows(report, *, split="dev"):
+    """Recompute direct reads in their canonical candidate order.
+
+    Diagnostic argmax credit uses the first maximal candidate on a tie; for
+    ordered false/true Noul probabilities, P(true)=0.5 therefore selects No.
+    This tie rule does not change thresholded Noul abstention or its score.
+    """
     if split not in {"dev", "calibration"}:
         raise ValueError("saved audits support dev/calibration only; test stays unopened")
     if report.get("complete") is not True or report.get("split") != split:
