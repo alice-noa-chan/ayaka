@@ -55,7 +55,7 @@ The confidence formulas follow the documentation exactly:
 
 | Feature | Where | Status |
 |---|---|---|
-| Choice candidate generation (`open` / `expand`) | `ayaka.questions.<id>.candidate_generation` | v2 server: experimental. Swift: being ported. |
+| Choice candidate generation (`open` / `expand`) | `ayaka.questions.<id>.candidate_generation` | v2 server: experimental. Swift: implemented and experimental (`b8e2d22`); CPU tests and JevBench smoke (231/231 valid) pass. Its expand-mode `confidence` uses p_max and is replaced by the shared Jev formula in the next compatibility step. |
 | Image input | `ayaka.media` | v2 server: experimental. Swift: planned, unmeasured. Jev itself is text-only. |
 | Reasoning controls | `ayaka.reasoning` / `options.reasoning` | v2 server only. Swift rejects explicit requests and uses only a gated internal route if an adoption gate admits it. |
 | Calibration and route diagnostics | response `answers.<id>.ayaka` | Swift |

@@ -85,6 +85,19 @@ budget. Global reasoning `off` or an effective reasoning budget of zero conflict
 with generation and fails before any inference. Supply a fixed list instead when
 generation must be disabled.
 
+> **Swift server (`ayaka.swift.server`).** The same `open` / `expand` contract is also served over frozen
+> `gemma-4-12B-it`, with two differences:
+>
+> - the proposal has its own budget and does **not** require a reasoning mode;
+> - the policy should be sent under the top-level `"ayaka": {"questions": {"<id>": {"candidate_generation": ...}}}`
+>   namespace, which the official TypeSafe SDK can send through `extra_body`. The per-question
+>   `candidate_generation` key here remains an alias.
+>
+> Generated lists, diagnostics and the calibration status (`unvalidated_generated_partition`) are returned under
+> each answer's `"ayaka"` object, so Jev fields stay where the TypeSafe API puts them. Details and failure behaviour
+> are in [`deploy/swift/README.md`](../deploy/swift/README.md#experimental-choice-candidate-generation).
+> Generation quality and calibration are unmeasured on both servers.
+
 ### Expand an existing Other outcome
 
 ```json
