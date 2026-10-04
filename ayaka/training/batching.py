@@ -40,6 +40,7 @@ class TrainItem:
     proposal_input_ids: list[int] | None = None
     proposal_positions: list[int] | None = None
     proposal_labels: list[int] | None = None
+    direct_distillation: bool = False  # original-input arm; trainer must retain gold NLL
 
     @property
     def length(self) -> int:

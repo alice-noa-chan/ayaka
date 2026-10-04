@@ -9,6 +9,7 @@ and the freshly initialized decision head.
 
 from __future__ import annotations
 
+import math
 import time
 from collections import Counter
 from collections.abc import Iterator
@@ -291,6 +292,34 @@ class Trainer:
         return out, t
 
     def _backward(self, items: list[TrainItem]):
+        direct = [it for it in items if it.direct_distillation]
+        if direct:
+            weights = self.cfg.loss_weights
+            if (
+                weights.gold_nll_with_teacher is not True
+                or not math.isfinite(weights.nll)
+                or weights.nll <= 0
+                or not math.isfinite(weights.distill)
+                or weights.distill < 0
+            ):
+                raise ValueError("direct-distillation items require gold-anchored loss weights")
+            if any(
+                any(
+                    getattr(it, field) is not None
+                    for field in (
+                        "reasoning_positions",
+                        "reasoning_labels",
+                        "proposal_input_ids",
+                        "proposal_positions",
+                        "proposal_labels",
+                        "native_inputs",
+                    )
+                )
+                for it in direct
+            ):
+                raise ValueError(
+                    "direct-distillation items must not contain trace, proposal or image inputs"
+                )
         self.model.train()
         n_q = len(items)
         agg: dict[str, torch.Tensor] = {}

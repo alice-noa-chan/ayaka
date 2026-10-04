@@ -238,7 +238,9 @@ def prepare_direct_distillation(splits, tok, cfg, teacher_reads, verify_gold, *,
                 teacher, direct = _check_read(read, sample, q)
                 reasons = _teacher_filter(q, teacher, direct, target)
             accepted = not reasons
-            items.append(replace(item, teacher=teacher if accepted else None))
+            items.append(
+                replace(item, teacher=teacher if accepted else None, direct_distillation=True)
+            )
             records.append(
                 {
                     "id": identity,

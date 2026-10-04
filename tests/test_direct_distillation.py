@@ -274,3 +274,43 @@ def test_prepared_items_reach_real_tiny_lora_backward_without_trace_ce():
     parts = trainer.train_step(items)
     assert "kl" in parts and "reasoning_ce" not in parts
     assert all(math.isfinite(parts[name]) for name in ("total", "nll", "kl", "rps"))
+
+
+@pytest.mark.parametrize("operation", ["train_step", "backward_step"])
+@pytest.mark.parametrize("weights", [LossWeights(), LossWeights(gold_nll_with_teacher=True, nll=0)])
+def test_trainer_rejects_direct_items_with_legacy_or_disabled_gold_before_forward(
+    monkeypatch, operation, weights
+):
+    splits = dataset()
+    cfg = tiny_config(max_seq_len=2048)
+    tok = ToyTokenizer()
+    items, _ = prepare_direct_distillation(splits, tok, cfg, reads(splits), verify)
+    # Exercise the real guard without constructing or calling a model/optimizer.
+    trainer = Trainer.__new__(Trainer)
+    trainer.cfg = TrainConfig(loss_weights=weights)
+    monkeypatch.setattr(trainer, "_plan", lambda _: pytest.fail("forward planning must not happen"))
+    with pytest.raises(ValueError, match="gold-anchored"):
+        getattr(trainer, operation)(items)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "reasoning_positions",
+        "reasoning_labels",
+        "proposal_input_ids",
+        "proposal_positions",
+        "proposal_labels",
+        "native_inputs",
+    ],
+)
+def test_trainer_rejects_auxiliary_inputs_even_when_empty_before_forward(field):
+    splits = dataset()
+    tok = ToyTokenizer()
+    cfg = tiny_config(max_seq_len=2048)
+    items, _ = prepare_direct_distillation(splits, tok, cfg, {}, verify)
+    items[0] = replace(items[0], **{field: [] if field != "native_inputs" else {}})
+    trainer = Trainer.__new__(Trainer)
+    trainer.cfg = TrainConfig(loss_weights=LossWeights(gold_nll_with_teacher=True))
+    with pytest.raises(ValueError, match="must not contain"):
+        trainer.backward_step(items)
