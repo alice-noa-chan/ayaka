@@ -661,7 +661,8 @@ def training_batches(recipe, inventory, groups, *, start_step=0):
     if plan is not None:
         contract = recipe["corpus_contract"]
         if (
-            whole_epochs(plan, inventory, schedule) != contract["whole_epochs"]
+            fingerprint(inventory) != contract["inventory_sha256"]
+            or whole_epochs(plan, inventory, schedule) != contract["whole_epochs"]
             or len(groups) != len(inventory)
             or any(
                 len(group) != len(row["rows"]) for group, row in zip(groups, inventory, strict=True)

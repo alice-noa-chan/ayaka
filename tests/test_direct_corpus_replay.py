@@ -95,7 +95,17 @@ def test_planned_replay_keeps_static_group_digest_and_trains_and_restores_exact_
 
 
 @pytest.mark.parametrize(
-    "damage", ["authored", "missing", "nan", "unnormalized", "width", "teacher", "tokens"]
+    "damage",
+    [
+        "authored",
+        "authored_inventory",
+        "missing",
+        "nan",
+        "unnormalized",
+        "width",
+        "teacher",
+        "tokens",
+    ],
 )
 def test_runtime_replay_cannot_relax_original_input_or_probability_contract(tmp_path, damage):
     samples, _, recipe, inventory, groups, tcfg = replay_bundle(tmp_path)
@@ -107,8 +117,10 @@ def test_runtime_replay_cannot_relax_original_input_or_probability_contract(tmp_
         for row, group in zip(inventory, groups, strict=True)
         if row["data_kind"] == "natural"
     )
-    if damage == "authored":
+    if damage in {"authored", "authored_inventory"}:
         authored.base_probs = [1 / len(authored.target)] * len(authored.target)
+        if damage == "authored_inventory":
+            inventory[0]["data_kind"] = "natural"
     elif damage == "missing":
         natural.base_probs = None
     elif damage == "nan":

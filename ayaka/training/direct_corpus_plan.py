@@ -354,6 +354,7 @@ def validate_contract(plan, splits, commitment, inventory, groups, schedule):
         "plan_sha256": anchor,
         "splits": summaries,
         "whole_epochs": whole_epochs(plan, inventory, schedule),
+        "inventory_sha256": fingerprint(inventory),
         "prepared_groups_sha256": prepared_groups_sha256(groups),
     }
 
