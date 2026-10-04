@@ -169,10 +169,22 @@ class ElectraDecisionModel(nn.Module):
 
     @classmethod
     def from_config(
-        cls, cfg: ElectraConfig, dtype: torch.dtype = torch.bfloat16, device="cpu"
+        cls,
+        cfg: ElectraConfig,
+        dtype: torch.dtype = torch.bfloat16,
+        device="cpu",
+        *,
+        backbone_path: str | None = None,
+        local_files_only: bool = False,
+        strict_loading: bool = False,
     ) -> ElectraDecisionModel:
         backbone, text_config = load_text_backbone(
-            cfg.backbone, dtype=dtype, device=device, revision=cfg.backbone_revision
+            backbone_path or cfg.backbone,
+            dtype=dtype,
+            device=device,
+            revision=None if backbone_path else cfg.backbone_revision,
+            local_files_only=local_files_only,
+            strict_loading=strict_loading,
         )
         model = cls(cfg, backbone, text_config)
         model.head.to(device)

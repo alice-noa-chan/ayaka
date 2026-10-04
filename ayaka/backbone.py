@@ -44,6 +44,9 @@ def load_text_backbone(
     device="cpu",
     seed: int = 0,
     revision: str | None = None,
+    *,
+    local_files_only: bool = False,
+    strict_loading: bool = False,
 ):
     """Return (Gemma4TextModel, text_config).
 
@@ -58,7 +61,9 @@ def load_text_backbone(
         cfg = tiny_text_config()
         lm = Gemma4ForCausalLM(cfg).to(dtype)
     else:
-        any_cfg = AutoConfig.from_pretrained(repo, revision=revision)
+        any_cfg = AutoConfig.from_pretrained(
+            repo, revision=revision, local_files_only=local_files_only, trust_remote_code=False
+        )
         cfg = getattr(any_cfg, "text_config", any_cfg)
         gemma = cfg.model_type == "gemma4_text"
         mapping = TEXT_KEY_MAPPING if gemma else {r"^model\.language_model\.": "model."}
@@ -66,15 +71,24 @@ def load_text_backbone(
         # load straight onto the target device: no full CPU copy of the weights
         dev = torch.device(device)
         loader = Gemma4ForCausalLM if gemma else AutoModelForCausalLM
-        lm = loader.from_pretrained(
+        loaded = loader.from_pretrained(
             repo,
             config=cfg,
             dtype=dtype,
             attn_implementation="sdpa",
             revision=revision,
+            local_files_only=local_files_only,
+            trust_remote_code=False,
+            output_loading_info=strict_loading,
             device_map={"": dev.index or 0} if dev.type == "cuda" else None,
             **kwargs,
         )
+        if strict_loading:
+            lm, info = loaded
+            if any(info.get(key) for key in ("missing_keys", "mismatched_keys", "error_msgs")):
+                raise ValueError(f"native text weights did not load completely: {info}")
+        else:
+            lm = loaded
     text = detach_text_backbone(lm)
     del lm
     return text.to(device), cfg
