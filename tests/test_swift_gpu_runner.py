@@ -180,6 +180,10 @@ def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatc
     assert "<set revision via env/--model>" in output
     assert "75 minutes" in output
     assert "Time budget table" in output
+    assert "pre-launch admission" in output
+    assert "Enabled plan total: 85 minutes" in output
+    assert "Admission: REFUSED" in output
+    assert "Cleanup/pack reserve: 120s inside the cap" in output
     assert all(priority in output for priority in ("P0", "P1", "P2", "P3", "P4"))
     assert "best TWO" in output
     assert "P4           15  False" in output
@@ -220,7 +224,7 @@ def test_dry_run_fixed_variants_and_optional_lora(capsys):
     assert gpu_runner.main(["--dry-run", "--with-lora-arm"]) == 0
     output = capsys.readouterr().out
     assert "P4           15  True" in output
-    assert "enabled plan total: 90 minutes" in output
+    assert "Enabled plan total: 105 minutes" in output
     for invalid in ("", "min,min", "min,unknown", "min,", "min,rules"):
         with pytest.raises(SystemExit):
             gpu_runner.main(["--dry-run", "--prompt-variants", invalid])
@@ -423,7 +427,23 @@ def test_supervisor_caps_subprocess_and_kills_entire_group(tmp_path, monkeypatch
     assert not supervisor.processes
 
 
-def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, with_lora_arm=False):
+def runner_fixture(
+    tmp_path,
+    monkeypatch,
+    *,
+    failure=None,
+    cap_after_p1=False,
+    with_lora_arm=False,
+    max_minutes=105,
+    allow_partial=False,
+    started=100.0,
+    cleanup_seconds=0,
+    prep_seconds=0,
+    priority_seconds=0,
+    pack_seconds=0,
+    selection_seconds=0,
+    clock=None,
+):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(gpu_runner, "require_free_ports", lambda ports: None)
     real_version = gpu_runner.importlib.metadata.version
@@ -432,7 +452,7 @@ def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, w
         "version",
         lambda name: "0.30.0" if name == "vllm" else real_version(name),
     )
-    now = [100.0]
+    now = [started] if clock is None else clock
     monkeypatch.setattr(gpu_runner.time, "monotonic", lambda: now[0])
     datasets = []
     for name, split in (
@@ -468,18 +488,28 @@ def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, w
     current = [None]
 
     class Supervisor:
+        def __setattr__(self, key, value):
+            if key in ("deadline", "work_deadline"):
+                events.append((key, value - started))
+            object.__setattr__(self, key, value)
+
         def __init__(self, root, deadline, work_deadline):
             self.deadline = deadline
             self.work_deadline = work_deadline
 
         def remaining(self):
-            return 600
+            remaining = self.work_deadline - now[0]
+            if remaining <= 0:
+                raise gpu_runner.DeadlineReached("fake work deadline exhausted")
+            return remaining
 
         def run(self, command, log):
+            self.remaining()
             commands.append(command)
             assert "pip" not in command
             if command[0] == "nvidia-smi":
                 log.write_text("CPU fake GPU receipt")
+                now[0] += prep_seconds
             elif "_resolve" in command:
                 offset = command.index("_resolve")
                 current[0] = command[offset + 1]
@@ -487,6 +517,9 @@ def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, w
                     json.dumps({"model": current[0], "revision": "a" * 40})
                 )
             elif any(str(part).endswith("parity.py") for part in command):
+                if priority_seconds:
+                    now[0] += priority_seconds
+                    self.remaining()
                 phase = command[command.index("--phase") + 1]
                 model = command[command.index("--model") + 1]
                 if phase == "reference":
@@ -532,13 +565,21 @@ def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, w
                     diagnostic="--diagnostic" in command,
                 )
                 if cap_after_p1 and Path(source).stem == "jevbench_public" and variant == "rules":
-                    now[0] = 200.0
+                    now[0] = self.work_deadline
+            elif "_select" in command:
+                events.append(("select",))
+                now[0] += selection_seconds
+                self.remaining()
+                gpu_runner.select_model_results(Path(command[-1]))
             elif any(str(part).endswith("latency_probe.py") for part in command):
                 assert active == ["vllm", "swift"]
                 events.append(("probe", command[command.index("--prompt-variant") + 1]))
                 Path(command[command.index("--output") + 1]).write_text('{"complete":true}')
             elif "_pack" in command:
                 assert not active
+                assert float(command[command.index("--deadline") + 1]) == started + max_minutes * 60
+                now[0] += pack_seconds
+                self.remaining()
                 gpu_runner.pack_results(Path(command[-2]), Path(command[-1]))
 
         def start(self, command, log):
@@ -563,12 +604,14 @@ def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, w
                 active.remove("swift")
             else:
                 active.clear()
+                now[0] += cleanup_seconds
 
     monkeypatch.setattr(gpu_runner, "Supervisor", Supervisor)
     args = SimpleNamespace(
         output=tmp_path / "out",
         archive=tmp_path / "out.tar.zst",
-        max_minutes=1,
+        max_minutes=max_minutes,
+        allow_partial=allow_partial,
         vllm_port=8000,
         swift_port=8009,
         health_timeout=10,
@@ -624,14 +667,17 @@ def test_runner_reference_exit_before_vllm_and_parity_aborts_bulk(tmp_path, monk
     )
 
 
-def test_runner_finishes_current_priority_then_skips_later_at_cap(tmp_path, monkeypatch):
+def test_runner_last_command_at_deadline_is_incomplete_and_later_priorities_skipped(
+    tmp_path, monkeypatch
+):
     code, args, events, _ = runner_fixture(tmp_path, monkeypatch, cap_after_p1=True)
     assert code == 124
     state = json.loads((args.output / "progress.json").read_text())
-    assert state["status"] == "time_cap"
+    assert state["status"] == "partial"
+    assert state["stop_reason"] == "priority_timeout"
     assert [p["status"] for p in state["priorities"]] == [
         "complete",
-        "complete",
+        "timeout",
         "skipped",
         "skipped",
         "skipped",
@@ -661,3 +707,214 @@ def test_reference_failure_keeps_invalid_artifact_and_never_starts_vllm(tmp_path
     assert diagnostic["comparison_valid"] is False
     assert diagnostic["hf_load_s"] == 0.1 and diagnostic["vllm_load_s"] is None
     assert "reference command exited 1" in diagnostic["runner_error"]
+
+
+def test_admission_includes_environment_all_enabled_work_loads_and_cleanup():
+    models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
+    admission = gpu_runner.admission_plan(models, 75)
+    assert admission["planned_minutes"] == 85
+    assert admission["environment_prep_minutes"] == 3
+    assert admission["cleanup_reserve_seconds"] == 120
+    assert [p["load_minutes"] for p in admission["priorities"]] == [5, 0, 0, 5, 5]
+    assert admission["refused"] and not any(p["admitted"] for p in admission["priorities"])
+    assert gpu_runner.admission_plan(models, 105, with_lora_arm=True)["planned_minutes"] == 105
+
+
+@pytest.mark.parametrize(
+    "minutes, admitted_ids",
+    [
+        (19, []),
+        (20, ["P0"]),
+        (45, ["P0"]),
+        (55, ["P0", "P1"]),
+        (60, ["P0", "P1", "P2"]),
+        (85, ["P0", "P1", "P2", "P3"]),
+    ],
+)
+def test_allow_partial_admits_a_prefix_including_exact_fit(minutes, admitted_ids):
+    models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
+    admission = gpu_runner.admission_plan(models, minutes, allow_partial=True)
+    assert not admission["refused"]
+    assert admission["admitted_minutes"] <= minutes
+    assert [p["id"] for p in admission["priorities"] if p["admitted"]] == admitted_ids
+    for priority in admission["priorities"]:
+        if priority["enabled"] and not priority["admitted"]:
+            assert priority["status"] == "skipped" and priority["skip_reason"] == "not_admitted"
+
+
+def test_overbudget_execute_refuses_before_any_environment_or_model_work(tmp_path, monkeypatch):
+    models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
+    args = SimpleNamespace(max_minutes=1, output=tmp_path / "out")
+    monkeypatch.setattr(gpu_runner.time, "monotonic", lambda: 0.0)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("over-budget admission must refuse before preparing the environment")
+
+    monkeypatch.setattr(gpu_runner, "Supervisor", forbidden)
+    monkeypatch.setattr(gpu_runner, "require_free_ports", forbidden)
+    monkeypatch.setattr(gpu_runner.importlib.metadata, "version", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    with pytest.raises(ValueError, match="planned total 85 minutes exceeds --max-minutes 1"):
+        gpu_runner.execute(
+            args, models, {"datasets": []}, 0.0, gpu_runner.model_options(None, models)
+        )
+    assert not args.output.exists()
+
+
+def test_r15_counterexample_60_second_cap_never_extends_any_deadline(tmp_path, monkeypatch):
+    # The original .dev audit writes a fixed receipt. Reproduce its zero-origin
+    # clock and 1-minute plan here, preserving all historical .dev receipts.
+    code, args, events, commands = runner_fixture(
+        tmp_path, monkeypatch, max_minutes=1, allow_partial=True, started=0.0, cleanup_seconds=30
+    )
+    assert code == 0
+    observed = [e[1] for e in events if e[0] in ("deadline", "work_deadline")]
+    assert max(observed) == 60.0
+    assert all(deadline <= 60 for deadline in observed)
+    assert all("_pack" in command for command in commands)
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "partial"
+    assert state["hard_deadline_elapsed_s"] == 60
+    assert state["finished_steps"] == []
+    assert [p["skip_reason"] for p in state["priorities"]] == ["not_admitted"] * 4 + ["disabled"]
+
+
+def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypatch):
+    real_write = gpu_runner.write_json
+    initial_states = []
+
+    def capture(path, data):
+        if path.name == "progress.json":
+            initial_states.append(json.loads(json.dumps(data)))
+        real_write(path, data)
+
+    monkeypatch.setattr(gpu_runner, "write_json", capture)
+    code, args, events, _ = runner_fixture(
+        tmp_path, monkeypatch, max_minutes=45, allow_partial=True
+    )
+    assert code == 0
+    initial = initial_states[0]
+    assert [p["status"] for p in initial["priorities"]] == ["pending"] + ["skipped"] * 4
+    assert [p["skip_reason"] for p in initial["priorities"]] == [None] + ["not_admitted"] * 3 + [
+        "disabled"
+    ]
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "partial" and state["priorities"][0]["status"] == "complete"
+    assert not any(e[0] in ("collect", "probe") for e in events)
+
+
+def test_priority_timeout_stops_work_and_preserves_partial_archive(tmp_path, monkeypatch):
+    code, args, events, commands = runner_fixture(
+        tmp_path, monkeypatch, priority_seconds=901, max_minutes=85
+    )
+    assert code == 124
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "partial"
+    assert state["priorities"][0]["status"] == "timeout"
+    assert all(p["status"] == "skipped" for p in state["priorities"][1:])
+    assert not any(e[0] in ("serve", "collect", "probe") for e in events)
+    assert not any(command[0] == "vllm" for command in commands)
+    assert args.archive.is_file()
+    assert all(e[1] <= 85 * 60 for e in events if e[0] in ("deadline", "work_deadline"))
+
+
+def test_environment_deadline_is_capped_and_timeout_skips_all_priorities(tmp_path, monkeypatch):
+    code, args, events, commands = runner_fixture(tmp_path, monkeypatch, prep_seconds=181)
+    assert code == 124
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "partial" and not state["finished_steps"]
+    assert all(p["status"] == "skipped" for p in state["priorities"])
+    assert all(command[0] == "nvidia-smi" or "_pack" in command for command in commands)
+    assert ("work_deadline", 180.0) in events
+
+
+def test_cleanup_after_hard_deadline_cannot_launch_pack_or_extend_cap(tmp_path, monkeypatch):
+    code, args, events, commands = runner_fixture(
+        tmp_path, monkeypatch, max_minutes=1, allow_partial=True, started=0, cleanup_seconds=60
+    )
+    assert code == 124
+    assert not commands
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "partial" and state["archive_status"] == "timeout"
+    assert not args.archive.exists()
+    assert max(e[1] for e in events if e[0] in ("deadline", "work_deadline")) == 60
+
+
+def test_pack_timeout_cannot_report_complete(tmp_path, monkeypatch):
+    code, args, _, _ = runner_fixture(tmp_path, monkeypatch, max_minutes=85, pack_seconds=85 * 60)
+    assert code == 124
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "partial" and state["archive_status"] == "timeout"
+    assert all(p["status"] == "complete" for p in state["priorities"] if p["enabled"])
+
+
+def test_selection_timeout_stops_live_backend_and_skips_public_and_latency(tmp_path, monkeypatch):
+    code, args, events, _ = runner_fixture(tmp_path, monkeypatch, selection_seconds=35 * 60)
+    assert code == 124
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["priorities"][1]["status"] == "timeout"
+    assert state["status"] == "partial" and state["archive_status"] == "complete"
+    assert ("select",) in events
+    assert not any(e[0] == "collect" and e[2] == "jevbench_public" for e in events)
+    assert not any(e[0] == "probe" for e in events)
+
+
+def test_next_priority_deadline_is_clamped_to_global_work_limit(tmp_path, monkeypatch):
+    now = [0.0]
+    real_write = gpu_runner.write_json
+    advanced = False
+
+    def slow_checkpoint(path, data):
+        nonlocal advanced
+        if path.name == "progress.json" and "P1" in data["finished_steps"] and not advanced:
+            # Simulate time between priorities: just one second of work remains.
+            now[0] = 60 * 60 - gpu_runner.CLEANUP_RESERVE_SECONDS - 1
+            advanced = True
+        real_write(path, data)
+
+    monkeypatch.setattr(gpu_runner, "write_json", slow_checkpoint)
+    code, args, events, _ = runner_fixture(
+        tmp_path, monkeypatch, max_minutes=60, allow_partial=True, started=0, clock=now
+    )
+    assert code == 0
+    state = json.loads((args.output / "progress.json").read_text())
+    priority = state["priorities"][2]
+    assert priority["started_elapsed_s"] == 3479
+    assert priority["work_deadline_elapsed_s"] == 3480
+    assert priority["work_deadline_elapsed_s"] < priority["started_elapsed_s"] + 5 * 60
+    assert all(p.get("work_deadline_elapsed_s", 0) <= 3480 for p in state["priorities"])
+    assert all(e[1] <= 3600 for e in events if e[0] in ("deadline", "work_deadline"))
+
+
+def test_supervisor_cleanup_grace_is_bounded_by_absolute_deadline(tmp_path, monkeypatch):
+    now = [59.0]
+    waits, killed = [], []
+    monkeypatch.setattr(gpu_runner.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: killed.append((pid, sig)), raising=False)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+
+    class Process:
+        pid = 42
+
+        def wait(self, timeout):
+            waits.append(timeout)
+            now[0] += timeout
+            raise subprocess.TimeoutExpired("fixture", timeout)
+
+    supervisor = gpu_runner.Supervisor(tmp_path, 60.0, 0.0)
+    stream = io.BytesIO()
+    supervisor.processes[Process()] = stream
+    supervisor.stop()
+    assert waits == [1.0, 0.0] and now[0] == 60.0
+    assert killed == [(42, signal.SIGTERM), (42, signal.SIGKILL)]
+    assert stream.closed and not supervisor.processes
+
+
+def test_dry_run_allow_partial_prints_admission_prefix(capsys):
+    assert gpu_runner.main(["--dry-run", "--max-minutes", "45", "--allow-partial"]) == 0
+    output = capsys.readouterr().out
+    assert "Admission: partial prefix" in output
+    assert "admitted total: 20 minutes" in output
+    rows = [line for line in output.splitlines() if line.startswith(("P0 ", "P1 ", "P2 ", "P3 "))]
+    assert "admitted" in rows[0]
+    assert all("skipped: not_admitted" in line for line in rows[1:])

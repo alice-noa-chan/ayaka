@@ -38,10 +38,15 @@ from scripts.swift.parity import CENTERED_LOG_MASS_MAX_ABS_NATS, COHORT  # noqa:
 VLLM_VERSION = "0.30.0"
 GEMMA_12B_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
 DEFAULT_KWARGS = {"enable_thinking": False}
-# Planning estimates, not measured throughput. Stop at priority boundaries;
-# a separate per-priority emergency deadline preserves diagnostic partials.
+# Planning estimates, not measured throughput. Loads are additional to priority
+# work: each new model/adapter needs an HF reference and a fresh vLLM server.
 PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P2": 5, "P3": 20, "P4": 15}
-SETUP_AND_PACK_MINUTES = 5
+ENVIRONMENT_PREP_MINUTES = 3
+HF_LOAD_MINUTES = 2
+VLLM_LOAD_MINUTES = 3
+# Stop work 120s before the absolute cap to stop process groups and pack partials.
+# This reserve is inside max_minutes; cleanup can never extend the cap.
+CLEANUP_RESERVE_SECONDS = 120
 FIXED_VARIANTS = ("min", "cygnet", "rules")
 FIXED_MODELS = ("google/gemma-4-12B-it", "google/gemma-4-E4B-it")
 DATASET_ORDER = ("v2_calibration", "v2_dev", "cygnet_calibration", "jevbench_public")
@@ -198,24 +203,90 @@ def priority_plan(models, *, with_lora_arm=False):
     ]
 
 
-def plan(
-    models, manifest, concurrency, minutes, options, variants=FIXED_VARIANTS, *, with_lora_arm=False
-):
+def admission_plan(models, minutes, *, with_lora_arm=False, allow_partial=False):
+    """Admit only a prefix whose estimated setup, loads, work and cleanup fit."""
+    if not math.isfinite(minutes) or minutes <= 0:
+        raise ValueError("max minutes must be finite and positive")
     priorities = priority_plan(models, with_lora_arm=with_lora_arm)
+    overhead = ENVIRONMENT_PREP_MINUTES + CLEANUP_RESERVE_SECONDS / 60
+    for priority in priorities:
+        priority["load_minutes"] = (
+            HF_LOAD_MINUTES + VLLM_LOAD_MINUTES if priority["id"] in ("P0", "P3", "P4") else 0
+        )
+        priority["total_minutes"] = priority["minutes"] + priority["load_minutes"]
+    total = overhead + sum(p["total_minutes"] for p in priorities if p["enabled"])
+    refused = total > minutes and not allow_partial
+    admitted_total = overhead
+    prefix_open = not refused
+    for priority in priorities:
+        admitted = (
+            priority["enabled"]
+            and prefix_open
+            and admitted_total + priority["total_minutes"] <= minutes
+        )
+        priority.update(
+            admitted=admitted,
+            status="pending" if admitted else "skipped",
+            skip_reason=None if admitted else "not_admitted" if priority["enabled"] else "disabled",
+        )
+        if admitted:
+            admitted_total += priority["total_minutes"]
+        elif priority["enabled"]:
+            prefix_open = False
+    return {
+        "environment_prep_minutes": ENVIRONMENT_PREP_MINUTES,
+        "cleanup_reserve_seconds": CLEANUP_RESERVE_SECONDS,
+        "planned_minutes": total,
+        "admitted_minutes": admitted_total if any(p["admitted"] for p in priorities) else 0,
+        "refused": refused,
+        "priorities": priorities,
+    }
+
+
+def require_admission(admission, minutes):
+    if admission["refused"]:
+        raise ValueError(
+            f"planned total {admission['planned_minutes']:g} minutes exceeds "
+            f"--max-minutes {minutes:g}; increase the cap or use --allow-partial "
+            "to admit only the priorities that fit"
+        )
+
+
+def plan(
+    models,
+    manifest,
+    concurrency,
+    minutes,
+    options,
+    variants=FIXED_VARIANTS,
+    *,
+    with_lora_arm=False,
+    allow_partial=False,
+):
+    admission = admission_plan(
+        models, minutes, with_lora_arm=with_lora_arm, allow_partial=allow_partial
+    )
     lines = [
         f"Prerequisites already installed: vllm=={VLLM_VERSION}; locally cached models/tokenizers (no automatic installs/downloads)",
-        f"Wall-clock cap: {minutes:g} minutes; finish the current priority, then mark later priorities skipped",
-        "Emergency deadline: each priority's fixed budget; cleanup/pack reserve <=30s",
-        "Time budget table (minutes; estimates, no GPU measurements):",
-        "Priority  Budget  Enabled  Work",
+        f"Absolute wall-clock cap: {minutes:g} minutes; stop unfinished priorities at their capped deadline",
+        f"Cleanup/pack reserve: {CLEANUP_RESERVE_SECONDS}s inside the cap; every work deadline <= hard deadline minus reserve",
+        "Time budget table / pre-launch admission (minutes; estimates, no GPU measurements):",
+        "Priority  Budget  Enabled  Load  Total  Admission           Work",
     ]
-    for priority in priorities:
+    for priority in admission["priorities"]:
+        decision = "admitted" if priority["admitted"] else "skipped: " + priority["skip_reason"]
         lines.append(
-            f"{priority['id']:8s} {priority['minutes']:6d}  {str(priority['enabled']):7s}  {priority['work']}"
+            f"{priority['id']:8s} {priority['minutes']:6g}  {str(priority['enabled']):7s}  "
+            f"{priority['load_minutes']:4g}  {priority['total_minutes']:5g}  {decision:19s} {priority['work']}"
         )
-    total = sum(p["minutes"] for p in priorities if p["enabled"]) + SETUP_AND_PACK_MINUTES
     lines += [
-        f"Setup/pack: {SETUP_AND_PACK_MINUTES} minutes; enabled plan total: {total} minutes",
+        f"Environment prep: {ENVIRONMENT_PREP_MINUTES} minutes; model load estimate: HF {HF_LOAD_MINUTES} + vLLM {VLLM_LOAD_MINUTES} minutes per new model/adapter",
+        f"Enabled plan total: {admission['planned_minutes']:g} minutes; admitted total: {admission['admitted_minutes']:g} minutes",
+        "Admission: REFUSED (increase --max-minutes or use --allow-partial)"
+        if admission["refused"]
+        else "Admission: partial prefix"
+        if any(p["enabled"] and not p["admitted"] for p in admission["priorities"])
+        else "Admission: complete plan",
         f"Bulk concurrency: {concurrency}; Prompt variants: {','.join(variants)}",
         "Serve one model at a time: bf16, context=16384, GPU=0.90, prefix caching, --logprobs-mode raw_logits",
         f"Fixed parity cohort: {COHORT.name}; 2/20/26 options, skew, typed item and two permutations",
@@ -380,6 +451,7 @@ class Supervisor:
         process = self.start(command, log)
         try:
             code = process.wait(timeout=self.remaining())
+            self.remaining()
             if code:
                 raise RuntimeError(f"command exited {code}; see {log}")
         except subprocess.TimeoutExpired as exc:
@@ -391,13 +463,15 @@ class Supervisor:
         import urllib.error
         import urllib.request
 
-        end = time.monotonic() + min(timeout, self.remaining())
+        self.remaining()
+        end = min(time.monotonic() + timeout, self.work_deadline)
         while time.monotonic() < end:
             if process.poll() is not None:
                 raise RuntimeError(f"server exited {process.returncode} before health: {url}")
             try:
                 with urllib.request.urlopen(url, timeout=min(2, self.remaining())) as response:
                     if response.status == 200:
+                        self.remaining()
                         return
             except (OSError, urllib.error.URLError):
                 pass
@@ -441,32 +515,58 @@ def require_free_ports(ports: tuple[int, ...]) -> None:
                 raise ValueError(f"port {port} is already in use; choose different ports") from exc
 
 
+def select_model_results(directory: Path) -> dict:
+    """Run CPU fitting in a supervised child while the billable backend is live."""
+    from ayaka.swift.collect import load_reads
+    from ayaka.swift.policy import Policy
+    from scripts.swift.select_variant import assert_roles_isolated, select_variants
+
+    calibration, dev = [], []
+    for variant in FIXED_VARIANTS:
+        for target, name in ((calibration, "v2_calibration"), (dev, "v2_dev")):
+            target.extend(load_reads([directory / variant / (name + ".reads.jsonl")]))
+    # Check all roles before excluding grouped diagnostics. Cygnet keeps its
+    # original split and never enters fitting or dev selection.
+    assert_roles_isolated(calibration, dev)
+    calibration = [r for r in calibration if r["readout"] != "grouped_approx"]
+    dev = [r for r in dev if r["readout"] != "grouped_approx"]
+    selection = select_variants(calibration, dev)
+    write_json(directory / "variant_selection.json", selection)
+    for variant, policy in selection["policies"].items():
+        Policy(**policy).save(directory / variant / "policy.json")
+    return selection
+
+
 def execute(args, models, manifest, started, options):
+    admission = admission_plan(
+        models,
+        args.max_minutes,
+        with_lora_arm=getattr(args, "with_lora_arm", False),
+        allow_partial=getattr(args, "allow_partial", False),
+    )
+    require_admission(admission, args.max_minutes)
     if sys.platform != "linux":
         raise ValueError("live collection requires Linux; --dry-run works on CPU/Windows")
     if args.output.exists() and any(args.output.iterdir()):
         raise ValueError("output directory must be empty; use --output for a fresh run")
     args.output.mkdir(parents=True, exist_ok=True)
-    cap = started + args.max_minutes * 60
-    supervisor = Supervisor(REPO, cap + 30, cap)
-    priorities = priority_plan(models, with_lora_arm=getattr(args, "with_lora_arm", False))
+    hard_deadline = started + args.max_minutes * 60
+    work_limit = hard_deadline - CLEANUP_RESERVE_SECONDS
+    supervisor = Supervisor(
+        REPO, hard_deadline, min(started + ENVIRONMENT_PREP_MINUTES * 60, work_limit)
+    )
     state = {
         "started_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "max_minutes": args.max_minutes,
+        "hard_deadline_elapsed_s": hard_deadline - started,
+        "admission": {k: v for k, v in admission.items() if k != "priorities"},
         "status": "running",
         "current_step": "preflight_environment",
         "finished_steps": [],
         "models": {},
         "prompt_variants": list(FIXED_VARIANTS),
         "comparison_valid": False,
-        "priorities": [
-            {
-                **p,
-                "status": "pending" if p["enabled"] else "skipped",
-                "skip_reason": None if p["enabled"] else "disabled",
-            }
-            for p in priorities
-        ],
+        "priorities": admission["priorities"],
     }
     marker = args.output / "progress.json"
     gpu = "unavailable (preflight/startup interrupted)"
@@ -486,6 +586,7 @@ def execute(args, models, manifest, started, options):
     def run(command, log, step):
         begin(step)
         supervisor.run(command, log)
+        supervisor.remaining()
         checkpoint(step)
 
     def reader_flags(model):
@@ -664,25 +765,13 @@ def execute(args, models, manifest, started, options):
         active_model = model
 
     def select_model(model):
-        from ayaka.swift.collect import load_reads
-        from ayaka.swift.policy import Policy
-        from scripts.swift.select_variant import assert_roles_isolated, select_variants
-
         directory = args.output / model["slug"]
-        calibration, dev = [], []
-        for variant in FIXED_VARIANTS:
-            for target, name in ((calibration, "v2_calibration"), (dev, "v2_dev")):
-                target.extend(load_reads([directory / variant / (name + ".reads.jsonl")]))
-        begin(model["slug"] + "/select")
-        # Check all roles before excluding grouped diagnostics. Cygnet keeps
-        # its original split and never enters fitting or dev selection.
-        assert_roles_isolated(calibration, dev)
-        calibration = [r for r in calibration if r["readout"] != "grouped_approx"]
-        dev = [r for r in dev if r["readout"] != "grouped_approx"]
-        selection = select_variants(calibration, dev)
-        write_json(directory / "variant_selection.json", selection)
-        for variant, policy in selection["policies"].items():
-            Policy(**policy).save(directory / variant / "policy.json")
+        run(
+            [sys.executable, str(Path(__file__).resolve()), "_select", str(directory)],
+            directory / "select.log",
+            model["slug"] + "/select",
+        )
+        selection = json.loads((directory / "variant_selection.json").read_text())
         state["best_two_variants"] = sorted(
             selection["variants"], key=lambda v: (-selection["variants"][v]["composite_A"], v)
         )[:2]
@@ -797,29 +886,35 @@ def execute(args, models, manifest, started, options):
     code = 0
     try:
         checkpoint()
-        require_free_ports((args.vllm_port, args.swift_port))
-        # Preconditions are read-only. The runner never installs dependencies.
-        if importlib.metadata.version("vllm") != VLLM_VERSION:
-            raise RuntimeError("preflight requires installed vLLM 0.30.0")
-        supervisor.run(
-            ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
-            args.output / "gpu.txt",
-        )
-        gpu = (args.output / "gpu.txt").read_text()
-        checkpoint("preflight_environment")
+        if any(p["admitted"] for p in state["priorities"]):
+            begin("preflight_environment")
+            require_free_ports((args.vllm_port, args.swift_port))
+            # Preconditions are read-only. The runner never installs dependencies.
+            if importlib.metadata.version("vllm") != VLLM_VERSION:
+                raise RuntimeError("preflight requires installed vLLM 0.30.0")
+            run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,driver_version,memory.total",
+                    "--format=csv,noheader",
+                ],
+                args.output / "gpu.txt",
+                "preflight_environment",
+            )
+            gpu = (args.output / "gpu.txt").read_text()
         for priority in state["priorities"]:
-            if not priority["enabled"]:
+            if not priority["admitted"]:
                 continue
-            if time.monotonic() >= cap:
-                state["status"] = "time_cap"
-                code = 124
-                break
+            # A completed priority must also finish stopping its transient
+            # processes before its deadline. No fresh work begins in reserve.
+            if time.monotonic() >= work_limit:
+                raise DeadlineReached("global work deadline reached before next priority")
             priority["status"] = "running"
             priority["started_elapsed_s"] = time.monotonic() - started
-            # Soft global cap is checked at boundaries. A hung priority has a
-            # distinct fixed emergency bound and leaves invalid partial output.
-            supervisor.work_deadline = time.monotonic() + priority["minutes"] * 60
-            supervisor.deadline = supervisor.work_deadline + 30
+            supervisor.work_deadline = min(
+                time.monotonic() + priority["total_minutes"] * 60, work_limit
+            )
+            priority["work_deadline_elapsed_s"] = supervisor.work_deadline - started
             checkpoint()
             if priority["id"] == "P0":
                 start_model(models[0])
@@ -830,6 +925,10 @@ def execute(args, models, manifest, started, options):
             elif priority["id"] == "P3":
                 collect_model(models[1])
             else:
+                # Release the previous backend before local adapter hashing,
+                # which can take time even without launching another model.
+                supervisor.stop()
+                active_model = None
                 arm = {
                     **models[0],
                     "slug": "ayaka_large_lora",
@@ -854,12 +953,19 @@ def execute(args, models, manifest, started, options):
                     }
                 )
                 collect_model(arm)
+            supervisor.remaining()
             priority.update(status="complete", finished_elapsed_s=time.monotonic() - started)
             checkpoint(priority["id"])
         if state["status"] == "running":
-            state["status"] = "complete"
+            state["status"] = (
+                "partial"
+                if any(p["enabled"] and not p["admitted"] for p in state["priorities"])
+                else "complete"
+            )
     except DeadlineReached as exc:
-        state.update(status="priority_timeout", error=str(exc), comparison_valid=False)
+        state.update(
+            status="partial", stop_reason="priority_timeout", error=str(exc), comparison_valid=False
+        )
         code = 124
     except KeyboardInterrupt as exc:
         state.update(status="interrupted", error=str(exc), comparison_valid=False)
@@ -870,36 +976,59 @@ def execute(args, models, manifest, started, options):
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         old_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
-        supervisor.deadline = time.monotonic() + 30
-        supervisor.stop()
-        for priority in state["priorities"]:
-            if priority["status"] == "pending":
-                priority.update(status="skipped", skip_reason=state["status"])
-            elif priority["status"] == "running":
-                priority["status"] = "failed"
-        state.update(
-            elapsed_s=time.monotonic() - started,
-            stopped_at_step=state["current_step"],
-            current_step="finished",
-        )
-        checkpoint()
-        write_json(args.output / "inputs.manifest.json", manifest)
-        supervisor.work_deadline = supervisor.deadline
         try:
-            supervisor.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "_pack",
-                    str(args.output),
-                    str(args.archive),
-                ],
-                args.archive.with_name(args.archive.name + ".pack.log"),
+            # Reuse the original absolute cap, including if work or SIGTERM
+            # arrives late. Neither shutdown nor packing gets a fresh budget.
+            supervisor.stop()
+            for priority in state["priorities"]:
+                if priority["status"] == "pending":
+                    priority.update(
+                        status="skipped", skip_reason=state.get("stop_reason", state["status"])
+                    )
+                elif priority["status"] == "running":
+                    priority["status"] = (
+                        "timeout" if state.get("stop_reason") == "priority_timeout" else "failed"
+                    )
+            state.update(
+                elapsed_s=time.monotonic() - started,
+                stopped_at_step=state["current_step"],
+                current_step="finished",
             )
+            checkpoint()
+            write_json(args.output / "inputs.manifest.json", manifest)
+            supervisor.work_deadline = hard_deadline
+            try:
+                supervisor.remaining()
+                supervisor.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "_pack",
+                        "--deadline",
+                        str(hard_deadline),
+                        str(args.output),
+                        str(args.archive),
+                    ],
+                    args.archive.with_name(args.archive.name + ".pack.log"),
+                )
+                supervisor.remaining()
+                state["archive_status"] = "complete"
+            except Exception as exc:
+                timed_out = isinstance(exc, DeadlineReached)
+                state.update(
+                    archive_status="timeout" if timed_out else "failed",
+                    archive_error=f"{type(exc).__name__}: {exc}",
+                )
+                if state["status"] in ("complete", "partial"):
+                    state["status"] = "partial" if timed_out else "failed"
+                if not code:
+                    code = 124 if timed_out else 1
+            state["elapsed_s"] = time.monotonic() - started
+            checkpoint()
         finally:
             signal.signal(signal.SIGTERM, previous)
             signal.signal(signal.SIGINT, old_int)
-        print(f"{state['status']}: packed {args.archive} (+ .sha256)", flush=True)
+        print(f"{state['status']}: archive {state['archive_status']} at {args.archive}", flush=True)
     return code
 
 
@@ -910,7 +1039,13 @@ def main(argv: list[str] | None = None) -> int:
         resolve_model(argv[1], argv[2], Path(argv[3]), json.loads(argv[4]))
         return 0
     if argv and argv[0] == "_pack":
-        pack_results(Path(argv[1]), Path(argv[2]))
+        if argv[1] == "--deadline":
+            pack_results(Path(argv[3]), Path(argv[4]), deadline=float(argv[2]))
+        else:
+            pack_results(Path(argv[1]), Path(argv[2]))
+        return 0
+    if argv and argv[0] == "_select":
+        select_model_results(Path(argv[1]))
         return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
@@ -933,6 +1068,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--concurrency", type=int, default=16)
     parser.add_argument(
         "--max-minutes", type=float, default=os.environ.get("SWIFT_MAX_MINUTES", "75")
+    )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="admit only the priority prefix that fits the cap",
     )
     parser.add_argument("--vllm-port", type=int, default=8000)
     parser.add_argument("--swift-port", type=int, default=8009)
@@ -1001,6 +1141,7 @@ def main(argv: list[str] | None = None) -> int:
                 options,
                 args.prompt_variants,
                 with_lora_arm=args.with_lora_arm,
+                allow_partial=args.allow_partial,
             ),
             flush=True,
         )

@@ -21,25 +21,42 @@ Transfer code and the input archive to the intended host yourself. The stored
 ```bash
 export SWIFT_GEMMA_E4B_REVISION=FULL_COMMIT_SHA
 bash scripts/swift/collect_gpu.sh --dry-run
-bash scripts/swift/collect_gpu.sh --max-minutes 75
+bash scripts/swift/collect_gpu.sh --max-minutes 85
+# Or explicitly admit a prefix within the default 75-minute cap:
+bash scripts/swift/collect_gpu.sh --max-minutes 75 --allow-partial
 ```
 
-| Priority | Minutes | Work |
-| --- | ---: | --- |
-| P0 | 10 | 12B HF GPU bf16 reference; exit/free GPU memory; vLLM load and exact-ID parity |
-| P1 | 35 | gemma-4-12B-it x min,cygnet,rules: calibration, dev, Cygnet; select on dev; public diagnostic last |
-| P2 | 5 | 200 serial HTTP requests for each of P1's best two variants |
-| P3 | 20 | E4B x the same variants/datasets, with its own sequential HF/vLLM parity |
-| P4 | 15 | Optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer |
-| Setup/pack | 5 | Environment preflight and result archive |
+| Priority | Work minutes | Load minutes | Work |
+| --- | ---: | ---: | --- |
+| P0 | 10 | 5 | 12B HF GPU bf16 reference; exit/free GPU memory; vLLM load and exact-ID parity |
+| P1 | 35 | 0 | gemma-4-12B-it x min,cygnet,rules: calibration, dev, Cygnet; select on dev; public diagnostic last |
+| P2 | 5 | 0 | 200 serial HTTP requests for each of P1's best two variants |
+| P3 | 20 | 5 | E4B x the same variants/datasets, with its own sequential HF/vLLM parity |
+| P4 | 15 | 5 | Optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer |
+| Environment prep | 3 | 0 | Environment preflight |
+| Cleanup/pack | 2 | 0 | Fixed 120-second reserve inside the cap |
 
-These are planning estimates, not measured throughput. The default enabled
-plan totals 75 minutes; enabling P4 gives 90 minutes. The global cap is checked
-at priority boundaries: finish the current priority, then mark later priorities
-`skipped`. A stuck priority has a separate emergency timeout equal to its table
-budget. That timeout keeps diagnostic partials and aborts the run. Cleanup and
-packing have a separate bounded 30-second reserve, so the cap is a boundary
-stop rule rather than a promise to kill an active priority at that instant.
+These are planning estimates, not measured throughput. Each new model/adapter
+adds 2 minutes for HF loading and 3 for vLLM loading. The enabled plan totals
+85 minutes; enabling P4 gives 105 minutes. Before environment prep or model
+loading, the runner refuses an over-budget plan. The default 75-minute cap
+therefore needs a larger cap or `--allow-partial`. With that flag, only the
+priority prefix whose full estimated total fits is admitted; at 75 minutes this
+is P0/P1/P2. All remaining enabled priorities are marked `skipped` with
+`skip_reason: not_admitted` up front. Dry runs print the admission table, including
+refusals, without launching anything. If no priority fits, no environment or
+model work starts.
+
+The monotonic hard deadline is fixed at runner start plus `max_minutes * 60`.
+Environment and priority work deadlines are the smaller of their own budget
+deadline and the hard deadline minus 120 seconds. Priority budgets include the
+load estimates above. A priority that reaches its deadline is stopped and marked
+`timeout`, and later admitted priorities are skipped. Variant fitting also runs
+in a supervised child so it cannot leave vLLM running through unbounded CPU work.
+Cleanup and packing use only the time remaining before the original hard
+deadline; they never receive a fresh budget. `status: complete` requires all
+enabled priorities to finish within their deadlines and packing to succeed;
+admitted prefixes and timeouts produce `status: partial`.
 
 The primary pin is `google/gemma-4-12B-it` at
 `707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`; E4B needs an explicit revision.
@@ -162,5 +179,7 @@ resolved revisions, environment metadata, selection and per-variant reads.
 Only the best two primary variants have latency artifacts. Successful rows are
 flushed as collected. Final `out.tar.zst` and its SHA256 include partial results;
 Python zstandard or system libzstd must already be available. Exit codes are
-0 complete, 1 failure, 124 boundary cap/emergency timeout, and 130 interrupted.
+0 complete or an explicitly allowed partial prefix, 1 failure, 124 work/cleanup
+timeout, and 130 interrupted. Packing may be incomplete if the hard deadline is
+reached; the local progress receipt records its outcome.
 These scripts do not launch a paid instance or push/deploy anything.
