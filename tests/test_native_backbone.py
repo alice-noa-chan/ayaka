@@ -8,6 +8,36 @@ from ayaka.primitives import Decision, QuestionSpec
 from ayaka.tokenization import ToyTokenizer
 
 
+def test_restricted_native_read_preserves_float64_range_and_gradients():
+    from types import SimpleNamespace
+
+    embedding = torch.nn.Embedding(2, 2, dtype=torch.float64)
+    with torch.no_grad():
+        embedding.weight.fill_(1e200)
+    text = SimpleNamespace(config=SimpleNamespace(), get_input_embeddings=lambda: embedding)
+    hidden = torch.full((1, 2), 1e-200, dtype=torch.float64, requires_grad=True)
+    selected = native_logits(text, hidden, torch.tensor([0]))
+    expected = native_logits(text, hidden)[0, 0]
+    assert selected.dtype == torch.float64
+    assert selected.item() == expected.item() == 2.0
+    selected.sum().backward()
+    assert torch.isfinite(hidden.grad).all()
+    assert torch.isfinite(embedding.weight.grad).all()
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+def test_restricted_native_read_keeps_minimum_fp32_accumulation(dtype):
+    from types import SimpleNamespace
+
+    embedding = torch.nn.Embedding(2, 4, dtype=dtype)
+    text = SimpleNamespace(config=SimpleNamespace(), get_input_embeddings=lambda: embedding)
+    hidden = torch.tensor([[0.2, 0.3, 0.4, 0.5]], dtype=dtype)
+    ids = torch.tensor([0])
+    result = native_logits(text, hidden, ids)
+    assert result.dtype == torch.float32
+    assert torch.equal(result, (hidden.float() * embedding.weight[ids].float()).sum(-1))
+
+
 @pytest.mark.parametrize(
     "family", ["granite", "qwen3_5", "qwen3_5_hybrid", "gemma4_text", "gemma4_unified_text"]
 )

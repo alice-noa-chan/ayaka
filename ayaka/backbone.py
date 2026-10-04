@@ -107,7 +107,8 @@ def native_logits(text, hidden, ids=None):
         )
     else:
         rows = output_rows(text, ids)
-        logits = (hidden.float() * rows.float()).sum(-1)
+        dtype = torch.promote_types(torch.promote_types(hidden.dtype, rows.dtype), torch.float32)
+        logits = (hidden.to(dtype) * rows.to(dtype)).sum(-1)
         if head is not None and getattr(head, "bias", None) is not None:
             logits = logits + head.bias[ids]
     logits = logits / getattr(text.config, "logits_scaling", 1.0)
