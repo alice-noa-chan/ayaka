@@ -91,7 +91,7 @@ QUESTIONS = [
 @pytest.mark.parametrize("family", ["gemma", "granite"])
 @pytest.mark.parametrize("variant", ["min", "cygnet", "rules"])
 @pytest.mark.parametrize("state_format", ["pretty", "compact"])
-@pytest.mark.parametrize("mode", ["full_rows", "prefix_cache"])
+@pytest.mark.parametrize("mode", ["full_rows", "prefix_cache", "copy_on_write"])
 def test_actual_swift_reader_and_feature_prior_are_identical(family, variant, state_format, mode):
     tok = tokenizer()
     lm, text = native_model(family)
@@ -99,7 +99,12 @@ def test_actual_swift_reader_and_feature_prior_are_identical(family, variant, st
     prepared = prepare_swift_evidence_inputs(
         state, QUESTIONS, tok, prompt_variant=variant, state_format=state_format, context_limit=1536
     )
-    features = extract_swift_evidence_features(text, prepared, mode=mode)
+    feature_options = (
+        {"mode": "prefix_cache", "cache_strategy": "copy_on_write"}
+        if mode == "copy_on_write"
+        else {"mode": mode}
+    )
+    features = extract_swift_evidence_features(text, prepared, **feature_options)
     reader = HFReader("offline-random-fixture", device="cpu", dtype="float32", readout=READOUT)
     reader.model, reader.tokenizer = lm, tok  # No load, download, or pretrained accuracy claim.
     for qi, question in enumerate(QUESTIONS):

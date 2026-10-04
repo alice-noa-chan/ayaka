@@ -7,7 +7,6 @@ Bundles are unbound until a caller verifies weights/recipe/splits/targets.
 
 from __future__ import annotations
 
-import copy
 import math
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -19,6 +18,8 @@ from ayaka.backbone import native_logits, output_rows
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.model.electra import PRIMITIVE_INDEX, at_least_fp32
 from ayaka.prompt import QuestionView, render_prefix, render_question
+
+from .evidence_cache import branch_evidence_cache, dynamic_kv_bytes
 
 
 @dataclass(frozen=True)
@@ -197,6 +198,7 @@ def extract_evidence_features(
     inputs: EvidenceInputs,
     *,
     mode: str = "prefix_cache",
+    cache_strategy: str = "deepcopy",
     lexical: bool = False,
     output_device="cpu",
     max_forward_tokens: int = 65536,
@@ -205,7 +207,10 @@ def extract_evidence_features(
     """Extract one record with isolated suffixes and reusable state-only memory.
 
     ``prefix_cache`` runs the prefix once, then deep-copies its native cache for
-    each suffix (including recurrent caches). ``full_rows`` independently runs
+    each suffix (including recurrent caches). Opt-in ``copy_on_write`` shares
+    immutable KV tensors in stock, non-offloaded dynamic attention layers while
+    copying their metadata; unsupported cache classes fail explicitly. It never
+    crops discarded sliding states. ``full_rows`` independently runs
     prefix+suffix and serves as a reference. Both preserve final normalized
     states, actual output rows and uncalibrated native logits. Caps are validated
     before the first forward; feature bytes are not total model/KV/peak VRAM.
@@ -215,6 +220,10 @@ def extract_evidence_features(
     _validate_inputs(inputs)
     if mode not in {"prefix_cache", "full_rows"} or type(lexical) is not bool:
         raise ValueError("invalid feature extraction mode/lexical setting")
+    if cache_strategy not in {"deepcopy", "copy_on_write"} or (
+        mode == "full_rows" and cache_strategy != "deepcopy"
+    ):
+        raise ValueError("invalid evidence cache strategy for extraction mode")
     if any(type(cap) is not int or cap < 1 for cap in (max_forward_tokens, max_feature_bytes)):
         raise ValueError("resource caps must be positive integers")
     if text.training or any(module.training for module in text.modules()):
@@ -265,6 +274,7 @@ def extract_evidence_features(
     queries, candidates, priors, lexical_features = [], [], [], []
     memory = None
     cache = None
+    prefix_kv_bytes = None
     calls = 0
     consumed_tokens = 0
 
@@ -306,11 +316,12 @@ def extract_evidence_features(
             cache = pref.past_key_values
             if cache is None:
                 raise ValueError("backbone has no native prefix cache")
+            prefix_kv_bytes = dynamic_kv_bytes(cache)
             memory = frozen(pref.last_hidden_state)
             del pref
         for question in inputs.questions:
             if mode == "prefix_cache":
-                result = forward(question.suffix_ids, copy.deepcopy(cache))
+                result = forward(question.suffix_ids, branch_evidence_cache(cache, cache_strategy))
                 suffix = result.last_hidden_state[0]
             else:
                 result = forward(inputs.prefix_ids + question.suffix_ids)
@@ -397,6 +408,9 @@ def extract_evidence_features(
         "label_ids": [list(q.label_ids) for q in inputs.questions],
         "mode": mode,
         "cache_type": type(cache).__name__ if cache is not None else None,
+        "cache_strategy": cache_strategy if cache is not None else None,
+        "logical_prefix_kv_bytes": prefix_kv_bytes,
+        "cache_branch_kv_copy_bytes": (0 if cache_strategy == "copy_on_write" else prefix_kv_bytes),
         "prefix_tokens": prefix_length,
         "suffix_tokens": suffix_lengths,
         "forward_calls": calls,

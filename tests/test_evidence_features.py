@@ -10,6 +10,7 @@ from ayaka.backbone import detach_text_backbone, output_rows, tiny_text_config
 from ayaka.model.evidence import EvidenceResidualHead
 from ayaka.prompt import QuestionView
 from ayaka.tokenization import ToyTokenizer
+from ayaka.training.evidence_cache import branch_evidence_cache
 from ayaka.training.evidence_features import (
     FeatureExtractionError,
     extract_evidence_features,
@@ -402,3 +403,99 @@ def test_finite_hidden_states_that_overflow_pooling_are_rejected(inputs, monkeyp
     with pytest.raises(FeatureExtractionError, match="candidate.*finite") as failure:
         extract_evidence_features(text, inputs)
     assert failure.value.progress["attempted_forward_calls"] == 2
+
+
+@pytest.mark.parametrize("family", ["gemma", "granite"])
+def test_copy_on_write_cache_matches_deepcopy_full_rows_and_keeps_prefix(
+    inputs, family, monkeypatch
+):
+    _, text = backbone(family, monkeypatch)
+    full = extract_evidence_features(text, inputs, mode="full_rows", lexical=True)
+    deep = extract_evidence_features(text, inputs, lexical=True)
+    original = text.forward
+    retained = {}
+    branches = []
+
+    def observe(**kwargs):
+        cache = kwargs.get("past_key_values")
+        if cache is not None:
+            assert cache is not retained["cache"]
+            assert cache.layers is not retained["cache"].layers
+            for layer, parent in zip(cache.layers, retained["cache"].layers, strict=True):
+                assert layer is not parent
+                assert layer.keys is parent.keys and layer.values is parent.values
+            branches.append(cache)
+        result = original(**kwargs)
+        if cache is None:
+            prefix_cache = result.past_key_values
+            retained["cache"] = prefix_cache
+            retained["values"] = [
+                (layer.keys.clone(), layer.values.clone(), layer.get_seq_length())
+                for layer in prefix_cache.layers
+            ]
+        return result
+
+    monkeypatch.setattr(text, "forward", observe)
+    shared = extract_evidence_features(text, inputs, lexical=True, cache_strategy="copy_on_write")
+    for key in full.tensors:
+        if full.tensors[key].is_floating_point():
+            assert torch.allclose(full.tensors[key], shared.tensors[key], atol=2e-5, rtol=2e-5), key
+            assert torch.equal(deep.tensors[key], shared.tensors[key]), key
+        else:
+            assert torch.equal(full.tensors[key], shared.tensors[key]), key
+    for layer, (keys, values, length) in zip(
+        retained["cache"].layers, retained["values"], strict=True
+    ):
+        assert torch.equal(layer.keys, keys) and torch.equal(layer.values, values)
+        assert layer.get_seq_length() == length
+    assert len({id(branch) for branch in branches}) == len(inputs.questions)
+    if family == "gemma":
+        # Already exceeds the sliding window: cropping would lose original KV.
+        sliding = [layer for layer in retained["cache"].layers if hasattr(layer, "sliding_window")]
+        assert all(layer.get_seq_length() > layer.sliding_window for layer in sliding)
+    assert shared.metadata["logical_prefix_kv_bytes"] > 0
+    assert shared.metadata["cache_branch_kv_copy_bytes"] == 0
+    assert deep.metadata["cache_branch_kv_copy_bytes"] == shared.metadata["logical_prefix_kv_bytes"]
+    assert shared.metadata["forward_tokens"] == deep.metadata["forward_tokens"]
+
+
+def test_copy_on_write_recurrent_cache_is_explicit_error_after_prefix_only(inputs, monkeypatch):
+    _, text = backbone("qwen_hybrid", monkeypatch)
+    with pytest.raises(FeatureExtractionError, match="stock non-offloaded attention") as failure:
+        extract_evidence_features(text, inputs, cache_strategy="copy_on_write")
+    assert failure.value.progress["attempted_forward_calls"] == 1
+    assert failure.value.progress["attempted_forward_tokens"] == len(inputs.prefix_ids)
+    # No silent fallback/retry; supported deepcopy remains available separately.
+    assert extract_evidence_features(text, inputs).metadata["forward_calls"] == 4
+
+
+@pytest.mark.parametrize("bad", ["offloading", "custom_layer", "custom_cache"])
+def test_copy_on_write_does_not_share_unknown_or_offloaded_mutation_semantics(bad):
+    from transformers.cache_utils import DynamicCache, DynamicLayer
+
+    cache = DynamicCache()
+    cache.update(torch.randn(1, 1, 4, 8), torch.randn(1, 1, 4, 8), 0)
+    if bad == "offloading":
+        cache.offloading = True
+    elif bad == "custom_layer":
+
+        class CustomLayer(DynamicLayer):
+            pass
+
+        cache.layers[0].__class__ = CustomLayer
+    else:
+
+        class CustomCache(DynamicCache):
+            pass
+
+        cache.__class__ = CustomCache
+    with pytest.raises(ValueError, match="stock non-offloaded attention"):
+        branch_evidence_cache(cache, "copy_on_write")
+
+
+@pytest.mark.parametrize(
+    "mode,strategy", [("prefix_cache", "auto"), ("full_rows", "copy_on_write")]
+)
+def test_invalid_copy_strategy_has_zero_model_calls(inputs, mode, strategy):
+    with pytest.raises(ValueError, match="cache strategy"):
+        extract_evidence_features(None, inputs, mode=mode, cache_strategy=strategy)
