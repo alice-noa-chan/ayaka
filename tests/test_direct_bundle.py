@@ -49,6 +49,28 @@ def resign(root, name, raw):
     (root / "manifest.json").write_bytes(canonical(manifest))
 
 
+def test_external_preparation_anchor_rejects_a_fully_consistent_replacement_corpus(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    bundle(first)
+    anchor = sha256((first / "manifest.json").read_bytes())
+    audit_bundle(first, allow_tiny=True, expected_manifest_sha256=anchor)
+    replacement = dataset()
+    replacement["train"][0].metadata["source_audit_marker"] = "replacement original corpus"
+    prepare_bundle(
+        second,
+        replacement,
+        ToyTokenizer(),
+        tiny_config(readout="lm", max_seq_len=2048),
+        {},
+        steps=2,
+        rows_per_step=16,
+        allow_tiny=True,
+    )
+    audit_bundle(second, allow_tiny=True)  # internal consistency alone accepts the replacement
+    with pytest.raises(ValueError, match="externally pinned"):
+        audit_bundle(second, allow_tiny=True, expected_manifest_sha256=anchor)
+
+
 def test_bundle_roundtrip_finite_schedule_and_deterministic_resume(tmp_path):
     original = bundle(tmp_path / "bundle")
     manifest, recipe, items, inventory, groups = audit_bundle(tmp_path / "bundle", allow_tiny=True)

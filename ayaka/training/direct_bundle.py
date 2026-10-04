@@ -365,10 +365,20 @@ def prepare_bundle(
     return manifest
 
 
-def audit_bundle(path, tok=None, *, allow_tiny=False, natural_registry=None):
+def audit_bundle(
+    path, tok=None, *, allow_tiny=False, natural_registry=None, expected_manifest_sha256=None
+):
     """Recompute corpus gold, original tokens, teacher filtering and the entire schedule."""
     root = Path(path)
-    manifest = json.loads((root / "manifest.json").read_bytes())
+    manifest_raw = (root / "manifest.json").read_bytes()
+    if expected_manifest_sha256 is not None and (
+        not isinstance(expected_manifest_sha256, str)
+        or len(expected_manifest_sha256) != 64
+        or any(c not in "0123456789abcdef" for c in expected_manifest_sha256)
+        or sha256(manifest_raw) != expected_manifest_sha256
+    ):
+        raise ValueError("bundle manifest differs from the externally pinned preparation digest")
+    manifest = json.loads(manifest_raw)
     if (
         manifest.get("version") != VERSION
         or manifest.get("status") != STATUS
@@ -474,6 +484,7 @@ def main(argv=None):
     audit = commands.add_parser("audit")
     audit.add_argument("--bundle", required=True, type=Path)
     audit.add_argument("--mechanics-only", action="store_true")
+    audit.add_argument("--expected-manifest-sha256")
     args = parser.parse_args(argv)
     if args.command == "prepare":
         cfg = ElectraConfig(**json.loads(args.config.read_bytes()))
@@ -504,7 +515,11 @@ def main(argv=None):
             optimizations=OptimizationConfig(attention=args.attention, liger=args.liger),
         )
     else:
-        manifest, _, _, _, _ = audit_bundle(args.bundle, allow_tiny=args.mechanics_only)
+        manifest, _, _, _, _ = audit_bundle(
+            args.bundle,
+            allow_tiny=args.mechanics_only,
+            expected_manifest_sha256=args.expected_manifest_sha256,
+        )
     print(
         json.dumps(
             {

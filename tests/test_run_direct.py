@@ -169,6 +169,8 @@ def test_native_execute_flag_and_prior_paid_time_are_required_before_weight_load
         run_pipeline(root, tmp_path / "absent", device="cuda")
     with pytest.raises(ValueError, match="already billed"):
         run_pipeline(root, tmp_path / "absent", device="cuda", execute=True)
+    with pytest.raises(ValueError, match="externally pinned"):
+        run_pipeline(root, tmp_path / "absent", device="cuda", execute=True, paid_elapsed_seconds=0)
     assert not (tmp_path / "absent").exists()
 
 

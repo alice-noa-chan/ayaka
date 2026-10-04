@@ -164,11 +164,14 @@ def run_pipeline(
     checkpoint_every=100,
     resume=None,
     paid_elapsed_seconds=None,
+    expected_bundle_sha256=None,
 ):
     started = time.monotonic()
     if action not in {"audit", "profile", "train"}:
         raise ValueError("unknown direct pipeline action")
-    manifest, recipe, _, inventory, groups = audit_bundle(bundle, allow_tiny=mechanics_only)
+    manifest, recipe, _, inventory, groups = audit_bundle(
+        bundle, allow_tiny=mechanics_only, expected_manifest_sha256=expected_bundle_sha256
+    )
     if action == "audit":
         return {
             "status": "audited_cpu_only",
@@ -187,6 +190,8 @@ def run_pipeline(
         raise ValueError("native production profile/train requires explicit --execute and CUDA")
     elif paid_elapsed_seconds is None:
         raise ValueError("include all already billed setup/download/teacher time explicitly")
+    elif expected_bundle_sha256 is None:
+        raise ValueError("native execution requires an externally pinned bundle manifest digest")
     if type(checkpoint_every) is not int or checkpoint_every < 1:
         raise ValueError("checkpoint interval must be positive")
     if action == "profile" and resume is not None:
@@ -222,6 +227,7 @@ def run_pipeline(
         native_root = verify_snapshot(snapshot_record, path=snapshot_path)
         native_sha = snapshot_record["snapshot_sha256"]
     binding = training_binding(manifest, recipe, tcfg, native_weights_sha256=native_sha)
+    binding["external_bundle_manifest_sha256"] = expected_bundle_sha256
     torch.manual_seed(tcfg.seed)
     model = ElectraDecisionModel.from_config(
         cfg,
@@ -380,6 +386,7 @@ def main(argv=None):
     parser.add_argument("--training-config", type=Path)
     parser.add_argument("--snapshot-record", type=Path)
     parser.add_argument("--snapshot-path", type=Path)
+    parser.add_argument("--expected-bundle-sha256")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-every", default=100, type=int)
     parser.add_argument(
@@ -408,6 +415,7 @@ def main(argv=None):
         resume=args.resume,
         checkpoint_every=args.checkpoint_every,
         paid_elapsed_seconds=args.paid_elapsed_seconds,
+        expected_bundle_sha256=args.expected_bundle_sha256,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
