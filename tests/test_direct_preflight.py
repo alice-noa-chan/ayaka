@@ -31,12 +31,15 @@ def test_meta_inspection_preserves_rng_and_does_not_load_weights(monkeypatch):
     )
 
 
-def test_cached_untied_head_and_actual_lora_positions_are_counted(monkeypatch):
+def test_cached_untied_head_and_actual_lora_positions_are_counted(tmp_path, monkeypatch):
+    import huggingface_hub
     from transformers import AutoConfig
 
     calls = []
     text = tiny_text_config()
     text.tie_word_embeddings = False
+    text.save_pretrained(tmp_path)
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kwargs: str(tmp_path))
 
     def config(repo, **kwargs):
         calls.append((repo, kwargs))
@@ -56,9 +59,8 @@ def test_cached_untied_head_and_actual_lora_positions_are_counted(monkeypatch):
     report = inspect_direct_model(cfg)
     assert calls == [
         (
-            cfg.backbone,
+            str(tmp_path.resolve()),
             {
-                "revision": cfg.backbone_revision,
                 "local_files_only": True,
                 "trust_remote_code": False,
             },

@@ -9,10 +9,18 @@ import torch
 from ..backbone import detach_text_backbone, tiny_text_config
 from ..checkpoint import apply_lora
 from ..model.electra import ElectraDecisionModel
+from .native_metadata import configuration_binding
 from .optimization import OptimizationConfig, optimization_plan
 
 
-def inspect_direct_model(cfg, *, official_weight_elements=None, optimizations=None):
+def inspect_direct_model(
+    cfg,
+    *,
+    official_weight_elements=None,
+    optimizations=None,
+    native_path=None,
+    expected_config=None,
+):
     """Load cached configuration only; instantiate every parameter on meta.
 
     The official full-checkpoint element count is used conservatively, even
@@ -25,20 +33,25 @@ def inspect_direct_model(cfg, *, official_weight_elements=None, optimizations=No
         raise ValueError("direct preflight requires the native LM readout")
     if type(cfg.lora_r) is not int or cfg.lora_r < 1 or not cfg.lora_targets:
         raise ValueError("direct preflight requires positive LoRA rank and explicit targets")
-    if cfg.backbone == "tiny":
+    config_binding, root = configuration_binding(cfg, path=native_path)
+    if expected_config is not None and config_binding != expected_config:
+        raise ValueError("native configuration bytes changed before architecture construction")
+    if root is None:
         text_config = tiny_text_config()
     else:
         revision = cfg.backbone_revision
-        if (
+        if cfg.backbone != "tiny" and (
             not isinstance(revision, str)
             or len(revision) != 40
             or any(c not in "0123456789abcdef" for c in revision)
         ):
             raise ValueError("cached native configuration requires an immutable revision")
         native = AutoConfig.from_pretrained(
-            cfg.backbone, revision=revision, local_files_only=True, trust_remote_code=False
+            str(root), local_files_only=True, trust_remote_code=False
         )
         text_config = getattr(native, "text_config", native)
+        if configuration_binding(cfg, path=root)[0] != config_binding:
+            raise ValueError("native configuration changed during metadata loading")
     context = getattr(text_config, "max_position_embeddings", None)
     if type(context) is not int or max(cfg.max_seq_len, cfg.serve_max_seq_len) > context:
         raise ValueError("requested context exceeds the actual native configuration")
@@ -78,6 +91,7 @@ def inspect_direct_model(cfg, *, official_weight_elements=None, optimizations=No
     return {
         "repo": cfg.backbone,
         "revision": cfg.backbone_revision,
+        "native_config": config_binding,
         "architecture": text_config.model_type,
         "native_text_parameters": base_parameters,
         "official_full_weight_elements": official_weight_elements,
