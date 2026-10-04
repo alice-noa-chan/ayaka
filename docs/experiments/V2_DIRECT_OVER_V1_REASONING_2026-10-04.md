@@ -936,3 +936,186 @@ control은 동시에 실행했으며, CPU/GPU 속도 비교 실험으로 사용�
 complete native weights와CUDA parity/throughput, 전체 workflow credit admission,
 matched v1 reasoning 대비 v2 off의 품질·최종 독립test 및 provider 회수/정리다.
 학습 직전 전체 완료나 v2 off > v1 reasoning을 아직 주장하지 않는다.
+
+## 2026-10-05: 원본 전체 계약 문서의 policy 감독 추가
+
+일반 human rehearsal에 실제 문서의 규칙·예외·정보 부재 감독을 추가했다.
+공식 ContractNLI **original train**만 사용하며, 423개 NDA 문서와 7,191개 인간
+annotation을 immutable revision·ZIP/train/LICENSE SHA로 고정했다. 모든 문서에
+원래 17개 hypothesis와 Entailment/Contradiction/NotMentioned를 보존한다.
+Neutral을 false로 합치거나 evidence span으로 문서를 잘라 gold를 노출하지 않는다.
+문서 ID·URL·파일명·annotation span은 ancestry/verifier에만 쓰며 모델 입력은
+원본 전체 문서, hypothesis, 세 클래스 설명이다. 원본 dev/test와 raw PDF 내용을
+열지 않았다. 원본 자료의 의미적·법적 정답을 독립적으로 재판정한 것은 아니다.
+
+출처와 재현 명령은
+[DIRECT_CORPUS_PREPARATION.md](DIRECT_CORPUS_PREPARATION.md#5-add-original-full-contract-policy-supervision)에
+기록했다. 네 소스 plan1은 그대로 유지하고 선택적인 다섯 소스 plan2를 추가했다.
+Plan2의 private state excerpt 검사는 공유 hypothesis/schema를 제외하고 실제 state
+문구의 중복을 전체 lineage group 단위로 제거한다. 짧은 4–12단어 문구와 wrapper가
+있는 연속 CJK 12문자도 검사한다. URL query는 유지하고 fragment만 제거한다.
+문서가 context를 넘으면 17문항 전체를 제외하며, 문서/질문 quota가 부족하면 실패한다.
+이는 literal matching이며 의미상 paraphrase나 목록에 없는 private 평가를 보장하지 않는다.
+
+구현은 문제별 상세 본문을 갖는 별도 커밋으로 나눴다.
+
+- `2c2b6b1`: 전체 계약 문서의 raw human gold registry와 train-only extractor.
+- `c8a3819`: 해시를 확인한 **동일 buffer**를 파싱하도록 파일 교체 경계 수정.
+- `b33445c`: composite registry, plan2, private excerpt/group 검사, CLI·teacher·runner 연결.
+- `69675b2`: 공식 ZIP의 미사용 raw PDF 이름을 filesystem destination과 분리.
+- `117967d`: frozen replay 테스트가 새 공개 registry 인자를 직접 사용하도록 수정.
+
+공식 ZIP의 raw PDF 이름에는 `T:\\proc_notices\\...pdf` 형식이 실제로 들어 있어
+첫 정식 추출은 실패했다. `69675b2`는 미사용 raw 이름을 opaque metadata로만
+취급하고 정확한 train/LICENSE member, byte anchor, 중복 이름 검사와 unsafe non-raw
+경로 거부를 유지한다. 이후 실제 공식 archive의 정식 추출·prepare가 성공했다.
+Runtime에는 downloader를 추가하지 않았다. 이번 작업의 다운로드는 공개 데이터
+archive 65,362,913바이트 1개이며 pretrained weight/GPU/paid API/production optimizer는0이다.
+
+독립 Codex 검토에서 해시·파싱 buffer 불일치, runner registry 전달 누락,
+wrapped CJK excerpt와 반복 generator 소비 반례를 발견하고 회귀 검사로 수정했다.
+Claude의 incoming 문서에는 새 승인·성능 판단이 없으며 `.dev`로 결과와 검토 요청을
+공유했다. Swift/API 소유 파일을 수정하지 않았고 `main`은 `475bec37` 그대로다.
+
+실제 cached Gemma4-12B-it tokenizer/configuration으로 offline 정식 CLI를 실행했다.
+Revision `707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`, LM readout/r32/alpha64,
+train4096/serve8192, Swift canonical/labeled/compact/nonthinking 설정이다.
+FA2/Liger는 meta preflight이며 실제 CUDA kernel 검증을 대신하지 않는다.
+
+| 실제 준비 내용 | 결과 |
+|---|---:|
+| 전체 raw 질문의 gold 대조 | 164,608 |
+| Train sample / question | 992 / 2,368 |
+| Human / authored question | 1,984 / 384 |
+| Policy document / question | 64 / 1,088 |
+| EN / KO / JA question | 2,176 / 96 / 96 (영어91.89%) |
+| Choice / Noul / Score | 1,600 / 320 / 448 |
+| Router-train / dev / calibration / test | 각각168 samples / 376 questions |
+| Train 전체 epoch / batch | 1회 / 74 × 32 |
+| Prepared row 방문 | unique2,368 / min=max1 |
+| Train source lineages | 678 |
+| Train text tokens / 최대 입력 | 2,349,245 / 4,037 |
+
+선택한 train corpus 한 바퀴이며 전체 raw164608문항을 학습한 것은 아니다.
+Contract 원본423문서는 closure420groups, 최대2samples/group이다. 17개 hypothesis는
+17개의 독립 문서가 아니다. Train의 클래스 분포는 E481/C139/N468이며,
+context 때문에 전체 제외한 계약 문서는6개다. 이는 quota를 채우기 전 검사한 문서의
+제외 수로, 원본423문서 전체의 overflow 비율을 측정한 것은 아니다.
+각 heldout의 최대 입력은 router5270/dev4576/calibration6951/test3545다.
+모든 선택 문항에 원본 full context를 보존했으며 raw soft label은 실제로0개다.
+
+Teacher transport fixture는 무작위 tiny LM의 17개 hypothesis와51개 saved backend
+calls를 검사했다. 실제 reasoned teacher나 학습 성능 향상의 증거는 아니다.
+이번 native control은 gold-only이며 teacher/production optimizer 실행은0이다.
+Prior private evaluation inventory가 공급되지 않아 **draft** scope를 계속 기록한다.
+Report의 `reserved_samples=768`은 authored controls이며 이전 private 평가768개를
+검사했다는 뜻이 아니다. 실제 test 입력은 별도 holdout directory에 보관한다.
+
+Portable load에서 raw registry/gold verifier/encoder/public/private inventory entrypoint를
+금지하고2,368rows/992groups/74batches와 모든 행1회 방문을 재확인했다.
+첫 로컬 검사 helper는 editable checkout을 잘못 import해 LF snapshot으로 고정된
+receipt와 source bytes가 달라 거부됐다. Immutable checkout을 명시한 뒤 통과했다.
+`69675b2`와 최종 `117967d`의 ayaka Python147files는 바이트가 같으며 test만 바뀌었다.
+기존 control의1,280개 train rows는 policy 추가 후에도 **모든 필드가 동일**하다.
+
+비용 진단은 같은 frozen buffers와 실제 schedule을 사용했다. Micro budget8192에서
+독립 full row는436chunks/2,349,245 unpadded/2,548,843 padded forward input tokens다.
+Prefix 공유가 가능하고 activation checkpointing이 꺼진 계획은
+233chunks/434,039 unpadded/501,012 padded tokens다. 모든2,368문항을 유지한다.
+Shared chunks에는157개 prefix forward가 추가되므로 예정 backbone 호출은390회다
+(independent436회). Chunk 수를 실제 호출 수나 wall-clock 감소율로 읽지 않는다.
+이는 입력 처리량의 정적 계산이며 GPU 시간·VRAM·비용·v1 속도 비교가 아니다.
+Shared token budget은 prefix+batch×suffix이며, 반복된 batch×prefix KV cache의
+메모리 상한이 아니다. Backward 재연산·OOM retry 비용도 이 집계에는 없다.
+OOM이 checkpointing을 켜거나 모델 cache sharing이 미지원이면 이 절감을 적용할 수 없다.
+현재 LoRA dropout0.05에서는 같은 prefix를 공유한 질문들의 stochastic noise도
+공유된다. Independent rows와 개별 loss/gradient의 결정적 일치를 주장하지 않는다.
+Zero-dropout parity와 기대 목적함수·실제 학습 품질은 별개로 검증해야 한다.
+
+```text
+actual control: .dev/direct-policy-native-69675b2-20261005
+plan file SHA: 825bd93bcb4918b3412f26e279db3632f1acbe23d2afa5efebbe0ff3a810f0ad
+canonical plan SHA: c4021b68d814fb9a7cff393bf72d37c2e74e9f0f7103b37acfb11f8b139d54a1
+bundle SHA: 6b2eca89f873f0d39315a131c522524e7682a7da6ea1da84c0412df8c0e89707
+CPU audit SHA: 3e827fbec083144fa03eca973bc18ce9031d65ee84a93e801ff1a58ebe401813
+holdout SHA: d820025097d93da7e702c260b02252adc5c525a2f6c6334655cf9ac93dc72dc3
+selection SHA: af13afe870b2bff55291e86baa44e96c25850db86166f3ed36df2c444a39fb45
+inventory SHA: cf090cf865159a48c983cf6f6dcb95f8ca2d62ccfc9d253df208b76918690ade
+prepared groups SHA: 626d787b255515484ad845503ac6f60e6bc1cbc32ce30256eca9c4a13c3a9374
+schedule SHA: 6a058dde98a84d54248bbb12cdc3fac1bc27c6db532ca8b25c0fa700a5ead669
+portable check SHA: c01bbb3d68aea61ae63d7b86ad30beabbf2c4b662df3229ae3aa78935d5be0e3
+workload shape check SHA: 8ee3b7f0ceab35825fb494f9f90a9ca58d10f39eaf684d86a94c9b9da52ac567
+```
+
+관련 검사는 Contract35pass, source/plan/teacher/replay120pass와 최종 replay32pass다.
+서로 겹치는 suite이므로 합산하지 않는다. 수정 전 고정 `b33445c` 전체 결과는
+2095pass/1fail/2skip/802.40초였다. Fail은 기존 테스트의 registry 이중 주입이며
+새 인자를 사용한32개 검사에서 연속 실행·재개 실행의 최종 가중치 완전 일치를
+다시 확인했다. 수정된 `117967d` 고정 전체 검사도 **2096pass/2skip/1warning,
+649.53초, exit0/source변경0/stable_pass=True**로 끝났다.
+
+```text
+archive SHA: 29eb6b18552b22aa2c68c74a284a9185f66145963afaff75f4c094aa6c09fbc1
+full receipt: .dev/codex-policy-corpus-full-117967d-20261005.json
+full log SHA: 4a976664c7dc7b94ec061949b08cca8fec2186614c8e436e7977607dfc3339e9
+```
+
+비용 진단의 후속 독립 검토에서 실제 학습 목적함수 문제를 발견했다.
+RPS와 missing은 eligible 문항만 평균 내는데 trainer가 모든 chunk의 질문 수로
+다시 가중해, prefix sharing·micro token budget·checkpoint 분할이 손실 비중을
+바꾸고 있었다. 동일 logits의 Score/다른 유형 혼합 반례에서 수정 전 gradient의
+최대 상대 차이0.144344/절대 차이0.014017을 재현했다. 과거 v2 성능 저하의
+확정 원인이나 실제 모델 정확도 차이를 측정한 것은 아니다.
+
+`61f3c6b` 수정은 전체 optimizer batch의 eligible 문항 수로 RPS·missing을 정규화하고
+KL/replay 진단값도 각 global subset 평균으로 집계한다. Teacher/replay 목적함수,
+NLL/Brier/pointer와 trace/proposal CE의 기존 전체 질문 분모는 유지한다.
+CPU row descriptor로 분모를 계산하므로 새 CUDA host sync를 추가하지 않는다.
+Standalone decision_loss 의미와 설정 LossWeights는 바꾸지 않는다.
+13개 격리 regression과 실제 nonzero LoRA B/dropout0 native tiny 모델을 포함한
+14개 검사가 통과했다. 실제 LoRA에서는 공유·selective checkpoint 경로의 loss와
+모든 trainable gradient가 한 번의 전체 배치 reference와 허용 오차 내 일치한다.
+Nonzero dropout의 stochastic noise 상관은 앞서 기록한 별개 제한이다.
+최종 관련109개 CPU 검사도36.95초에 통과했고 Ruff308 source files의 lint/format이
+통과했다. 독립 reviewer는 추가 P1/P2가 없다고 보고했다. Claude 승인은 별개다.
+
+Trainer가 바뀌었으므로 위 native receipt를 새 코드에 그대로 적용하지 않는다.
+최종 코드의 전체 CPU 검사와 같은 입력 plan의 native corpus 재준비·portable load를
+새 디렉터리와 SHA로 다시 기록한다. 이전 결과와 오류 기록은 보존한다.
+
+고정 `61f3c6b`에서 같은 input plan으로 actual native prepare를 다시 완료했다.
+원본164608문항 전량 확인, 모든 split의 실제 입력 길이 audit, train rows·전체 epoch
+schedule은 그대로다. 이전 control의 train_items/teacher_reads 및 모든 선택 split
+payload bytes가 완전히 같다. Holdout은 내용 파싱 없이 opaque bytes만 비교했다.
+Source anchor가 바뀌므로 manifest/receipt는 아래 새 값으로 고정한다.
+새 portable load도 원본 source/encoder entrypoint 재실행 없이2368rows/992groups/
+74batches/everyrow1visit을 확인했다. Local tokenizer identity 검사는 유지한다.
+새 workload shape 검사에서233chunks+157prefixcalls=390backbonecalls 및 같은 토큰
+집계를 재확인했다. 두 제어 run은 새 모델의 출력·성능 비교가 아니다.
+
+```text
+latest actual control: .dev/direct-policy-native-61f3c6b-20261005
+bundle SHA: 170ece7c5e1b41dadd98051b26e1260e889c8033cc91c6658a5a087a7438a624
+CPU audit SHA: 2c960994d18a20624fb8ca4854624daa24b9f9e40ed21855348d68447e3e1b7c
+holdout SHA: f86e5420047cf2916a65a3fe79989ad765c40d51bad8aed3af1b6fd034a36b5a
+selection SHA: 73b8e56813c0370f992dc07a170dda60928940b2f09d9982f7543b98b210ed2a
+portable SHA: 3e1b93c92eb6fef9f09501fe895b65d88a9529b7234b44bcedf2b8257762f81f
+workload shape SHA: 6fb531d71189dc90c1019bfcf93129a46c59ef7a8073720709bf30d8fba171e5
+archive SHA: ea1df85d663735e6df702b94bb62c7f07caaaf14cd5c8c3ce892df2704455516
+```
+
+최종 `61f3c6b` 고정 전체 CPU 검사: **2110 passed, 2 skipped, 1 warning /
+614.84초**, exit0/source변경0/stable_pass=True. Warning은 중복 ZIP member를
+만드는 공격 fixture의 예상 UserWarning이다. Ruff lint/format은308 source files와
+이 단위의 두 Markdown 문서를 확인했다. 전체 검사와 native prepare는 동시에
+진행했으므로 CPU/GPU 속도 비교에 사용하지 않는다. 모든 자체 검증 process는 종료됐다.
+
+```text
+full receipt: .dev/codex-policy-corpus-full-61f3c6b-20261005.json
+full log SHA: c9ef00eb9cc0f33172b843473c884e5ff3d72259130497e32b85a5333e5efe8a
+```
+
+남은 필수 조건은 prior private inventory, 실제 reasoned-teacher의 paired 이득,
+complete native weights/CUDA parity·throughput, 전체 workflow credit admission과
+matched v1 reasoning 대비 v2 off·독립 test이다. Policy corpus 준비는 진행됐으나
+학습 직전 모든 조건 완료, 품질 향상이나 승격을 주장하지 않는다.

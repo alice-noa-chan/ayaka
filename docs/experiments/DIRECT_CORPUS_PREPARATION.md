@@ -32,8 +32,9 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from ayaka.config import ELECTRA_LARGE
 
-cfg = replace(ELECTRA_LARGE, name="ayaka-v2-direct-control", version=2,
-              readout="lm", lora_r=32, lora_alpha=64)
+cfg = replace(
+    ELECTRA_LARGE, name="ayaka-v2-direct-control", version=2, readout="lm", lora_r=32, lora_alpha=64
+)
 Path("direct-config.json").write_text(json.dumps(asdict(cfg)), encoding="utf-8")
 ```
 
@@ -124,3 +125,83 @@ FA2/Liger here are declared/preflight settings; actual CUDA parity, throughput,
 whole-workflow credit admission, real policy teachers and quality measurements
 remain separate work. Existing unplanned bundle6/holdout2 controls remain
 readable when all corpus-plan markers and extensions are absent.
+
+## 5. Add original full-contract policy supervision
+
+The optional five-source example `direct_policy_corpus_settings.json` enables
+corpus plan2. It declares 64 ContractNLI train documents, each retaining all
+17 original hypotheses and three-way Choice labels, in addition to the plan1
+control. The selected train quota is 2,368 questions, including 1,088 contract
+questions; a complete epoch is 74 batches of 32. Each reserved split adds
+eight documents (136 questions) for a declared total of 376 questions. Quotas
+must fit the actual whole-document inputs; an insufficient split fails.
+
+ContractNLI provides human annotations on complete NDA documents. Its three
+labels are Entailment, Contradiction and NotMentioned. NotMentioned remains
+neutral, distinct from Contradiction. Evidence spans stay in the raw registry;
+they are not injected into the model or used to crop the document. Original
+document IDs, URLs and filenames are ancestry metadata and never model inputs.
+This is public benchmark train supervision, not a new private test, independent
+legal truth verification or an observed teacher/model improvement.
+
+Primary source and required attribution: Yuta Koreeda and Christopher Manning,
+*ContractNLI: A Dataset for Document-level Natural Language Inference for
+Contracts*, Findings of EMNLP 2021, pp. 1907–1919.
+[Dataset specification and CC-BY-4.0 license](https://stanfordnlp.github.io/contract-nli/),
+[paper](https://aclanthology.org/2021.findings-emnlp.164/).
+
+Download preparation is separate from these offline commands. Obtain the
+official archive at the immutable repository revision
+`eced6528dd3c1d14d73f9a87df8f7bdbc03126f9`:
+[official ZIP](https://raw.githubusercontent.com/stanfordnlp/contract-nli/eced6528dd3c1d14d73f9a87df8f7bdbc03126f9/resources/contract-nli.zip).
+The extractor checks the ZIP size, Git blob and SHA256, exact train member
+SHA256, and original license SHA256. It opens only train.json and LICENSE;
+original dev/test contents and raw PDFs remain unopened. The official ZIP has
+a nonportable Windows path inside a raw PDF filename. Unselected raw filenames
+are opaque archive metadata and are never filesystem destinations. Duplicate
+member names and unsafe non-raw paths are rejected.
+
+```bash
+python -m ayaka.data.contract_nli extract \
+  --archive contract-nli.zip --out contract-nli-training
+
+python -m ayaka.training.direct_corpus plan \
+  --config direct-config.json \
+  --settings docs/experiments/direct_policy_corpus_settings.json \
+  --contractnli-train contract-nli-training/train.json \
+  --reserved-manifest private-manifest.json \
+  --expected-reserved-manifest-sha256 MANIFEST_BYTE_SHA256 \
+  --out policy-input-plan.json
+
+python -m ayaka.training.direct_corpus prepare \
+  --config direct-config.json \
+  --plan policy-input-plan.json --expected-plan-file-sha256 PLAN_FILE_BYTE_SHA256 \
+  --contractnli-train contract-nli-training/train.json \
+  --reserved-manifest private-manifest.json \
+  --expected-reserved-manifest-sha256 MANIFEST_BYTE_SHA256 \
+  --attention flash_attention_2 --liger --out prepared-policy-direct
+```
+
+Plan2 pins the composite raw registry and the new private state-evidence
+overlap policy. Matching excludes complete source groups before quotas and
+retains URL queries while ignoring URL fragments. It compares state evidence
+only, excluding shared hypothesis and candidate schema. The literal matching
+boundary is 13 normalized words, complete private phrases of 4–12 words inside
+the training document, or 12 consecutive normalized CJK characters, including
+wrapped excerpts. Original aliases and normalized equal document text are
+also closed transitively. This does not establish semantic independence from
+paraphrases or private files omitted from the bound inventory. Common boilerplate
+can conservatively exclude a whole group; no quota backfill changes the rules.
+
+`selection.json` reports source group counts, largest group sizes, per-source
+exclusions and selected policy class counts for development splits. The opaque
+test commitment still contains no original test inputs or per-question gold.
+All five internal splits come from the official original train file; the
+official original development/test files are not repurposed for training.
+
+Full regeneration through `direct_bundle`, `direct_audit`, `teacher_artifacts`
+or `run_direct` also accepts `--contractnli-train` and requires the same pinned
+train and sibling LICENSE. GPU startup can instead use an externally anchored
+CPU receipt with `--audit-receipt` and its expected SHA256, without raw sources.
+`run_direct` rejects combining portable receipt loading with a raw policy path.
+The four-source plan1 remains available and keeps its previous selection policy.
