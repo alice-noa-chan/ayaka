@@ -1,0 +1,15 @@
+# CPU-prepared Linux x86_64 / CPython 3.11 runtime for the anchored direct bundle.
+# Native training and CUDA kernel parity are separate from dependency preparation.
+torch @ https://download.pytorch.org/whl/cu128/torch-2.8.0%2Bcu128-cp311-cp311-manylinux_2_28_x86_64.whl
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3.post1/flash_attn-2.8.3.post1%2Bcu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+liger-kernel==0.8.4
+transformers==5.18.0
+tokenizers==0.23.2
+peft==0.21.2
+accelerate==1.15.0
+huggingface_hub==1.33.0
+safetensors==0.8.0
+numpy==2.1.2
+pillow==11.3.0
+zstandard==0.25.0
+pytest==8.4.2
