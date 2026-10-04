@@ -7,6 +7,7 @@ questions carry per-candidate ordinals (addendum A3).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -74,6 +75,7 @@ class LossWeights:
     missing: float = 0.25
     pointer_aux: float = 0.3  # pointer-only NLL keeps the pointer usable alone (large sets)
     distill: float = 1.0  # KL to teacher, when teacher targets exist
+    gold_nll_with_teacher: bool = False  # opt-in direct student: gold NLL + auxiliary teacher KL
 
 
 def decision_loss(
@@ -89,8 +91,17 @@ def decision_loss(
 ) -> dict[str, torch.Tensor]:
     """Composite decision loss. With teacher targets (distillation),
     questions with teacher_mask use KL to the teacher in place of the
-    gold NLL term; gold Brier/RPS still anchor them."""
+    gold NLL term; gold Brier/RPS still anchor them. With the opt-in
+    ``gold_nll_with_teacher`` flag, every question retains gold NLL and only
+    teacher-labelled questions receive an additional, detached forward KL.
+    This flag does not change the legacy v1 distillation default."""
     w = weights or LossWeights()
+    if type(w.gold_nll_with_teacher) is not bool:
+        raise ValueError("gold_nll_with_teacher must be boolean")
+    if w.gold_nll_with_teacher and (
+        not math.isfinite(w.nll) or w.nll <= 0 or not math.isfinite(w.distill) or w.distill < 0
+    ):
+        raise ValueError("anchored distillation requires positive gold NLL and nonnegative KL")
     cu = out.cand_cu
     logp = out.log_probs()
     p = logp.exp()
@@ -98,9 +109,30 @@ def decision_loss(
 
     if teacher_probs is not None and teacher_mask is not None and teacher_mask.any():
         per_q_gold = -per_question_sum(targets * logp, cu)
-        t = teacher_probs.clamp(min=1e-8)
-        per_q_kl = per_question_sum(t * (t.log() - logp), cu)
-        per_q = torch.where(teacher_mask, w.distill * per_q_kl, w.nll * per_q_gold)
+        if w.gold_nll_with_teacher:
+            if (
+                teacher_probs.shape != targets.shape
+                or teacher_mask.shape != out.primitive.shape
+                or teacher_mask.dtype != torch.bool
+                or not torch.isfinite(teacher_probs).all()
+                or (teacher_probs < 0).any()
+            ):
+                raise ValueError("anchored teacher probabilities and mask must align and be finite")
+            t = teacher_probs.detach().to(logp.dtype)
+            if not torch.allclose(
+                per_question_sum(t, cu)[teacher_mask],
+                torch.ones_like(per_q_gold[teacher_mask]),
+                rtol=0,
+                atol=1e-6,
+            ):
+                raise ValueError("anchored teacher distributions must sum to one")
+            # xlogy(0, 0) is exactly zero: do not invent mass in zero-target tails.
+            per_q_kl = per_question_sum(torch.special.xlogy(t, t) - t * logp, cu)
+            per_q = w.nll * per_q_gold + torch.where(teacher_mask, w.distill * per_q_kl, 0.0)
+        else:
+            t = teacher_probs.clamp(min=1e-8)
+            per_q_kl = per_question_sum(t * (t.log() - logp), cu)
+            per_q = torch.where(teacher_mask, w.distill * per_q_kl, w.nll * per_q_gold)
         main = per_q.mean()
         parts["kl"] = per_q_kl[teacher_mask].mean().detach()
     else:
