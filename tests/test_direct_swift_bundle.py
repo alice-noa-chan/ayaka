@@ -140,7 +140,6 @@ def test_fixed_schedule_swift_training_calibration_dev_export_and_resume(tmp_pat
     root = tmp_path / "bundle"
     tok, _, _ = prepared(root)
     monkeypatch.setattr(direct_bundle, "local_tokenizer", lambda *a, **kw: tok)
-    monkeypatch.setattr(run_direct, "local_tokenizer", lambda *a, **kw: tok)
     training = {"bf16": False, "log_every": 0, "micro_batch_tokens": 8192}
     result = run_direct.run_pipeline(
         root,

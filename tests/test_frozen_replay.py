@@ -150,7 +150,8 @@ def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuou
     from ayaka.data.direct_natural import NaturalGoldRegistry
     from ayaka.data.natural_training_v2 import SOURCES, partition_sources
     from ayaka.training import run_direct
-    from ayaka.training.direct_bundle import audit_bundle, prepare_bundle
+    from ayaka.training.direct_audit import audit_snapshot
+    from ayaka.training.direct_bundle import prepare_bundle
 
     repo, revision, filename, _ = SOURCES["commonsense_qa"]
     rows = [
@@ -193,8 +194,8 @@ def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuou
     )
     monkeypatch.setattr(
         run_direct,
-        "audit_bundle",
-        lambda *args, **kwargs: audit_bundle(*args, **kwargs, natural_registry=registry),
+        "audit_snapshot",
+        lambda *args, **kwargs: audit_snapshot(*args, **kwargs, natural_registry=registry),
     )
     full = run_direct.run_pipeline(
         tmp_path / "bundle",

@@ -160,13 +160,13 @@ def test_native_execute_flag_and_prior_paid_time_are_required_before_weight_load
     tmp_path, monkeypatch
 ):
     from ayaka.training import run_direct
-    from ayaka.training.direct_bundle import audit_bundle
+    from ayaka.training.direct_audit import audit_snapshot
 
     root = bundle(tmp_path)
-    audited = audit_bundle(root, allow_tiny=True)
-    audited[1]["model"]["backbone"] = "publisher/native"
-    audited[1]["model"]["backbone_revision"] = "a" * 40
-    monkeypatch.setattr(run_direct, "audit_bundle", lambda *args, **kwargs: audited)
+    audited = audit_snapshot(root, allow_tiny=True)
+    audited.recipe["model"]["backbone"] = "publisher/native"
+    audited.recipe["model"]["backbone_revision"] = "a" * 40
+    monkeypatch.setattr(run_direct, "audit_snapshot", lambda *args, **kwargs: audited)
     with pytest.raises(ValueError, match="explicit --execute and CUDA"):
         run_pipeline(root, tmp_path / "absent", device="cuda")
     with pytest.raises(ValueError, match="already billed"):

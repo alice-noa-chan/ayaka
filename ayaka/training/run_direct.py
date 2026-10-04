@@ -28,9 +28,10 @@ from ..model.electra import ElectraDecisionModel
 from ..primitives import QuestionSpec
 from .batching import _noul_canonical
 from .calibrate import apply_temperatures, fit_temperatures
+from .direct_audit import audit_snapshot, load_audited_bundle
 from .direct_budget import STAGES, admit_workflow
 from .direct_budget import VERSION as BUDGET_VERSION
-from .direct_bundle import audit_bundle, local_tokenizer, training_batches
+from .direct_bundle import training_batches
 from .direct_holdout import DEVELOPMENT_SPLITS
 from .direct_state import (
     load_training_state,
@@ -175,17 +176,40 @@ def run_pipeline(
     paid_elapsed_seconds=None,
     expected_bundle_sha256=None,
     saved_base_reads=None,
+    audit_receipt=None,
+    expected_audit_receipt_sha256=None,
 ):
     started = time.monotonic()
     if action not in {"audit", "profile", "train"}:
         raise ValueError("unknown direct pipeline action")
-    manifest, recipe, _, inventory, groups = audit_bundle(
-        bundle, allow_tiny=mechanics_only, expected_manifest_sha256=expected_bundle_sha256
+    if (audit_receipt is None) != (expected_audit_receipt_sha256 is None):
+        raise ValueError("CPU audit receipt and its external SHA256 must be provided together")
+    if audit_receipt is None:
+        audited = audit_snapshot(
+            bundle, allow_tiny=mechanics_only, expected_manifest_sha256=expected_bundle_sha256
+        )
+    else:
+        audited = load_audited_bundle(
+            bundle,
+            audit_receipt,
+            allow_tiny=mechanics_only,
+            expected_manifest_sha256=expected_bundle_sha256,
+            expected_receipt_sha256=expected_audit_receipt_sha256,
+        )
+    manifest, recipe, inventory, groups = (
+        audited.manifest,
+        audited.recipe,
+        audited.inventory,
+        audited.groups,
     )
     if action == "audit":
         return {
             "status": "audited_cpu_only",
             "bundle_sha256": fingerprint(manifest),
+            "bundle_manifest_sha256": audited.binding["bundle_manifest_sha256"],
+            "audit_mode": "frozen_cpu_receipt"
+            if audit_receipt is not None
+            else "full_regeneration",
             "optimizer_steps": 0,
         }
     cfg = ElectraConfig(**recipe["model"])
@@ -224,8 +248,7 @@ def run_pipeline(
     root = Path(out)
     if root.exists():
         raise ValueError("direct execution output must be a fresh directory")
-    tok = local_tokenizer(cfg, allow_tiny=mechanics_only)
-    splits = read_splits(bundle)
+    tok, splits = audited.tokenizer, audited.splits
     if mechanics_only:
         native_sha, native_root = fingerprint({"tiny_initial_seed": 0, "dtype": "float32"}), None
     else:
@@ -238,6 +261,7 @@ def run_pipeline(
         native_sha = snapshot_record["snapshot_sha256"]
     binding = training_binding(manifest, recipe, tcfg, native_weights_sha256=native_sha)
     binding["external_bundle_manifest_sha256"] = expected_bundle_sha256
+    binding["cpu_audit_sha256"] = fingerprint(audited.binding)
     torch.manual_seed(tcfg.seed)
     model = ElectraDecisionModel.from_config(
         cfg,
@@ -266,21 +290,27 @@ def run_pipeline(
     )
     root.mkdir(parents=True, exist_ok=False)
     _write(root, "binding.json", binding)
+    _write(
+        root,
+        "cpu_audit.json",
+        {
+            **audited.binding,
+            "external_receipt_sha256": expected_audit_receipt_sha256,
+            "load_mode": "frozen_cpu_receipt" if audit_receipt is not None else "full_regeneration",
+        },
+    )
     _write(root, "initial_admission.json", admitted)
     _write(root, "kernel_parity.json", application.report)
     _write(root, "training_config.json", asdict(tcfg))
     if base_reads is not None:
         _write(root, "frozen_base_reads.json", base_reads)
-    by_id = {
-        sample.metadata["source_example_id"]: group
-        for sample, group in zip(splits["train"], groups, strict=True)
-    }
+    by_sample = {id(sample): group for sample, group in zip(splits["train"], groups, strict=True)}
     profile = profile_production(
         trainer,
         itertools.cycle(training_batches(recipe, inventory, groups)),
         splits["train"],
         inventory,
-        lambda sample: by_id[sample.metadata["source_example_id"]],
+        lambda sample: by_sample[id(sample)],
         steps=tcfg.steps,
         seed=tcfg.seed,
     )
@@ -420,6 +450,10 @@ def main(argv=None):
     parser.add_argument("--snapshot-path", type=Path)
     parser.add_argument("--expected-bundle-sha256")
     parser.add_argument(
+        "--audit-receipt", type=Path, help="externally anchored full CPU audit receipt"
+    )
+    parser.add_argument("--expected-audit-receipt-sha256")
+    parser.add_argument(
         "--base-reads", type=Path, help="original frozen native reads, required for replay resume"
     )
     parser.add_argument("--resume", type=Path)
@@ -452,6 +486,8 @@ def main(argv=None):
         paid_elapsed_seconds=args.paid_elapsed_seconds,
         expected_bundle_sha256=args.expected_bundle_sha256,
         saved_base_reads=read(args.base_reads),
+        audit_receipt=args.audit_receipt,
+        expected_audit_receipt_sha256=args.expected_audit_receipt_sha256,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
