@@ -307,10 +307,16 @@ def extract_training(archive, out):
         # original member spelling before accepting that interpretation.
         names = [info.orig_filename for info in stream.infolist()]
         if len(names) != len(set(names)) or any(
-            PurePosixPath(name).is_absolute()
-            or ".." in PurePosixPath(name).parts
-            or "\\" in name
-            or "\0" in name
+            (
+                PurePosixPath(name).is_absolute()
+                or ".." in PurePosixPath(name).parts
+                or "\\" in name
+                or "\0" in name
+            )
+            # The pinned official archive has a raw PDF whose name contains
+            # a Windows drive/path. Raw documents are never read or extracted;
+            # their names must not be interpreted as filesystem destinations.
+            and not name.startswith("contract-nli/raw/")
             for name in names
         ):
             raise ValueError("ContractNLI archive has duplicate or unsafe member paths")
@@ -336,6 +342,7 @@ def extract_training(archive, out):
         "archive_git_blob": ARCHIVE_GIT_BLOB,
         "files": {name: hashlib.sha256(value).hexdigest() for name, value in contents.items()},
         "opened_members": [SOURCE_POLICY[2], "contract-nli/LICENSE"],
+        "raw_document_members_opened": False,
         "original_dev_test_opened": False,
         "documents": 423,
         "questions": 423 * len(HYPOTHESIS_IDS),

@@ -266,6 +266,10 @@ def archive_fixture(tmp_path, monkeypatch, *, extra=()):
         stream.writestr("contract-nli/LICENSE", license_bytes)
         stream.writestr("contract-nli/dev.json", b"original dev must remain unopened")
         stream.writestr("contract-nli/test.json", b"original test must remain unopened")
+        legacy_raw_name = r"contract-nli/raw/T:\proc_notices\notices_020_k\original.pdf"
+        legacy_raw_info = zipfile.ZipInfo(legacy_raw_name)
+        legacy_raw_info.filename = legacy_raw_name
+        stream.writestr(legacy_raw_info, b"unselected official-style raw PDF must stay unopened")
         for name in extra:
             info = zipfile.ZipInfo(name)
             # Windows ZipInfo normalizes backslashes; emulate bytes from an
@@ -298,6 +302,7 @@ def test_extraction_opens_only_exact_train_and_license_members(tmp_path, monkeyp
     report = module.extract_training(archive, out)
     assert opened == report["opened_members"]
     assert report["original_dev_test_opened"] is False
+    assert report["raw_document_members_opened"] is False
     assert report["questions"] == 7191
     assert {p.name for p in out.iterdir()} == {"train.json", "LICENSE", "extraction.json"}
     assert module.ContractGoldRegistry(out / "train.json").local_files_verified
