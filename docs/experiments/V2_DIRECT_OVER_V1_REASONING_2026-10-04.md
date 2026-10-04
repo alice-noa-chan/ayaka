@@ -646,3 +646,104 @@ source 변경0, stable_pass=True, Ruff lint/format292files로 통과했다.
 `f4f93ac8ddf52d1138697901225b3a07c8c7d6b7f47d5d974e5c496ff04dc824`다.
 기존 optional SDK 미설치 skip 등 두 skip은 그대로이며 실제 CUDA kernel 검사를
 CPU 결과로 대체하지 않는다. private test/artifacts/deploy는 복사하거나 변경하지 않았다.
+
+### 로컬 업로드 경로와 native loader 바이트 검증 (2026-10-05)
+
+`88722ae` / `378ff65`는 빈 HF 캐시 서버에서 업로드 폴더를 쓰는 경로를 구현했다.
+준비·전체 감사·CPU 감사 재사용은 `--native-path`, runner는 `--snapshot-path`를
+받는다. 실제 tokenizer/config와 최초 모델/체크포인트 reload 모두 같은 로컬
+디렉터리를 사용한다. 선언한 repository/revision과 승인 survey는 그대로 검증하며,
+명시한 폴더가 불완전하면 캐시로 우회하지 않는다. 로더는 local-only/remote-code-off다.
+
+새 **direct bundle6**에는 native metadata inventory와 full config SHA가 들어간다.
+같은 크기의 rope/scaling/dropout 변경도 AutoConfig/meta 생성 전에 거부한다.
+새 **deployable snapshot2**는 safetensors index/header/모든 shard 바이트에 더해
+fast tokenizer/config/template 자산을 포함한다. 기존 weights-only snapshot1 API는
+유지하지만 native profile/train에는 쓸 수 없다. bundle5와 이전 CPU receipts는
+같은 소스/메타데이터로 새로 준비·감사해야 하며, 체크섬만 고쳐서 재사용하지 않는다.
+v1 모델/서빙이나 main의 변경은 없다.
+
+설치된 HF의 실제 preferred directory(`additional_chat_templates`)와 versioned fast
+files도 inventory에 넣는다. config redirect는 명시적으로 거부하며 canonical
+`config.json`이 필요하다. implicit PEFT `adapter_config.json`/adapter payload는
+fresh-base 목표와 충돌하므로 거부한다. 필수 파일 이름은 Linux에서 그대로 열릴
+소문자 이름이어야 한다. 대소문자 충돌도 허용하지 않는다. snapshot/CPU receipt를
+native 디렉터리 안에 만들면 loader inventory를 바꾸므로 출력 위치를 거부한다.
+
+독립 read-only 검토에서 실제 preferred template 경로, embedded adapter 로딩,
+감사 종료 후 metadata 변경, 긴 weight hash 도중 새 preferred 파일 추가를 잡았다.
+수정 후 metadata 전체와 shard inventory를 성공 반환 전에 다시 검사한다.
+이것은 검증한 로컬 입력을 묶는 기능이며 publisher 바이트의 독립 인증이나
+악의적 concurrent writer를 막는 파일 시스템 격리라고 주장하지 않는다.
+
+완전한 native 폴더와 bundle6를 준비한 뒤 CPU에서 다음처럼 검사할 수 있다.
+기존 receipt와 manifest hash는 별도의 신뢰된 기록에 저장한다. source checkout의
+`docs/experiments/v2_candidates.json`과 CPU receipt에 묶인 정확한 dependencies도
+함께 필요하다. pip 설치와 가중치 폴더만 전달한 상태를 준비 완료로 보지 않는다.
+
+```sh
+python -m ayaka.training.native_snapshot \
+  --repo PINNED_REPOSITORY --revision IMMUTABLE_REVISION \
+  --path /srv/native --out /srv/receipts/native-snapshot.json
+python -m ayaka.training.direct_audit \
+  --bundle /srv/bundle --native-path /srv/native \
+  --out /srv/receipts/cpu-audit.json \
+  --expected-manifest-sha256 ORIGINAL_BUNDLE_SHA256
+python -m ayaka.training.run_direct audit \
+  --bundle /srv/bundle --snapshot-path /srv/native \
+  --snapshot-record /srv/receipts/native-snapshot.json \
+  --expected-bundle-sha256 ORIGINAL_BUNDLE_SHA256 \
+  --audit-receipt /srv/receipts/cpu-audit.json \
+  --expected-audit-receipt-sha256 PINNED_AUDIT_RECEIPT_SHA256
+```
+
+Runner audit는 snapshot record가 있으면 전체 weight bytes도 검사하고 그 여부를
+`native_weight_bytes_verified`에 기록한다. tensor를 모델에 읽지는 않는다.
+profile/train에서는 동일 snapshot2·bundle metadata 일치, 실제 weight 검증,
+CUDA 실행과 전체 잔액 admission, 실제 probability/loss/gradient 커널 parity를
+모두 통과해야 optimizer가 진행된다. native CPU mechanics에는 명시적으로
+`--mechanics-only`를 붙이며 이는 production-weight/quality 증거가 아니다.
+
+관련 **219 CPU tests / 335.19초**와 own8files Ruff lint/format 재검사가 통과했다.
+실제로 저장한 pristine random Gemma/Granite sharded native LM+fast tokenizer를
+빈/offline HF cache에서 prepare/audit/receipt/snapshot/runner CLI로 검사했다.
+폴더 이동 후 item bytes·recipe·논리 audit binding이 같으며 full/fast/resumed
+최종 trainable tensors와 dev 확률도 완전히 같고 checkpoint reload parity가 통과했다.
+초기 새 fixture가 tuple/이미 detach한 head를 잘못 저장한 부분은 pristine native
+constructor로 교체했다. strict missing-head loader나 gold 검증은 완화하지 않았다.
+
+고정378ff65의 실제 cached Gemma12B tokenizer/config control도 bundle6로 재생성됐다.
+기존 inventory/schedule hash와 96rows/10715tokens/26lineages/3completebatches는 같다.
+FA2+Liger는 meta topology 검증이며, 실제 CUDA 측정은 아니다. control receipts는
+`.dev/direct-native-swift-input-378ff65-cpu-20261005`에 있다.
+
+```text
+bundle manifest: 4889c4d43e922097f7c23777fc905c31744b3230f423d6b60fb5d27464431834
+holdout manifest: ca373f23978fea61800ba54d4503491e22018253a5e691312ef827b2c08c4002
+native metadata: 0db749370aa1641172bb189754c0a4c8fa914346d68049754e04eacb4dd82aa2
+full native config: 478c46e8d2c52d5c2d85bf67e3b3e8c90e7c9d91086cee27e3c267907e936bd9
+```
+
+새 control의 teacher/optimizer/download/GPU0, native weights ready=False다.
+실제 quality corpus/teacher와 complete publisher weights/CUDA 검증, 같은 조건의
+v1 reasoning 대 v2 off 품질 측정, 최종 독립 test 및 provider 회수/정리가 남았다.
+이 변경은 업로드 준비 문제를 해결한 것으로, 성능 향상이나 학습 직전 전체 완료를
+입증하지 않는다. Shared Swift의 token_input/SwiftReadIndex P1 상태는 `.dev`로
+소유자에게 재확인 요청했다. Swift/serve/private test/artifacts/deploy는 수정하지 않았다.
+
+최종 고정378ff65 전체 검사: **1963 passed, 2 skipped / 687.87초**, source 변경0,
+stable_pass=True, exit0. Ruff lint/format295files도 통과했다. Git archive SHA는
+`3799fab0d85d0f2c0ba528d0f3476f09b765b2ab5ba0853784a68a4793bb30b9`다.
+`.dev/codex-native-upload-full-378ff65-20261005.json`과 log SHA
+`edef0c050770f8ee83f991f01276485b2cdc789caea966eb5939213ff71a3a91`로 기록했다.
+검사 child 환경만 Git Bash/OMP_NUM_THREADS=1/MKL_NUM_THREADS=1을 지정했다.
+시스템 환경은 변경하지 않았고 전체 소스는 검사를 마칠 때까지 고정했다.
+
+전체 pytest 종료 후, 겹치는 작업 없이 동일 warmed native tokenizer에서 새 schema6
+CPU 감사 startup을 측정했다. full regeneration **6.2661초 → anchored reuse 2.0287초
+(3.089배)**, backend 직렬화6→2회이며 전체 item bytes·inventory·splits·논리 audit
+binding·사용한 tokenizer 객체가 같다. 별도 tokenizer load는7.3131초다.
+새 CPU audit SHA는 `2854496f0c3179922a0eb1fa62e925682221730c27c06dee991f6a8d1cf7857d`다.
+control의 `startup-comparison.json` 참조. 추가 raw metadata 검증을 포함한 단일 CPU
+관측이며, 전체 GPU 학습 속도/품질 개선이나 CUDA FA2/Liger 성능으로 해석하지 않는다.
+실험/test 프로세스는 모두 정상 종료했고 GPU/paid API/다운로드는 사용하지 않았다.
