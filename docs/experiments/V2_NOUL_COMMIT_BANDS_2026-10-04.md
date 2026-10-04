@@ -76,6 +76,15 @@ fitting contract expectations and Windows/WSL Bash path handling. Exact failures
 and suggested fixes were sent in `.dev` as R10; Swift files were not modified
 by this implementation. This is not a final stable integration pass.
 
+Follow-up: with the installed Git Bash explicitly prioritized **only in the
+test process**, the full suite passed **694 tests, 1 skipped** (214.42 seconds).
+Hashes of all Python/shell sources under `ayaka`, `tests`, `scripts` and the
+project configuration matched before and after the run. The JSON record binds
+this stable integration receipt and log hashes. It includes Claude-owned,
+currently uncommitted Swift sources; those sources were not staged here.
+The native Windows/WSL Bash path issue remains separate. Passing the suite does
+not resolve the reader/split/soft-target/forced-reasoning review counterexamples.
+
 Historical calibration tags do not cryptographically establish fitting input
 provenance. The dev observations do not establish independent transfer or an
 official sealed-inclusive benchmark score. Claude's independent review is pending.

@@ -249,7 +249,24 @@
         "test_swift_gpu_runner.py::test_shell_entrypoint_dry_run_and_syntax"
       ]
     },
-    "peer_review": "requested; no response observed"
+    "peer_review": "requested; no response observed",
+    "stable_integration": {
+      "passed": 694,
+      "skipped": 1,
+      "pytest_duration_seconds": 214.42,
+      "test_process_bash": "C:\\Program Files\\Git\\bin\\bash.EXE",
+      "source_unchanged": true,
+      "stable_pass": true,
+      "source_files": 210,
+      "source_mapping_sha256": "b37062179f3fa630611a4344bc53826fb924b96458a979515d6cbfef056436c2",
+      "local_receipt": ".dev/codex-cpu-integration-20261004-gitbash-corrected.json",
+      "local_receipt_sha256": "54a0cc6776623c18a227b5d2cc7c7dccb7fbbe92b27fcacabca48ee9e8180cf7",
+      "original_receipt_sha256": "d4340c85f17c2134af0a11848bdd14552bdbc1839408702dd4189f2d859a7feb",
+      "log_sha256": "e244e4e41d8679b8b2f29a51cfa18be33fc82ed8ada1858bfd5a91aeb666531c",
+      "log_hash_correction": "original log hash covered stdout LF text; corrected hash covers saved Windows CRLF bytes",
+      "native_wsl_path_issue_resolved": false,
+      "scope": "explicit existing Git Bash; includes uncommitted Claude-owned Swift sources; not model-quality proof"
+    }
   },
   "limitations": [
     "soft target credit is not hard-label accuracy",
