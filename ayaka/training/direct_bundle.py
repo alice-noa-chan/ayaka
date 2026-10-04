@@ -394,6 +394,13 @@ def prepare_bundle(
         splits["test"], context=test_context, counts=counts["test"]
     )
     development = {split: splits[split] for split in DEVELOPMENT_SPLITS}
+    development_registry = (
+        natural_registry
+        if any(
+            s.metadata.get("data_kind") == "natural" for rows in development.values() for s in rows
+        )
+        else None
+    )
     items, report, _, _ = _prepare(
         development,
         tok,
@@ -402,7 +409,7 @@ def prepare_bundle(
         weights,
         schedule,
         architecture,
-        natural_registry=natural_registry,
+        natural_registry=development_registry,
         allow_tiny=allow_tiny,
         holdout_commitment=commitment,
         input_encoding=input_encoding,

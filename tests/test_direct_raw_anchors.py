@@ -211,3 +211,36 @@ def test_raw_change_after_full_audit_prevents_receipt_publication(tmp_path, monk
             expected_manifest_sha256=sha256((root / "manifest.json").read_bytes()),
         )
     assert not receipt.exists()
+
+
+def test_raw_human_holdout_does_not_require_natural_development_rows(tmp_path, monkeypatch):
+    from test_direct_bundle import dataset
+
+    from ayaka.config import tiny_config
+    from ayaka.tokenization import ToyTokenizer
+    from ayaka.training import direct_bundle
+
+    cached_raw_fixture(tmp_path, monkeypatch)
+    splits = dataset()
+    natural = module.NaturalGoldRegistry().sample("helpsteer2", 0)
+    natural.metadata["split"] = "test"
+    splits["test"].append(natural)
+    root = tmp_path / "bundle"
+    direct_bundle.prepare_bundle(
+        root,
+        splits,
+        ToyTokenizer(),
+        tiny_config(readout="lm", max_seq_len=2048),
+        {},
+        steps=1,
+        rows_per_step=8,
+        allow_tiny=True,
+    )
+    monkeypatch.setattr(
+        module,
+        "local_raw_sources",
+        lambda: pytest.fail("development must not read held-out raw sources"),
+    )
+    _, recipe, _, _, _ = direct_bundle.audit_bundle(root, allow_tiny=True)
+    assert recipe["gold_sources"] is None
+    assert not (root / "test.jsonl").exists()
