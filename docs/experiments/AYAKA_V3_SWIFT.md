@@ -1,6 +1,8 @@
-# Ayaka v3 "Swift" — plan (2026-10-04)
+# Swift readout for the v2 candidate — plan (2026-10-04)
 
-Goal: JevBench v1.5 headline A #1. v3 is a separate system; published v1 weights stay frozen.
+Goal: JevBench v1.5 headline A #1. Swift is a readout/decision-policy component of the v2 candidate on
+`ayaka-v2-experiments`, not a separate release line (the file name is kept because it is referenced).
+Published v1 weights stay frozen.
 
 ## Why change direction
 
@@ -8,8 +10,11 @@ Goal: JevBench v1.5 headline A #1. v3 is a separate system; published v1 weights
   #1 Cygnet 73.70 = **frozen** `google/gemma-4-12B-it`, options shown as letters, the model's own probability
   for each letter read at one answer position, one temperature (T = 3.4). Axes: I 71.1, C 87.0, S 91.0, Cost 56.4.
 - On the v1.2 public set that frozen readout scored hard 85/111; our trained v1 large scored 72/111 single pass.
-  Our fine-tuning lost base ability, and the v2 continuation regressed further
-  ([V2_CLEAN_BEAM_2026-10-03](V2_CLEAN_BEAM_2026-10-03.md)). v3 therefore starts from the frozen readout
+  This is an observed underperformance across different systems (prompt, readout and runtime differ); whether
+  fine-tuning caused it stays unconfirmed until a matched readout comparison (same base/tokenizer revision,
+  prompt and letter readout, with and without the v1 adapter). The v2 continuation's dev regression is largely
+  explained by more Noul abstentions under unchanged thresholds
+  ([V2_CONTINUATION_AUDIT_2026-10-04](V2_CONTINUATION_AUDIT_2026-10-04.md)). Swift therefore starts from the frozen readout
   (approach credited to [NInfer](https://github.com/igorls/ninfer) and
   [Cygnet](https://github.com/blockbrain-ai/cygnet-recipe)) and adds a decision policy.
 
