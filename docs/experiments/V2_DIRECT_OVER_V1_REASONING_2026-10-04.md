@@ -428,3 +428,38 @@ source 변경0, stable_pass=True다. Ruff lint/format274files도 통과했다.
 import 경로를 확인했고, 필요한 ignored calibration/dev 두 fixture만 SHA를 확인해
 연결했다. private test/artifacts/deploy는 복사하지 않았다. archive 이후 상대 세션의
 unstaged API/media/Swift 변경은 이 통합 결과에 포함하지 않는다.
+
+## API 포함 재검증과 실제 서빙 연결의 남은 문제
+
+상대 세션의 API/SDK 변경도 포함해 별도로 확인했다. `9224446` 고정 전체 검사는
+1787pass/1skip/1fail이었다. 유일한 실패는 기존 export HTTP 테스트의 400 기대와 새
+계약 422의 차이였고, 상대 세션이 `55787c0`에서 수정했다. 실패 receipt도 보존한다.
+
+최종 `55787c0` 고정 전체는 **1788 passed, 2 skipped / 350.46초**, source 변경0,
+stable_pass=True, Ruff lint/format279files다. 새 optional `typesafe_sdk`가 이 venv에
+없어 SDK 통합 모듈이 건너뛰어졌으며 상대 세션의 SDK 설치 환경 검증과 구분한다.
+`.dev/codex-jev-teacher-full-55787c0-20261004.json` 참조.
+
+같은 소스에서 native v5 준비와 전체 audit도 다시 통과했다. 이전 `404fb90` control의
+train_items/preparation/recipe/test_commitment와 bytes가 같았다. teacher0/optimizer0/
+download0/native weights ready=False 조건은 그대로다.
+`.dev/direct-native-swift-input-55787c0-cpu-20261004/receipt.json` 참조.
+
+```text
+bundle manifest: fa8e288b4f15853d30aef8fa2c6ed39a685e5de663ce0790e835056b8677ca7f
+holdout manifest: 9e0921beef20cc4c93115028abfe1b563f5f32c9a1095a64cee890bdfe81c14b
+```
+
+추가 독립 리뷰에서 **실제 출하 경로가 아직 연결되지 않은 문제**를 확인했다.
+체크포인트 metadata의 Swift input recipe를 production loader가 읽지 않아 기본
+Decision은 legacy segmented 입력을 사용한다. 서버 QuestionSpec에는 original Choice
+wire labels도 전달되지 않으며 standalone export는 입력 metadata를 버린다.
+Trainer의 pre-encoded probe 재로딩 일치는 이 서빙 경로를 검사한 것이 아니다.
+
+또 detached text backbone의 저장 LoRA key와 HFReader full LM의 key 경로가 다르다.
+PEFT는 누락된 key를 경고하고 계속할 수 있으므로 실제 학습한 nonzero A/B tensor가
+로드됐는지 검사해야 한다. adapter-only HFReader는 checkpoint의 type/length
+calibration도 읽지 않는다. raw-reader 일치와 calibrated-serving 일치를 나눠 검증해야 한다.
+actual local tiny Granite + nonzero LoRA + nonunit temperature로 Service의 입력/token/
+확률 및 실제 HFReader 로드를 검사하고, 연결 전에는 silent legacy fallback을 거부해야 한다.
+이 작업은 `.dev`로 공유했다. 준비 전체 완료나 새 모델의 성능 향상을 아직 주장하지 않는다.
