@@ -1,4 +1,4 @@
-"""Fit NLL temperatures, then choose Noul commitment by local composite A."""
+"""Fit NLL temperatures, then search Noul and Score sequentially by local A."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import json
 import math
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from .binding import validate_bound_reads
 from .collect import load_reads
@@ -18,6 +18,7 @@ from .score import TYPES, composite, score_reads
 
 COMMIT_MARGINS = (None, *(index / 40 for index in range(13)))
 TEMPERATURE_MULTIPLIERS = (0.5, 0.7, 1.0, 1.4, 2.0)
+SCORE_TEMPERATURE_MULTIPLIERS = (0.4, *TEMPERATURE_MULTIPLIERS)
 SIMPLICITY_TOLERANCE = 0.25
 
 
@@ -73,6 +74,15 @@ def fit_policy(
     candidates, then higher A. Otherwise maximize A, breaking exact ties by
     that temperature deviation, no commitment, then smaller margin. Require
     all three primitives rather than inventing missing composite axes.
+    Next freeze that Noul choice and search Score NLL temperature times
+    {0.4, 0.5, 0.7, 1, 1.4, 2} on the same reads and fixed Speed/Cost axes.
+    Score's expected position changes I as well as C; Choice's argmax is
+    temperature-invariant, so its temperature remains NLL-fitted. Keep Score's
+    NLL temperature if it is within .25 A points of the best; otherwise maximize
+    A, breaking ties by the smallest absolute log-temperature deviation.
+    Sequential search costs 70 + 6 evaluations rather than 70 * 6 jointly.
+    Search's existing candidates/chosen describe the Noul stage at NLL Score;
+    score_search records the final stage, and bootstrap uses the final policy.
     Choice ECE uses recorded hard-tier items, falling back to all Choice items
     when none exist; Choice TVD uses every available exact gold distribution.
     The case-bootstrap CI measures calibration-fit uncertainty conditional
@@ -148,6 +158,7 @@ def fit_policy(
             table.append(
                 {
                     "t_noul": candidate.t_noul,
+                    "t_score": candidate.t_score,
                     "temperature_multiplier": multiplier,
                     "commit_margin": margin,
                     "I": report["I"],
@@ -204,9 +215,47 @@ def fit_policy(
             or any(row.get("readout") == "alias_sum" for row in rows)
         ),
     )
+    score_table = []
+    for multiplier in SCORE_TEMPERATURE_MULTIPLIERS:
+        candidate = replace(policy, t_score=temperatures["t_score"] * multiplier)
+        report = score_reads(reads, candidate, include_grouped=include_grouped)
+        score_table.append(
+            {
+                "t_choice": candidate.t_choice,
+                "t_noul": candidate.t_noul,
+                "commit_margin": candidate.commit_margin,
+                "t_score": candidate.t_score,
+                "temperature_multiplier": multiplier,
+                "I": report["I"],
+                "C": report["C"],
+                "choice_ece_scope": report["choice_ece_scope"],
+                "composite_A": composite(report["I"], report["C"], speed_axis, cost_axis),
+                "score_CC": report["per_type_CC"]["score"],
+                "score_nRPS": report["calibration_details"]["score"]["nRPS"],
+                "score_top_ECE": report["calibration_details"]["score"]["top_ECE"],
+            }
+        )
+    score_best = min(
+        score_table,
+        key=lambda candidate: (
+            -candidate["composite_A"],
+            abs(math.log(candidate["temperature_multiplier"])),
+            candidate["t_score"],
+        ),
+    )
+    score_nll = next(
+        candidate for candidate in score_table if candidate["temperature_multiplier"] == 1
+    )
+    score_chosen = (
+        score_nll
+        if score_best["composite_A"] - score_nll["composite_A"] <= SIMPLICITY_TOLERANCE
+        else score_best
+    )
+    policy.t_score = score_chosen["t_score"]
     policy.search = {
         "exploratory": exploratory,
         "objective": "local_composite_A",
+        "strategy": "sequential_noul_then_score",
         "hard_n": sum(
             not isinstance(row["gold"], dict) and row.get("gold_distribution") is None
             for row in rows
@@ -231,6 +280,13 @@ def fit_policy(
             "gap_from_best": best["composite_A"] - runner_up["composite_A"],
             "delta_from_chosen": runner_up["composite_A"] - chosen["composite_A"],
             "within_0_25": best["composite_A"] - runner_up["composite_A"] <= SIMPLICITY_TOLERANCE,
+        },
+        "score_search": {
+            "selection_rule": "keep NLL within tolerance; otherwise maximize A, then closest NLL temperature",
+            "candidates": score_table,
+            "nll": score_nll,
+            "best": score_best,
+            "chosen": score_chosen,
         },
         "bootstrap": case_bootstrap_composite(
             reads, policy, speed=speed_axis, cost=cost_axis, include_grouped=include_grouped
@@ -278,15 +334,17 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(exc))
     policy.save(args.output)
     print(json.dumps(asdict(policy), indent=2))
-    chosen = policy.search["chosen"]
+    chosen = policy.search["score_search"]["chosen"]
     interval = policy.search["bootstrap"]["ci_95"]
     runner_up = policy.search["runner_up"]
     print(
-        f"\nChosen local A={chosen['composite_A']:.4f}; case-bootstrap 95% CI "
+        f"\nChosen local A={chosen['composite_A']:.4f}, t_score={chosen['t_score']:.6g}; "
+        f"case-bootstrap 95% CI "
         f"[{interval[0]:.4f}, {interval[1]:.4f}] (B=1000, seed=15; calibration-fit only)."
     )
     print(
-        f"Runner-up A={runner_up['composite_A']:.4f}, t_noul={runner_up['t_noul']:.6g}, "
+        f"Noul-stage runner-up A={runner_up['composite_A']:.4f} (at NLL t_score), "
+        f"t_noul={runner_up['t_noul']:.6g}, "
         f"commit_margin={runner_up['commit_margin']}; "
         f"within 0.25 of best={runner_up['within_0_25']}."
     )

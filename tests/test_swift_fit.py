@@ -70,7 +70,7 @@ def test_recovers_known_temperature_for_each_primitive():
     policy = fit_exploratory(rows, fitted_on="synthetic private")
     assert policy.t_choice == pytest.approx(3.4, abs=1e-5)
     assert policy.search["nll_temperatures"]["t_noul"] == pytest.approx(2.1, abs=1e-5)
-    assert policy.t_score == pytest.approx(0.7, abs=1e-5)
+    assert policy.search["nll_temperatures"]["t_score"] == pytest.approx(0.7, abs=1e-5)
     assert "public=0" in policy.fitted_on
 
 
@@ -170,6 +170,73 @@ def test_prefer_no_commit_close_to_best_and_nll_temperature():
     assert policy.search["runner_up"]["within_0_25"]
 
 
+def score_search_reads(probs, counts):
+    return [
+        row("choice", {"a": 1, "b": 0}, "a"),
+        row("noul", {"false": 0, "true": 1}, "true"),
+        *[
+            row("score", probs, label)
+            for label, count in zip(probs, counts, strict=True)
+            for _ in range(count)
+        ],
+    ]
+
+
+@pytest.mark.parametrize("speed_axis,cost_axis", [(91, 56.4), (82, 61)])
+def test_score_search_sharpens_when_competence_gain_pays_calibration_cost(speed_axis, cost_axis):
+    rows = score_search_reads({"0": 0.1, "1": 0.9}, (2, 8))
+    policy = fit_exploratory(rows, speed_axis=speed_axis, cost_axis=cost_axis)
+    search = policy.search["score_search"]
+    nll_t = policy.search["nll_temperatures"]["t_score"]
+    assert nll_t == pytest.approx(math.log(9) / math.log(4), abs=1e-5)
+    assert policy.t_score == pytest.approx(0.4 * nll_t)
+    before = score_reads(rows, replace(policy, t_score=nll_t))
+    after = score_reads(rows, policy)
+    nmae_gain = (
+        before["ordinal_value_diagnostics"]["nMAE"] - after["ordinal_value_diagnostics"]["nMAE"]
+    )
+    nrps_cost = (
+        after["calibration_details"]["score"]["nRPS"]
+        - before["calibration_details"]["score"]["nRPS"]
+    )
+    assert nmae_gain > nrps_cost > 0
+    assert after["I"] > before["I"] and after["C"] < before["C"]
+    assert search["chosen"] == search["best"]
+    assert search["chosen"]["composite_A"] - search["nll"]["composite_A"] > 0.25
+    assert search["chosen"]["composite_A"] == pytest.approx(
+        composite(after["I"], after["C"], speed_axis, cost_axis)
+    )
+    for candidate in search["candidates"]:
+        assert candidate["composite_A"] == pytest.approx(
+            composite(candidate["I"], candidate["C"], speed_axis, cost_axis)
+        )
+    assert policy.search["bootstrap"]["composite_A"] == search["chosen"]["composite_A"]
+
+
+def test_score_search_keeps_nll_when_calibration_cost_outweighs_competence_gain():
+    rows = score_search_reads({"0": 0.1, "1": 0.2, "2": 0.7}, (1, 2, 7))
+    policy = fit_exploratory(rows)
+    search = policy.search["score_search"]
+    assert policy.t_score == policy.search["nll_temperatures"]["t_score"] == 1
+    assert search["chosen"] == search["nll"] == search["best"]
+    baseline = search["nll"]
+    for sharper in search["candidates"]:
+        if sharper["temperature_multiplier"] < 1:
+            assert sharper["score_CC"] > baseline["score_CC"]
+            assert sharper["score_nRPS"] > baseline["score_nRPS"]
+            assert sharper["C"] < baseline["C"]
+            assert sharper["composite_A"] < baseline["composite_A"]
+
+
+def test_score_search_prefers_nll_within_composite_tolerance():
+    policy = fit_exploratory(score_search_reads({"0": 0.1, "1": 0.9}, (3, 7)))
+    search = policy.search["score_search"]
+    assert search["best"]["temperature_multiplier"] == 0.5
+    assert 0 < search["best"]["composite_A"] - search["nll"]["composite_A"] <= 0.25
+    assert search["chosen"] == search["nll"]
+    assert policy.t_score == policy.search["nll_temperatures"]["t_score"]
+
+
 def test_search_is_complete_deterministic_and_roundtrips(tmp_path):
     rows = synthetic_reads(8)
     first = fit_exploratory(rows, fitted_on="private fixture")
@@ -183,14 +250,36 @@ def test_search_is_complete_deterministic_and_roundtrips(tmp_path):
         assert candidate["t_noul"] == pytest.approx(
             first.search["nll_temperatures"]["t_noul"] * candidate["temperature_multiplier"]
         )
+        assert candidate["t_score"] == first.search["nll_temperatures"]["t_score"]
         assert candidate["composite_A"] == pytest.approx(
             composite(candidate["I"], candidate["C"], 91.0, 56.4)
         )
+    assert first.search["strategy"] == "sequential_noul_then_score"
+    score_table = first.search["score_search"]["candidates"]
+    assert len(score_table) == 6
+    assert {item["temperature_multiplier"] for item in score_table} == {0.4, 0.5, 0.7, 1, 1.4, 2}
+    for candidate in score_table:
+        assert (
+            candidate["t_choice"] == first.t_choice == first.search["nll_temperatures"]["t_choice"]
+        )
+        assert candidate["t_noul"] == first.t_noul == first.search["chosen"]["t_noul"]
+        assert (
+            candidate["commit_margin"]
+            == first.commit_margin
+            == first.search["chosen"]["commit_margin"]
+        )
+        assert candidate["t_score"] == pytest.approx(
+            first.search["nll_temperatures"]["t_score"] * candidate["temperature_multiplier"]
+        )
+        assert candidate["composite_A"] == pytest.approx(
+            composite(candidate["I"], candidate["C"], 91, 56.4)
+        )
+    assert first.t_score == first.search["score_search"]["chosen"]["t_score"]
     interval = first.search["bootstrap"]
     assert interval["B"] == 1000 and interval["seed"] == 15
     assert interval["unit"] == "case"
     assert interval["ci_95"][0] < interval["ci_95"][1]
-    assert interval["composite_A"] == first.search["chosen"]["composite_A"]
+    assert interval["composite_A"] == first.search["score_search"]["chosen"]["composite_A"]
     path = tmp_path / "policy.json"
     first.save(path)
     assert Policy.load(path) == first
@@ -217,13 +306,13 @@ def test_fit_composite_uses_choice_scope_and_reports_it(hard_choice):
     choice_ece = 1 - p if hard_choice else ((1 - p) + 1) / 2
     choice_part = (100 * (1 - choice_ece / 0.5) + 100 * (1 - abs(p - 0.7))) / 2
     expected_c = (choice_part + 100 + 100) / 3
-    for candidate in policy.search["candidates"]:
+    for candidate in policy.search["candidates"] + policy.search["score_search"]["candidates"]:
         assert candidate["choice_ece_scope"] == scope
         assert candidate["C"] == pytest.approx(expected_c)
         assert candidate["composite_A"] == pytest.approx(
             composite(candidate["I"], expected_c, 91, 56.4)
         )
-    chosen = policy.search["chosen"]
+    chosen = policy.search["score_search"]["chosen"]
     assert policy.search["bootstrap"]["choice_ece_scope"] == scope
     assert policy.search["bootstrap"]["composite_A"] == chosen["composite_A"]
 

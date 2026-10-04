@@ -17,6 +17,32 @@ def test_temperature_square_roots_and_zeros():
     assert policy.apply("score", {"0": 0.75, "1": 0.25}) == pytest.approx({"0": 0.9, "1": 0.1})
 
 
+@pytest.mark.parametrize("temperature", [0.1, 0.4, 0.5, 0.7, 1, 1.4, 2, 10])
+@pytest.mark.parametrize(
+    "probs",
+    [
+        {"b": 0.1, "a": 0.8, "c": 0.1},
+        {"b": 0.45, "a": 0.45, "c": 0.1},
+        {"zero": 0, "first": 0.7, "last": 0.3},
+        {"b": 0.5, "a": 0.5},
+    ],
+)
+@pytest.mark.parametrize("use_log_masses", [False, True])
+def test_choice_temperature_preserves_argmax_and_ties(temperature, probs, use_log_masses):
+    # For T > 0, p**(1/T) and log_mass/T are monotone; normalization is shared.
+    masses = (
+        {label: math.log(p) if p > 0 else -1000 for label, p in probs.items()}
+        if use_log_masses
+        else None
+    )
+    answer = Policy(t_choice=temperature).decide("choice", probs, candidate_log_masses=masses)
+    expected = max(probs, key=probs.__getitem__)
+    assert answer["choice"] == expected
+    winners = {label for label, p in probs.items() if p == probs[expected]}
+    scaled = answer["probabilities"]
+    assert {label for label, p in scaled.items() if p == scaled[expected]} == winners
+
+
 @pytest.mark.parametrize(
     "p,expected",
     [
