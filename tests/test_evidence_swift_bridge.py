@@ -16,7 +16,7 @@ from transformers import (
 
 from ayaka.backbone import detach_text_backbone, tiny_text_config
 from ayaka.eval.read_artifact import fingerprint
-from ayaka.swift.prompt import render_question
+from ayaka.swift.prompt import PROMPT_VARIANTS, render_question
 from ayaka.swift.readers import READOUT, HFReader
 from ayaka.training.swift_evidence import (
     extract_swift_evidence_features,
@@ -89,7 +89,7 @@ QUESTIONS = [
 
 
 @pytest.mark.parametrize("family", ["gemma", "granite"])
-@pytest.mark.parametrize("variant", ["min", "cygnet", "rules"])
+@pytest.mark.parametrize("variant", PROMPT_VARIANTS)
 @pytest.mark.parametrize("state_format", ["pretty", "compact"])
 @pytest.mark.parametrize("mode", ["full_rows", "prefix_cache", "copy_on_write"])
 def test_actual_swift_reader_and_feature_prior_are_identical(family, variant, state_format, mode):
@@ -133,7 +133,7 @@ def test_actual_swift_reader_and_feature_prior_are_identical(family, variant, st
 
 
 @pytest.mark.parametrize("trim", [False, True])
-@pytest.mark.parametrize("variant", ["min", "cygnet", "rules"])
+@pytest.mark.parametrize("variant", PROMPT_VARIANTS)
 def test_whitespace_multiline_options_and_question_isolation(trim, variant):
     tok = tokenizer(trim=trim)
     _, text = native_model("granite")
@@ -240,3 +240,21 @@ def test_recipe_metadata_is_a_snapshot_not_a_mutable_alias():
     assert (
         fingerprint(features.metadata["prior_recipe"]) == features.metadata["prior_recipe_sha256"]
     )
+
+
+def test_labeled_spans_keep_descriptions_and_native_prior_keeps_semantic_keys():
+    tok = tokenizer()
+    qs = [
+        {"type": "choice", "criteria": {"finance": "a small office", "hr": "hr: people"}},
+        {"type": "noul", "criteria": {"false": "no", "true": "true"}},
+        QUESTIONS[2],
+    ]
+    prepared = prepare_swift_evidence_inputs("Policy evidence", qs, tok, prompt_variant="labeled")
+    expected = [["a small office", "hr: people"], ["no", "true"], ["low", "mid", "high"]]
+    for question, descriptions in zip(prepared.inputs.questions, expected, strict=True):
+        assert [
+            tok.decode(question.suffix_ids[a:b]) for a, b in question.option_spans
+        ] == descriptions
+    prompt = tok.decode(prepared.inputs.prefix_ids + prepared.inputs.questions[0].suffix_ids)
+    assert "A. finance: a small office" in prompt
+    assert "B. hr: people" in prompt and "hr: hr:" not in prompt

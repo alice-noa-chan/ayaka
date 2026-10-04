@@ -47,6 +47,36 @@ def _token_span(offsets, start, end):
     return indices[0], indices[-1] + 1
 
 
+def _description_texts(question, prompt_variant, state_format):
+    """Derive option decorations and footer from the actual serving renderer."""
+    blank, _ = render_question(
+        "",
+        Question(question.type, "", [""], [""]),
+        prompt_variant=prompt_variant,
+        state_format=state_format,
+    )
+    before, separator, footer = blank[-1]["content"].partition("A. ")
+    if not separator:
+        raise ValueError("Swift renderer does not expose a single-option description boundary")
+    prefix = before + separator
+    result = []
+    for label, description in zip(question.labels, question.descriptions, strict=True):
+        messages, _ = render_question(
+            "",
+            Question(question.type, "", [label], [description]),
+            prompt_variant=prompt_variant,
+            state_format=state_format,
+        )
+        user = messages[-1]["content"]
+        if not user.startswith(prefix) or (footer and not user.endswith(footer)):
+            raise ValueError("Swift option decorations changed the surrounding renderer")
+        decorated = user[len(prefix) : len(user) - len(footer)]
+        if not decorated.endswith(description):
+            raise ValueError("Swift candidate description is not preserved by the renderer")
+        result.append((decorated, len(decorated) - len(description)))
+    return result
+
+
 def prepare_swift_evidence_inputs(
     state,
     questions,
@@ -131,16 +161,18 @@ def prepare_swift_evidence_inputs(
             prefix_end = i + 1
         if prefix_end < 1:
             raise ValueError("Swift prompt has no shareable state-only prefix")
+        descriptions = _description_texts(q, prompt_variant, state_format)
         options = "\n".join(
-            f"{letter}. {description}"
-            for letter, description in zip(letters, q.descriptions, strict=True)
+            f"{letter}. {text}" for letter, (text, _) in zip(letters, descriptions, strict=True)
         )
         options_at = user.rfind(options)
         if options_at < len(user) - len(tail):
             raise ValueError("Swift options must be inside the question suffix")
         spans, cursor = [], content_start + options_at - trimmed
-        for letter, description in zip(letters, q.descriptions, strict=True):
-            begin = cursor + len(f"{letter}. ")
+        for letter, description, (decorated, offset) in zip(
+            letters, q.descriptions, descriptions, strict=True
+        ):
+            begin = cursor + len(f"{letter}. ") + offset
             # An edge-trimming template can remove the final option's trailing
             # whitespace. Never pool assistant-template tokens as its evidence.
             spans.append(
@@ -150,7 +182,7 @@ def prepare_swift_evidence_inputs(
                     min(begin + len(description), content_start + retained),
                 )
             )
-            cursor = begin + len(description) + 1
+            cursor += len(f"{letter}. ") + len(decorated) + 1
         label_ids = tuple(wire["canonical_token_ids"][letter][0] for letter in letters)
         rows.append((tuple(ids), spans, label_ids, PRIMITIVE_INDEX[q.type]))
         maximum_prefix.append(prefix_end)
