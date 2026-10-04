@@ -13,9 +13,11 @@ from types import SimpleNamespace
 from .v2 import paired_report, summarize, typed_row
 
 
-def checked_rows(report):
-    if report.get("complete") is not True or report.get("split") != "dev":
-        raise ValueError("audit requires complete dev reports; test stays unopened")
+def checked_rows(report, *, split="dev"):
+    if split not in {"dev", "calibration"}:
+        raise ValueError("saved audits support dev/calibration only; test stays unopened")
+    if report.get("complete") is not True or report.get("split") != split:
+        raise ValueError(f"audit requires complete {split} reports; test stays unopened")
     identity = report.get("model_id")
     if (
         not isinstance(identity, str)
@@ -31,7 +33,7 @@ def checked_rows(report):
         if not original.get("id") or original["id"] in seen:
             raise ValueError("question identities must be nonempty and unique")
         seen.add(original["id"])
-        if original.get("model_id") != identity or original.get("split") != "dev":
+        if original.get("model_id") != identity or original.get("split") != split:
             raise ValueError("row checkpoint/split binding differs from report")
         if original.get("route") != "direct" or any(
             original.get(key, 0) != 0 for key in ("budget", "reasoning_tokens", "generated_tokens")
@@ -115,10 +117,8 @@ def changes(before, after):
     return result
 
 
-def audit_continuation(parent, candidate, workload=None, history=None, *, replicates=2000):
-    if type(replicates) is not int or replicates < 1:
-        raise ValueError("bootstrap replicate count must be positive")
-    before, after = checked_rows(parent), checked_rows(candidate)
+def match_rows(before, after):
+    """Require full row/case metadata identity; source prompt text may be absent."""
     if [row["id"] for row in before] != [row["id"] for row in after]:
         raise ValueError("compare the complete identical cohort, never its intersection")
     fields = (
@@ -136,6 +136,13 @@ def audit_continuation(parent, candidate, workload=None, history=None, *, replic
             "tier", "standard"
         ):
             raise ValueError("question metadata or case binding differs")
+
+
+def audit_continuation(parent, candidate, workload=None, history=None, *, replicates=2000):
+    if type(replicates) is not int or replicates < 1:
+        raise ValueError("bootstrap replicate count must be positive")
+    before, after = checked_rows(parent), checked_rows(candidate)
+    match_rows(before, after)
     result = {
         "version": 1,
         "scope": "saved dev observations; cannot identify a causal training mechanism",
