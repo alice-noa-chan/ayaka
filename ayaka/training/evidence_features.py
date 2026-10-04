@@ -242,9 +242,14 @@ def extract_evidence_features(
     if forward_tokens > max_forward_tokens:
         raise ValueError("planned forward tokens exceed cap")
     parameter = next(text.parameters())
-    dtype = parameter.dtype if parameter.is_floating_point() else torch.float32
-    element_size = max(torch.empty((), dtype=dtype).element_size(), 4)
-    # Conservatively budget fp32 span/lexical means, masks and fp32 native scores.
+    # Mixed-precision output rows/bias can promote native/lexical features.
+    # Inspect metadata only; do not copy or scan the weights on their device.
+    element_size = max(
+        4,
+        *(p.element_size() for p in text.parameters() if p.is_floating_point()),
+        *(b.element_size() for b in text.buffers() if b.is_floating_point()),
+    )
+    # Conservatively include promoted span/lexical means and native scores.
     feature_upper = (
         (prefix_length * hidden + qcount * hidden + qcount * kmax * hidden * (1 + lexical))
         * element_size
@@ -319,25 +324,23 @@ def extract_evidence_features(
                 raise ValueError("native output-head logits are not finite")
             priors.append(frozen(prior))
             queries.append(frozen(query))
-            candidates.append(
-                frozen(
-                    torch.stack(
-                        [at_least_fp32(suffix[s:e]).mean(0) for s, e in question.option_spans]
-                    )
-                )
+            candidate_features = torch.stack(
+                [at_least_fp32(suffix[s:e]).mean(0) for s, e in question.option_spans]
             )
+            if not torch.isfinite(candidate_features).all():
+                raise ValueError("pooled candidate features are not finite")
+            candidates.append(frozen(candidate_features))
             if lexical:
                 option_ids = torch.tensor(question.suffix_ids, dtype=torch.long, device=source)
-                lexical_features.append(
-                    frozen(
-                        torch.stack(
-                            [
-                                at_least_fp32(output_rows(text, option_ids[s:e])).mean(0)
-                                for s, e in question.option_spans
-                            ]
-                        )
-                    )
+                lexical_feature = torch.stack(
+                    [
+                        at_least_fp32(output_rows(text, option_ids[s:e])).mean(0)
+                        for s, e in question.option_spans
+                    ]
                 )
+                if not torch.isfinite(lexical_feature).all():
+                    raise ValueError("pooled lexical features are not finite")
+                lexical_features.append(frozen(lexical_feature))
             del result, suffix, query
 
     with accounted(), torch.inference_mode(False):
@@ -348,7 +351,11 @@ def extract_evidence_features(
         padded_candidates = torch.zeros(
             1, qcount, kmax, hidden, dtype=candidates[0].dtype, device=destination
         )
-        padded_lexical = torch.zeros_like(padded_candidates) if lexical else None
+        padded_lexical = (
+            torch.zeros_like(padded_candidates, dtype=lexical_features[0].dtype)
+            if lexical
+            else None
+        )
         for qi, question in enumerate(inputs.questions):
             k = len(question.label_ids)
             candidate_mask[0, qi, :k] = True

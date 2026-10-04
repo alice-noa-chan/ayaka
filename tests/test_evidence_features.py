@@ -342,3 +342,63 @@ def test_nonfinite_native_head_is_rejected_without_fake_prior(inputs, monkeypatc
     with pytest.raises(FeatureExtractionError, match="output-head logits") as failure:
         extract_evidence_features(text, inputs)
     assert failure.value.progress["attempted_forward_calls"] == 2
+
+
+def test_mixed_precision_output_head_storage_is_rejected_before_forward(inputs, monkeypatch):
+    _, text = backbone("granite", monkeypatch)
+    baseline = extract_evidence_features(text, inputs, lexical=True)
+    baseline_cap = baseline.metadata["planned_feature_bytes_upper_bound"]
+    text._ayaka_lm_head.double()
+    with torch.no_grad():
+        text._ayaka_lm_head.weight.fill_(1e-200)
+    calls = []
+    hook = text.register_forward_pre_hook(lambda *args: calls.append(True))
+    try:
+        with pytest.raises(ValueError, match="planned feature storage"):
+            extract_evidence_features(text, inputs, lexical=True, max_feature_bytes=baseline_cap)
+    finally:
+        hook.remove()
+    assert calls == []
+    mixed = extract_evidence_features(text, inputs, lexical=True)
+    assert mixed.tensors["lexical"].dtype == torch.float64
+    lexical = mixed.tensors["lexical"][mixed.tensors["candidate_mask"]]
+    assert torch.allclose(lexical, torch.full_like(lexical, 1e-200), rtol=1e-14, atol=0)
+    assert (
+        mixed.metadata["planned_feature_bytes_upper_bound"]
+        >= mixed.metadata["stored_feature_bytes"]
+    )
+
+
+def test_nonfinite_lexical_output_row_is_reported_without_returning_invalid_features(
+    inputs, monkeypatch
+):
+    _, text = backbone("granite", monkeypatch)
+    question = inputs.questions[0]
+    inputs = replace(inputs, questions=(question,))
+    option_ids = question.suffix_ids[slice(*question.option_spans[0])]
+    token = next(i for i in option_ids if i not in question.label_ids)
+    with torch.no_grad():
+        text._ayaka_lm_head.weight[token].fill_(torch.nan)
+    with pytest.raises(FeatureExtractionError, match="lexical.*finite") as failure:
+        extract_evidence_features(text, inputs, lexical=True)
+    assert failure.value.progress["attempted_forward_calls"] == 2
+    assert failure.value.progress["attempted_forward_tokens"] == len(inputs.prefix_ids) + len(
+        question.suffix_ids
+    )
+
+
+def test_finite_hidden_states_that_overflow_pooling_are_rejected(inputs, monkeypatch):
+    _, text = backbone("granite", monkeypatch)
+    original = text.forward
+    with torch.no_grad():
+        text._ayaka_lm_head.weight.zero_()
+
+    def large_hidden(**kwargs):
+        result = original(**kwargs)
+        result.last_hidden_state.fill_(3e38)
+        return result
+
+    monkeypatch.setattr(text, "forward", large_hidden)
+    with pytest.raises(FeatureExtractionError, match="candidate.*finite") as failure:
+        extract_evidence_features(text, inputs)
+    assert failure.value.progress["attempted_forward_calls"] == 2
