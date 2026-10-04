@@ -362,3 +362,69 @@ ready=False다. 실제 pretrained probabilities, CUDA kernel 실행·속도 또�
 완주·회수·정리 경로다. feature store/head training runner와 selected checkpoint/policy
 bytes를 고정하는 독립 최종 evaluator도 별도 완성이 필요하다.
 이후 작업 전까지 학습 직전 준비 전체 완료나 v1 추론 대비 향상을 주장하지 않는다.
+
+## Swift 관측 → 비추론 teacher와 CPU 준비 최적화
+
+`c68bc76`의 `ayaka.training.teacher_artifacts`는 저장된 Swift 직접 판정과 풀이 후
+판정을 직접 학습용 teacher 확률로 변환한다. 외부에 고정한 train 원문 byte SHA와
+direct/paired read의 **순서 있는 JSON 목록** fingerprint를 요구한다. 현재 파일에서
+새로 계산한 hash만으로 외부 anchor를 대체하지 않는다.
+
+원래 train 문맥·후보·soft gold·source lineage와 별도 verifier의 정답을 대조하고,
+실제 tokenizer로 직접 입력·풀이 생성 입력·풀이 뒤 최종 입력을 재생성한다. 표시 글자
+A/B/... 순서를 검사해 dict 삽입 순서 변경으로 후보 확률을 뒤집는 공격을 거부한다.
+Noul과 정수 Score는 원래 candidate ID/순서로 되돌린다. 숫자 없음·높은 확신도·강제
+1,024토큰 관측도 auto eligibility로 제외하지 않는다.
+
+완료된 풀이의 확률만 내보내고 풀이 텍스트는 학습 입력에 넣거나 내보내지 않는다.
+빈 풀이와 length-capped 풀이는 제외하되 input/output/reasoning tokens는 집계한다.
+teacher가 정답 기준으로 직접 판정보다 나아졌는지는 기존 distillation 준비가 다시
+필터링한다. 저장되지 않은 upstream 실패 비용은 별도 collection runner usage log가
+필요하다. hash는 backend/loaded-weight 실행 증명이 아니며 export는 promotable=False다.
+
+CLI는 `--train`, `--config`, `--input-encoding`, `--teacher-identity`,
+`--direct-reads`, `--paired-reads`, 세 `--expected-*-sha256`, 새 `--out`을 받는다.
+입력은 명시적 `swift_canonical`이다. production tokenizer는 cached pinned model
+revision을 따른다. random tiny 검사에만 `--mechanics-only --mechanics-tokenizer
+LOCAL_FAST_TOKENIZER`를 허용하며 production override나 download는 하지 않는다.
+actual tiny raw-logit gather·실제 offline subprocess CLI 포함22tests 통과와 독립
+리뷰를 완료했다. common Swift validator의 후보 순서 허점도 Claude에게 `.dev`로 전달했다.
+
+`404fb90`은 순수 CPU 준비 scope 안에서 tokenizer backend 직렬화를 재사용한다.
+scope 진입/정상 종료에 전체 바이트를 검사하고 중간에는 template·special tokens 등
+설정과 객체를 확인한다. 변경은 저장 전에 실패하며 종료된 scope는 copied context에도
+hash를 남기지 않는다. 기존 hash/row/recipe bytes, 실제 토큰·gold·source·전체 schedule
+재생성은 유지한다. 영구 cache나 serving 변경은 없고 writer/optimizer 전에 scope가 끝난다.
+처음부터 padding/truncation이 설정된 backend를 HF 호출이 정규화하면 실패할 수 있다.
+동시/일시적 tokenizer 변조를 격리하는 장치로 부르지 않는다. 소스가 바뀌므로 이전
+bundle은 새로 준비해야 한다. 관련80 CPU tests 및 Ruff가 통과했다.
+
+고정 `404fb90`과 actual cached Gemma12B tokenizer에서 동일12문항의 기존 unscoped
+입력 준비 **9.4736초 → scoped1.4567초**, 약 **6.50배** 개선을 관측했다. 직렬화12회→2회,
+prepared rows는 완전히 같았다. tokenizer load14.7783초는 비교 구간과 별도다.
+`.dev/codex-native-tokenizer-scope-404fb90-20261004.json` 참조. 단일 CPU 관측을
+GPU 학습·실서비스 throughput 개선으로 확대하지 않는다.
+
+같은 고정 소스의 authored480문항 v5 준비+전체 regeneration audit은 process import와
+tokenizer load를 포함해 **35.8613초**에 통과했다. train96행은 각1회, 유형별32행,
+10715 tokens, source lineages26개다. test는 별도 holdout이다.
+`.dev/direct-native-swift-input-404fb90-cpu-20261004/receipt.json` 및
+`.dev/codex-native-preparation-time-404fb90-20261004.json` 참조.
+이전 고정 `bc75502`의 native control과 `train_items.jsonl`, `preparation.json`,
+`recipe.json`, `test_commitment.json` 네 파일의 전체 bytes도 같았다.
+`.dev/codex-native-preparation-equivalence-404fb90-20261004.json` 참조.
+
+```text
+bundle manifest: 7098e1cb0d2f68ad5552690100e266cb006ec6f4e1d9a1b0ba8ebdd5b7bd5f97
+holdout manifest: 7df7de48c197093051bf7805b175f348879f20ac6639d8e339d8aa4a692bf431
+```
+
+이 control은 teacher0/optimizer0/download0/native weights ready=False이며 FA2/Liger
+**meta topology** 검사다. 실제 pretrained 품질·CUDA 실행이나 준비 전체 완료를 뜻하지 않는다.
+
+최종 고정 `404fb90` Git archive 전체 CPU 검증은 **1743 passed, 1 skipped / 341.39초**,
+source 변경0, stable_pass=True다. Ruff lint/format274files도 통과했다.
+`.dev/codex-teacher-scope-full-404fb90-20261004.json` 참조. archived source의 실제
+import 경로를 확인했고, 필요한 ignored calibration/dev 두 fixture만 SHA를 확인해
+연결했다. private test/artifacts/deploy는 복사하지 않았다. archive 이후 상대 세션의
+unstaged API/media/Swift 변경은 이 통합 결과에 포함하지 않는다.
