@@ -30,13 +30,14 @@ from .direct_holdout import (
     write_holdout,
 )
 from .direct_preflight import inspect_direct_model
+from .native_metadata import inspect_metadata, verify_metadata
 from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .swift_direct import encode_direct_sample, input_serving_recipe, normalize_input_encoding
 from .tokenizer_identity import backend_fingerprints, scoped_tokenizer_preparation
 from .workload import describe_rows, finite_workload, scheduled_batches
 
-VERSION = "ayaka-direct-bundle-5"
+VERSION = "ayaka-direct-bundle-6"
 STATUS = "cpu_prepared_no_model_or_optimizer_execution"
 FILES = {f"{split}.jsonl" for split in DEVELOPMENT_SPLITS} | {
     "test_commitment.json",
@@ -110,16 +111,27 @@ def _model_policy(cfg, *, allow_tiny):
     }
 
 
-def local_tokenizer(cfg, *, allow_tiny=False):
+def local_tokenizer(cfg, *, allow_tiny=False, native_path=None, expected_metadata=None):
     _model_policy(cfg, allow_tiny=allow_tiny)
-    if cfg.backbone == "tiny":
+    metadata, root = inspect_metadata(cfg.backbone, cfg.backbone_revision, path=native_path)
+    if expected_metadata is not None and metadata != expected_metadata:
+        raise ValueError("native configuration/tokenizer assets changed before tokenizer loading")
+    if root is None:
         return ToyTokenizer()
     from transformers import AutoTokenizer
 
-    hf = AutoTokenizer.from_pretrained(
-        cfg.backbone, revision=cfg.backbone_revision, local_files_only=True, trust_remote_code=False
-    )
+    hf = AutoTokenizer.from_pretrained(str(root), local_files_only=True, trust_remote_code=False)
+    verify_metadata(metadata, cfg.backbone, cfg.backbone_revision, path=root)
     return HFTokenizer(hf, cfg.backbone)
+
+
+def bound_native_root(cfg, recipe, *, native_path=None):
+    """Validate metadata before native config/tokenizer loaders can select assets."""
+    if recipe.get("version") != VERSION or "native_metadata" not in recipe:
+        raise ValueError("v6 direct bundle requires bound native metadata; prepare a new bundle")
+    return verify_metadata(
+        recipe["native_metadata"], cfg.backbone, cfg.backbone_revision, path=native_path
+    )
 
 
 def _tokenizer_identity(tok, cfg):
@@ -319,6 +331,7 @@ def prepare_bundle(
     natural_registry=None,
     holdout_out=None,
     input_encoding=None,
+    native_path=None,
 ):
     """Validate all data/tokens/settings before creating a fresh output directory."""
     root = Path(out)
@@ -349,10 +362,18 @@ def prepare_bundle(
     input_encoding = normalize_input_encoding(input_encoding)
     input_recipe = input_serving_recipe(tok, input_encoding)
     optimizations = optimizations or OptimizationConfig()
+    metadata, native_root = inspect_metadata(cfg.backbone, cfg.backbone_revision, path=native_path)
     architecture = inspect_direct_model(
         cfg,
         official_weight_elements=policy.get("backbone_weight_elements"),
         optimizations=optimizations,
+        native_path=native_root,
+        expected_config={
+            "kind": "config_file",
+            "sha256": metadata["files"]["config.json"]["sha256"],
+        }
+        if metadata is not None
+        else None,
     )
     counts = audit_splits(splits)
     verify_test_gold, _ = _gold_verifier(
@@ -391,6 +412,7 @@ def prepare_bundle(
         "gold_sources": report["gold_sources"],
         "model_policy": policy,
         "native_architecture": architecture,
+        "native_metadata": metadata,
         "optimizations": asdict(optimizations),
         "inference_mode": "off",
         "reasoning_training_tokens": 0,
@@ -427,6 +449,7 @@ def prepare_bundle(
             "trained calibration/dev/frozen independent test",
         ],
     }
+    verify_metadata(metadata, cfg.backbone, cfg.backbone_revision, path=native_root)
     root.mkdir(parents=True, exist_ok=False)
     for name, raw in payloads.items():
         (root / name).write_bytes(raw)
@@ -437,7 +460,13 @@ def prepare_bundle(
 
 
 def audit_bundle(
-    path, tok=None, *, allow_tiny=False, natural_registry=None, expected_manifest_sha256=None
+    path,
+    tok=None,
+    *,
+    allow_tiny=False,
+    natural_registry=None,
+    expected_manifest_sha256=None,
+    native_path=None,
 ):
     """Recompute corpus gold, original tokens, teacher filtering and the entire schedule."""
     root = Path(path)
@@ -484,18 +513,30 @@ def audit_bundle(
     _validate_schedule(recipe.get("schedule"))
     if recipe.get("model_policy") != _model_policy(cfg, allow_tiny=allow_tiny):
         raise ValueError("declared model policy changed")
+    native_root = bound_native_root(cfg, recipe, native_path=native_path)
     architecture = inspect_direct_model(
         cfg,
         official_weight_elements=recipe["model_policy"].get("backbone_weight_elements"),
         optimizations=OptimizationConfig(**recipe["optimizations"]),
+        native_path=native_root,
+        expected_config=recipe["native_architecture"]["native_config"],
     )
     if architecture != recipe.get("native_architecture"):
         raise ValueError("actual native architecture or LoRA placements changed")
-    tok = tok if tok is not None else local_tokenizer(cfg, allow_tiny=allow_tiny)
+    tok = (
+        tok
+        if tok is not None
+        else local_tokenizer(
+            cfg,
+            allow_tiny=allow_tiny,
+            native_path=native_root,
+            expected_metadata=recipe["native_metadata"],
+        )
+    )
     if _tokenizer_identity(tok, cfg) != recipe.get("tokenizer_sha256"):
         raise ValueError("tokenizer or chat template changed")
     if "input_encoding" not in recipe or "input_recipe" not in recipe:
-        raise ValueError("v5 direct bundle requires an explicit input encoder and serving recipe")
+        raise ValueError("v6 direct bundle requires an explicit input encoder and serving recipe")
     input_encoding = normalize_input_encoding(recipe["input_encoding"])
     if (
         input_encoding != recipe["input_encoding"]
@@ -533,6 +574,9 @@ def audit_bundle(
         or _item_bytes(items) != (root / "train_items.jsonl").read_bytes()
     ):
         raise ValueError("regenerated direct items or workload disagree with saved preparation")
+    verify_metadata(
+        recipe["native_metadata"], cfg.backbone, cfg.backbone_revision, path=native_root
+    )
     return manifest, recipe, items, inventory, groups
 
 
@@ -565,6 +609,9 @@ def main(argv=None):
     prepare.add_argument("--base-replay-weight", default=0, type=float)
     prepare.add_argument("--mechanics-only", action="store_true")
     prepare.add_argument(
+        "--native-path", type=Path, help="complete offline native model/tokenizer directory"
+    )
+    prepare.add_argument(
         "--input-encoder", choices=("ayaka_segmented", "swift_canonical"), default="ayaka_segmented"
     )
     prepare.add_argument("--prompt-variant", choices=("min", "cygnet", "rules", "labeled"))
@@ -577,6 +624,7 @@ def main(argv=None):
     audit.add_argument("--bundle", required=True, type=Path)
     audit.add_argument("--mechanics-only", action="store_true")
     audit.add_argument("--expected-manifest-sha256")
+    audit.add_argument("--native-path", type=Path)
     args = parser.parse_args(argv)
     if args.command == "prepare":
         encoding = {"encoder": args.input_encoder}
@@ -585,7 +633,7 @@ def main(argv=None):
                 encoding[field] = getattr(args, field)
         encoding = normalize_input_encoding(encoding)
         cfg = ElectraConfig(**json.loads(args.config.read_bytes()))
-        tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only)
+        tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only, native_path=args.native_path)
         splits = {
             split: [
                 Sample.from_json(json.loads(line))
@@ -615,12 +663,14 @@ def main(argv=None):
             optimizations=OptimizationConfig(attention=args.attention, liger=args.liger),
             holdout_out=args.holdout_out,
             input_encoding=encoding,
+            native_path=args.native_path,
         )
     else:
         manifest, _, _, _, _ = audit_bundle(
             args.bundle,
             allow_tiny=args.mechanics_only,
             expected_manifest_sha256=args.expected_manifest_sha256,
+            native_path=args.native_path,
         )
     print(
         json.dumps(

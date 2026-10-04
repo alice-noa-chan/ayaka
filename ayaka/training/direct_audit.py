@@ -113,12 +113,30 @@ class AuditedBundle:
 
 
 def audit_snapshot(
-    path, tok=None, *, allow_tiny=False, natural_registry=None, expected_manifest_sha256=None
+    path,
+    tok=None,
+    *,
+    allow_tiny=False,
+    natural_registry=None,
+    expected_manifest_sha256=None,
+    native_path=None,
 ):
     """Full regeneration with stable payload/source/tokenizer snapshots, CPU only."""
     before = _payloads(path, expected_manifest_sha256)
-    cfg = ElectraConfig(**json.loads(before[2]["recipe.json"])["model"])
-    tok = tok if tok is not None else bundles.local_tokenizer(cfg, allow_tiny=allow_tiny)
+    recipe = json.loads(before[2]["recipe.json"])
+    cfg = ElectraConfig(**recipe["model"])
+    bundles._model_policy(cfg, allow_tiny=allow_tiny)
+    native_root = bundles.bound_native_root(cfg, recipe, native_path=native_path)
+    tok = (
+        tok
+        if tok is not None
+        else bundles.local_tokenizer(
+            cfg,
+            allow_tiny=allow_tiny,
+            native_path=native_root,
+            expected_metadata=recipe["native_metadata"],
+        )
+    )
     sources, dependencies = bundles._source_hashes(), _dependencies()
     tokenizer = _tokenizer_binding(tok, cfg)
     manifest, recipe, items, inventory, groups = bundles.audit_bundle(
@@ -127,6 +145,7 @@ def audit_snapshot(
         allow_tiny=allow_tiny,
         natural_registry=natural_registry,
         expected_manifest_sha256=sha256(before[0]),
+        native_path=native_root,
     )
     if (
         _payloads(path, sha256(before[0])) != before
@@ -136,6 +155,7 @@ def audit_snapshot(
         or bundles._item_bytes(items) != before[2]["train_items.jsonl"]
     ):
         raise ValueError("bundle/source/tokenizer changed during CPU audit; discard receipt")
+    bundles.bound_native_root(cfg, recipe, native_path=native_root)
     binding = {
         "version": VERSION,
         "bundle_manifest_sha256": sha256(before[0]),
@@ -165,6 +185,7 @@ def create_audit_receipt(
     expected_manifest_sha256,
     allow_tiny=False,
     natural_registry=None,
+    native_path=None,
 ):
     """Write after full CPU verification; pin the returned digest outside the bundle."""
     _digest(expected_manifest_sha256, "bundle manifest")
@@ -181,7 +202,14 @@ def create_audit_receipt(
         allow_tiny=allow_tiny,
         natural_registry=natural_registry,
         expected_manifest_sha256=expected_manifest_sha256,
+        native_path=native_path,
     )
+    cfg = ElectraConfig(**snapshot.recipe["model"])
+    native_root = bundles.bound_native_root(cfg, snapshot.recipe, native_path=native_path)
+    if native_root is not None and (
+        destination == native_root or native_root in destination.parents
+    ):
+        raise ValueError("audit receipt must be outside the native loader directory")
     raw = canonical(snapshot.binding) + b"\n"
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("xb") as stream:
@@ -227,7 +255,14 @@ def _items(raw):
 
 
 def load_audited_bundle(
-    path, receipt, tok=None, *, expected_manifest_sha256, expected_receipt_sha256, allow_tiny=False
+    path,
+    receipt,
+    tok=None,
+    *,
+    expected_manifest_sha256,
+    expected_receipt_sha256,
+    allow_tiny=False,
+    native_path=None,
 ):
     """Read only exact externally audited buffers, without rendering or raw-source loads."""
     _digest(expected_manifest_sha256, "bundle manifest")
@@ -258,14 +293,26 @@ def load_audited_bundle(
         raise ValueError("audited tiny bundles require explicit mechanics-only mode")
     if recipe["model_policy"] != bundles._model_policy(cfg, allow_tiny=allow_tiny):
         raise ValueError("model size/license policy differs from the CPU audit")
+    native_root = bundles.bound_native_root(cfg, recipe, native_path=native_path)
     architecture = bundles.inspect_direct_model(
         cfg,
         official_weight_elements=recipe["model_policy"].get("backbone_weight_elements"),
         optimizations=OptimizationConfig(**recipe["optimizations"]),
+        native_path=native_root,
+        expected_config=recipe["native_architecture"]["native_config"],
     )
     if architecture != recipe["native_architecture"]:
         raise ValueError("actual native architecture differs from the CPU audit")
-    tok = tok if tok is not None else bundles.local_tokenizer(cfg, allow_tiny=allow_tiny)
+    tok = (
+        tok
+        if tok is not None
+        else bundles.local_tokenizer(
+            cfg,
+            allow_tiny=allow_tiny,
+            native_path=native_root,
+            expected_metadata=recipe["native_metadata"],
+        )
+    )
     if _tokenizer_binding(tok, cfg) != binding["tokenizer"] or (
         input_serving_recipe(tok, recipe["input_encoding"]) != recipe["input_recipe"]
     ):
@@ -312,6 +359,7 @@ def load_audited_bundle(
         or json.loads(payloads["preparation.json"])["workload"] != binding["workload"]
     ):
         raise ValueError("audited rows, inventory or complete schedule differ")
+    bundles.bound_native_root(cfg, recipe, native_path=native_root)
     return AuditedBundle(manifest, recipe, items, inventory, groups, splits, binding, tok)
 
 
@@ -321,12 +369,14 @@ def main(argv=None):
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--expected-manifest-sha256", required=True)
     parser.add_argument("--mechanics-only", action="store_true")
+    parser.add_argument("--native-path", type=Path)
     args = parser.parse_args(argv)
     result = create_audit_receipt(
         args.bundle,
         args.out,
         expected_manifest_sha256=args.expected_manifest_sha256,
         allow_tiny=args.mechanics_only,
+        native_path=args.native_path,
     )
     print(json.dumps({k: v for k, v in result.items() if k != "source_sha256"}, indent=2))
 

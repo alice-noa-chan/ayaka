@@ -41,7 +41,7 @@ from .direct_state import (
     validate_training_config,
 )
 from .frozen_replay import attach_base_replay
-from .native_snapshot import verify_snapshot
+from .native_snapshot import DEPLOYABLE_VERSION, verify_snapshot
 from .optimization import OptimizationConfig, optimize_and_verify
 from .prepare_v2 import canonical
 from .swift_direct import direct_readout_binding, encode_direct_sample
@@ -159,6 +159,20 @@ def _write(root, name, value):
         stream.write(canonical(value) + b"\n")
 
 
+def _verified_native_root(cfg, recipe, record, path):
+    if not isinstance(record, dict) or (record.get("repo"), record.get("revision")) != (
+        cfg.backbone,
+        cfg.backbone_revision,
+    ):
+        raise ValueError("native snapshot must match the bundle's immutable model")
+    if (
+        record.get("version") != DEPLOYABLE_VERSION
+        or record.get("native_metadata") != recipe["native_metadata"]
+    ):
+        raise ValueError("native execution requires a deployable snapshot bound to bundle metadata")
+    return verify_snapshot(record, path=path)
+
+
 def run_pipeline(
     bundle,
     out,
@@ -186,7 +200,10 @@ def run_pipeline(
         raise ValueError("CPU audit receipt and its external SHA256 must be provided together")
     if audit_receipt is None:
         audited = audit_snapshot(
-            bundle, allow_tiny=mechanics_only, expected_manifest_sha256=expected_bundle_sha256
+            bundle,
+            allow_tiny=mechanics_only,
+            expected_manifest_sha256=expected_bundle_sha256,
+            native_path=snapshot_path,
         )
     else:
         audited = load_audited_bundle(
@@ -195,6 +212,7 @@ def run_pipeline(
             allow_tiny=mechanics_only,
             expected_manifest_sha256=expected_bundle_sha256,
             expected_receipt_sha256=expected_audit_receipt_sha256,
+            native_path=snapshot_path,
         )
     manifest, recipe, inventory, groups = (
         audited.manifest,
@@ -202,7 +220,10 @@ def run_pipeline(
         audited.inventory,
         audited.groups,
     )
+    cfg = ElectraConfig(**recipe["model"])
     if action == "audit":
+        if snapshot_record is not None:
+            _verified_native_root(cfg, recipe, snapshot_record, snapshot_path)
         return {
             "status": "audited_cpu_only",
             "bundle_sha256": fingerprint(manifest),
@@ -211,8 +232,9 @@ def run_pipeline(
             if audit_receipt is not None
             else "full_regeneration",
             "optimizer_steps": 0,
+            "native_weight_bytes_verified": snapshot_record is not None,
+            "model_weights_loaded": False,
         }
-    cfg = ElectraConfig(**recipe["model"])
     tcfg = training_config(recipe, training)
     dev = torch.device(device)
     if mechanics_only:
@@ -249,15 +271,10 @@ def run_pipeline(
     if root.exists():
         raise ValueError("direct execution output must be a fresh directory")
     tok, splits = audited.tokenizer, audited.splits
-    if mechanics_only:
+    if mechanics_only and snapshot_path is None:
         native_sha, native_root = fingerprint({"tiny_initial_seed": 0, "dtype": "float32"}), None
     else:
-        if not isinstance(snapshot_record, dict) or (
-            snapshot_record.get("repo"),
-            snapshot_record.get("revision"),
-        ) != (cfg.backbone, cfg.backbone_revision):
-            raise ValueError("native snapshot must match the bundle's immutable model")
-        native_root = verify_snapshot(snapshot_record, path=snapshot_path)
+        native_root = _verified_native_root(cfg, recipe, snapshot_record, snapshot_path)
         native_sha = snapshot_record["snapshot_sha256"]
     binding = training_binding(manifest, recipe, tcfg, native_weights_sha256=native_sha)
     binding["external_bundle_manifest_sha256"] = expected_bundle_sha256

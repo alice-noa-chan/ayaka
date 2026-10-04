@@ -88,21 +88,25 @@ def inspect_metadata(repo, revision, *, path=None):
     if root is None:
         return None, None
     required = {"config.json", "tokenizer.json", "tokenizer_config.json"}
-    if any(not (root / name).is_file() for name in required):
+    entries = list(root.iterdir())
+    actual_names = {p.name for p in entries}
+    if len({name.casefold() for name in actual_names}) != len(actual_names):
+        raise ValueError("native loader filenames must not contain case collisions")
+    if not required <= actual_names or any(not (root / name).is_file() for name in required):
         raise ValueError(
             "native upload requires config.json, tokenizer.json and tokenizer_config.json"
         )
     _config_record(root)
     names = {
         p.name
-        for p in root.iterdir()
+        for p in entries
         if p.is_file() and p.suffix.lower() in _SUFFIXES and not p.name.endswith(".index.json")
     }
     for directory in {CHAT_TEMPLATE_DIR, "chat_templates"}:
         template_dir = root / directory
         if template_dir.exists():
-            if not template_dir.is_dir():
-                raise ValueError("native chat template assets must be a directory")
+            if directory not in actual_names or not template_dir.is_dir():
+                raise ValueError("native chat template assets require the exact directory name")
             names.update(
                 p.relative_to(root).as_posix() for p in template_dir.glob("*.jinja") if p.is_file()
             )

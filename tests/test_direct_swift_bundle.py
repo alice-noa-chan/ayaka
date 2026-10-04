@@ -63,7 +63,7 @@ def test_swift_bundle_roundtrip_binds_all_splits_and_original_score_meaning(tmp_
     actual, recipe, items, inventory, groups = audit_bundle(
         root, tok=tok, allow_tiny=True, expected_manifest_sha256=anchor
     )
-    assert actual == manifest and recipe["version"] == "ayaka-direct-bundle-5"
+    assert actual == manifest and recipe["version"] == "ayaka-direct-bundle-6"
     assert recipe["input_encoding"] == normalize_input_encoding(ENCODING)
     assert all(item.direct_input_binding["recipe"] == recipe["input_recipe"] for item in items)
     assert not (root / "test.jsonl").exists()

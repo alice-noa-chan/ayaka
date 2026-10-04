@@ -168,3 +168,11 @@ def test_embedded_adapters_reject_before_model_allocation(tmp_path, monkeypatch,
         inspect_direct_model(cfg, native_path=tmp_path)
     with pytest.raises(ValueError, match="embedded adapter"):
         inspect_metadata(cfg.backbone, cfg.backbone_revision, path=tmp_path)
+
+
+@pytest.mark.parametrize("name", ["config.json", "tokenizer.json", "tokenizer_config.json"])
+def test_case_renamed_required_files_are_not_linux_ready(tmp_path, name):
+    cfg = package(tmp_path)
+    (tmp_path / name).rename(tmp_path / name.capitalize())
+    with pytest.raises(ValueError, match="native upload requires"):
+        inspect_metadata(cfg.backbone, cfg.backbone_revision, path=tmp_path)
