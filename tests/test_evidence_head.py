@@ -267,3 +267,31 @@ def test_feature_overflow_fails_instead_of_losing_native_prior(sample):
     sample["candidates"].fill_(1e10)
     with pytest.raises(ValueError, match="overflow head dtype"):
         make_head().half()(**sample)
+
+
+def test_padded_attention_rows_have_only_a_zero_null_key(sample, monkeypatch):
+    from torch.nn import functional as functional
+
+    sample["candidate_mask"][1] = False
+    sample["question_mask"][1] = False
+    sample["memory_mask"][1] = False
+    sample["candidate_mask"][0, 1, 2:] = False
+    captured = []
+    original = functional.scaled_dot_product_attention
+
+    def inspect_mask(q, k, v, *, attn_mask, **kwargs):
+        assert attn_mask.any(-1).all()
+        assert (k[:, :, -1] == 0).all() and (v[:, :, -1] == 0).all()
+        null_rows = attn_mask[..., -1]
+        assert null_rows.any()
+        assert (~attn_mask[..., :-1].any(-1)[null_rows]).all()
+        assert (~attn_mask[..., -1][attn_mask[..., :-1].any(-1)]).all()
+        captured.append(True)
+        return original(q, k, v, attn_mask=attn_mask, **kwargs)
+
+    monkeypatch.setattr(functional, "scaled_dot_product_attention", inspect_mask)
+    head = activate(make_head())
+    out = head(**sample)
+    out.logits[sample["candidate_mask"]].sum().backward()
+    assert len(captured) == 2
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in head.parameters())

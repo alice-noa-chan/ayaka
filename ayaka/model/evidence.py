@@ -52,6 +52,12 @@ class _AttentionBlock(nn.Module):
         k, v = (
             self.kv(self.memory_norm(memory)).view(b, s, 2, self.heads, d // self.heads).unbind(2)
         )
+        # A zero null key is visible only to completely padded query rows.
+        # No SDPA backend has to define softmax over a fully blocked row.
+        null = k.new_zeros(b, 1, self.heads, d // self.heads)
+        k = torch.cat((k, null), dim=1)
+        v = torch.cat((v, null), dim=1)
+        allowed = torch.cat((allowed, ~allowed.any(-1, keepdim=True)), dim=-1)
         routed = F.scaled_dot_product_attention(
             q.transpose(1, 2),
             k.transpose(1, 2),
