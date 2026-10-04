@@ -24,6 +24,7 @@ from .swift_direct import (
     normalize_input_encoding,
     validate_direct_input_items,
 )
+from .tokenizer_identity import scoped_tokenizer_preparation
 
 VERSION = "ayaka-direct-distillation-preparation-1"
 
@@ -188,6 +189,7 @@ def _teacher_filter(q, teacher, direct, target):
     return reasons
 
 
+@scoped_tokenizer_preparation
 def prepare_direct_distillation(
     splits,
     tok,

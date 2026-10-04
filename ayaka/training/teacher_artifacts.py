@@ -29,6 +29,7 @@ from .swift_direct import (
     normalize_input_encoding,
     swift_question,
 )
+from .tokenizer_identity import scoped_tokenizer_preparation
 
 VERSION = "ayaka-swift-teacher-observations-1"
 
@@ -295,6 +296,7 @@ def _reasoned_observation(original, paired, native, kwargs, context):
     return nested, final[1]["content"], exclusion
 
 
+@scoped_tokenizer_preparation
 def export_swift_teachers(
     samples,
     tok,

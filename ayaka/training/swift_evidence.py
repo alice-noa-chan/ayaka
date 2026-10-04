@@ -20,6 +20,7 @@ from .evidence_features import (
     _validate_inputs,
     extract_evidence_features,
 )
+from .tokenizer_identity import backend_fingerprints
 
 
 @dataclass(frozen=True)
@@ -227,7 +228,7 @@ def prepare_swift_evidence_inputs(
         "chat_template_kwargs": kwargs,
         "capture_return_dict": False,
         "chat_template_sha256": fingerprint(tokenizer.chat_template),
-        "tokenizer_sha256": fingerprint(backend.to_str()),
+        "tokenizer_sha256": backend_fingerprints(tokenizer)["json_string_sha256"],
         "input_sha256": inputs.input_sha256,
         "questions": contracts,
         "shared_prefix_semantics": "system and state only; boundary-straddling tokens kept in suffix",

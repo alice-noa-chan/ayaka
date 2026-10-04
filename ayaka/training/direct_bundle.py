@@ -7,7 +7,6 @@ Prepared tokens are regenerated during audit rather than trusted from disk.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from dataclasses import asdict
@@ -34,6 +33,7 @@ from .direct_preflight import inspect_direct_model
 from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .swift_direct import encode_direct_sample, input_serving_recipe, normalize_input_encoding
+from .tokenizer_identity import backend_fingerprints, scoped_tokenizer_preparation
 from .workload import describe_rows, finite_workload, scheduled_batches
 
 VERSION = "ayaka-direct-bundle-5"
@@ -140,7 +140,7 @@ def _tokenizer_identity(tok, cfg):
         raise ValueError("exact fast-tokenizer serialization is required")
     return fingerprint(
         {
-            "backend_sha256": hashlib.sha256(backend.to_str().encode()).hexdigest(),
+            "backend_sha256": backend_fingerprints(tok)["raw_sha256"],
             "chat_template": tok.hf.chat_template,
             "special_tokens": tok.hf.special_tokens_map,
             "decision_chat": tok.decision_chat,
@@ -176,6 +176,7 @@ def _gold_verifier(splits, natural_registry, *, allow_tiny):
     return verify, natural_registry.binding if natural else None
 
 
+@scoped_tokenizer_preparation
 def _context_audit(splits, tok, cfg, architecture, verify_gold, input_encoding=None):
     contexts = {}
     vocab_size = architecture["native_output_shape"][0]
@@ -227,6 +228,7 @@ def _context_audit(splits, tok, cfg, architecture, verify_gold, input_encoding=N
     return contexts
 
 
+@scoped_tokenizer_preparation
 def _prepare(
     splits,
     tok,
