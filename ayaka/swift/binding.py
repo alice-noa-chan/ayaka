@@ -20,7 +20,9 @@ from .readers import READOUT, logmass_probs
 CONTRACT = "swift_canonical_tokens_v2"
 
 
-def make_swift_binding(item, reader, *, model, revision, prompt_variant, state_format, group_size):
+def make_swift_binding(
+    item, reader, *, model, revision, prompt_variant, state_format, group_size, diagnostic=False
+):
     messages = None
     if len(item.question.labels) <= 26:
         messages, _ = render_question(
@@ -59,6 +61,8 @@ def make_swift_binding(item, reader, *, model, revision, prompt_variant, state_f
         "chat_template_kwargs": getattr(reader, "chat_template_kwargs", {}),
         "dtype": getattr(reader, "dtype", None),
         "device": getattr(reader, "device", None),
+        "tokenizer_model": getattr(reader, "tokenizer_model", model),
+        "adapter_sha256": getattr(reader, "adapter_sha256", None),
         "implementation_sha256": {
             name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
             for name in ("readers.py", "prompt.py", "grouping.py")
@@ -79,6 +83,7 @@ def make_swift_binding(item, reader, *, model, revision, prompt_variant, state_f
         "runtime_sha256": fingerprint(runtime),
         "readout": runtime["readout"],
         "prompt_variant": prompt_variant,
+        "diagnostic": diagnostic,
         "token_inputs": token_inputs,
         "canonical_token_ids_sha256": fingerprint([v["canonical_token_ids"] for v in token_inputs]),
         "rendered_input_sha256": fingerprint(messages),
@@ -113,7 +118,11 @@ class SwiftReadIndex:
                 {key: value for key, value in row.items() if key != "record_sha256"}
             ):
                 raise ValueError("cached read record fingerprint mismatch")
-            if row["id"] != binding["question_id"] or row["id"] in self.rows:
+            if (
+                not row.get("id")
+                or row.get("id") != binding.get("question_id")
+                or row["id"] in self.rows
+            ):
                 raise ValueError("duplicate or inconsistent question ids in read artifact")
             for key in (
                 "model",
@@ -123,7 +132,10 @@ class SwiftReadIndex:
                 "readout",
                 "prompt_variant",
             ):
-                if not binding.get(key):
+                if not binding.get(key) or (
+                    key != "runtime"
+                    and (not isinstance(binding[key], str) or not binding[key].strip())
+                ):
                     raise ValueError(f"bound reads require non-empty {key}")
             runtime = binding["runtime"]
             if not isinstance(runtime, dict) or binding.get("runtime_sha256") != fingerprint(
@@ -145,6 +157,7 @@ class SwiftReadIndex:
                 "labels",
                 "gold",
                 "gold_distribution",
+                "diagnostic",
             ):
                 if row.get(key) != binding.get(key):
                     raise ValueError(f"read row differs from binding: {key}")
@@ -240,6 +253,9 @@ def validate_bound_reads(rows):
         or row.get("diagnostic")
         or row.get("comparison_valid") is False
         or row.get("promotable") is False
+        or row["binding"]["runtime"].get("backend") not in ("hf", "vllm")
+        or row["binding"]["runtime"].get("logprobs_mode") != "raw_logits"
+        or row["binding"]["runtime"].get("single_pass_readout") != READOUT
         for row in rows
     ):
         raise ValueError("diagnostic reads require --exploratory")

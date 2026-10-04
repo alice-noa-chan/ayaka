@@ -75,7 +75,7 @@ class LetterReader(Protocol):
 
 
 def canonical_logprobs(top_logprobs: list[dict], letters: list[str]) -> dict[str, float]:
-    """Only exact canonical token strings count; aliases invalidate the read."""
+    """Legacy decoded-token diagnostic; never used by the raw-ID reader."""
     masses = {}
     aliases = []
     for entry in top_logprobs:
@@ -92,8 +92,7 @@ def canonical_logprobs(top_logprobs: list[dict], letters: list[str]) -> dict[str
     missing = [letter for letter in letters if letter not in masses]
     if missing:
         raise ValueError(
-            f"missing canonical letter logprobs: {missing}; require processed_logprobs "
-            "and --max-logprobs 26; top-20 must cover every letter"
+            f"missing canonical letter logprobs: {missing}; legacy top-k diagnostics require full coverage"
         )
     return masses
 
@@ -122,6 +121,8 @@ class VLLMChatReader:
         revision: str | None = None,
         tokenizer_revision: str | None = None,
         tokenizer: Any = None,
+        tokenizer_model: str | None = None,
+        adapter_sha256: str | None = None,
     ):
         root = url.rstrip("/")
         self.url = (
@@ -136,6 +137,8 @@ class VLLMChatReader:
         self.model = model
         self.revision = revision
         self.tokenizer_revision = tokenizer_revision or revision
+        self.tokenizer_model = tokenizer_model or model
+        self.adapter_sha256 = adapter_sha256
         self.tokenizer = tokenizer
         self.backend = "vllm"
         self.readout = READOUT
@@ -151,7 +154,7 @@ class VLLMChatReader:
 
     def describe(self, messages, letters):
         if self.tokenizer is None:
-            self.tokenizer = cached_tokenizer(self.model, self.tokenizer_revision)
+            self.tokenizer = cached_tokenizer(self.tokenizer_model, self.tokenizer_revision)
         return token_input(self.tokenizer, messages, letters, self.chat_template_kwargs)
 
     def read(self, messages: Messages, letters: list[str]) -> ReadResult:
@@ -222,7 +225,11 @@ def wire_token_id(token):
 
 def gather_token_logits(entries, requested, sampled_token):
     """Wire 'logprob' means raw logit; reject losses rather than invent mass."""
-    if not requested or len(set(requested)) != len(requested):
+    if (
+        not requested
+        or any(type(i) is not int or i < 0 for i in requested)
+        or len(set(requested)) != len(requested)
+    ):
         raise ValueError("requested canonical token ids must be distinct")
     sampled = wire_token_id(sampled_token)
     selected, seen = {}, set()
@@ -258,7 +265,12 @@ def letter_token_ids(tokenizer: Any) -> dict[str, list[int]]:
 
 def canonical_letter_ids(tokenizer: Any, prompt: str, letters: list[str]) -> dict[str, list[int]]:
     """Find the one appended token at the actual assistant answer position."""
-    if not letters or len(letters) > 26 or len(set(letters)) != len(letters):
+    if (
+        not letters
+        or len(letters) > 26
+        or any(not isinstance(k, str) or not re.fullmatch(r"[A-Z]", k) for k in letters)
+        or len(set(letters)) != len(letters)
+    ):
         raise ValueError("canonical read needs 1..26 distinct letters")
     prefix = tokenizer.encode(prompt, add_special_tokens=False)
     ids = {}
@@ -267,6 +279,8 @@ def canonical_letter_ids(tokenizer: Any, prompt: str, letters: list[str]) -> dic
         if completed[:-1] != prefix or len(completed) != len(prefix) + 1:
             raise ValueError(f"letter {letter} is not one canonical token at the answer position")
         ids[letter] = [completed[-1]]
+        if type(completed[-1]) is not int or completed[-1] < 0:
+            raise ValueError("canonical token ids must be vocabulary integers")
     if len({values[0] for values in ids.values()}) != len(letters):
         raise ValueError("canonical letters must have distinct token ids")
     return ids
@@ -297,6 +311,7 @@ class HFReader:
         readout: str = READOUT,
         revision: str | None = None,
         chat_template_kwargs: dict | None = None,
+        lora_path: str | None = None,
     ):
         if readout not in (READOUT, "alias_sum"):
             raise ValueError("HF readout must be canonical_letter_raw or diagnostic alias_sum")
@@ -305,6 +320,7 @@ class HFReader:
         self.readout = readout
         self.revision = revision
         self.tokenizer_revision = revision
+        self.lora_path = lora_path
         self.logprobs_mode = "raw_logits"
         self.chat_template_kwargs = (
             {"enable_thinking": False}
@@ -336,6 +352,12 @@ class HFReader:
             .to(self.device)
             .eval()
         )
+        if self.lora_path:
+            from peft import PeftModel
+
+            self.model = PeftModel.from_pretrained(
+                self.model, self.lora_path, is_trainable=False, local_files_only=True
+            ).eval()
 
     def describe(self, messages, letters):
         if self.tokenizer is None:
@@ -471,6 +493,11 @@ def add_reader_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chat-template-kwargs", type=template_kwargs)
     parser.add_argument("--hf-model")
     parser.add_argument("--revision", help="resolved model/tokenizer commit")
+    parser.add_argument("--tokenizer-model", help="base tokenizer id for a served LoRA arm")
+    parser.add_argument("--tokenizer-revision", help="pinned base tokenizer commit")
+    parser.add_argument(
+        "--adapter-sha256", help="local adapter files fingerprint, for LoRA provenance"
+    )
     parser.add_argument("--readout", choices=[READOUT, "alias_sum"], default=READOUT)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--dtype", default="float32")
@@ -499,4 +526,7 @@ def reader_from_args(args: argparse.Namespace) -> LetterReader:
         args.timeout,
         chat_template_kwargs=getattr(args, "chat_template_kwargs", None),
         revision=args.revision,
+        tokenizer_revision=getattr(args, "tokenizer_revision", None),
+        tokenizer_model=getattr(args, "tokenizer_model", None),
+        adapter_sha256=getattr(args, "adapter_sha256", None),
     )

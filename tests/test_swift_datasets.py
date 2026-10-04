@@ -171,7 +171,7 @@ def test_collect_resume_limit_and_rows(tmp_path):
     expected = {
         "id": "easy-0",
         "model": "fake",
-        "revision": None,
+        "revision": "fixture-model-v1",
         "prompt_variant": "min",
         "source": str(dataset),
         "tier": "easy",
@@ -187,7 +187,7 @@ def test_collect_resume_limit_and_rows(tmp_path):
     assert {key: rows[0][key] for key in expected} == expected
     assert rows[0]["split"] == "public"
     assert rows[0]["cluster_id"] == "easy-0"
-    assert rows[0]["readout"] == "canonical_letter"
+    assert rows[0]["readout"] == "canonical_letter_raw"
     assert rows[0]["passes"] == 1
     assert rows[0]["binding"]["messages"] == reader.calls[0][0]
 

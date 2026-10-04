@@ -265,6 +265,7 @@ def collect(
     model: str | None = None,
     revision: str | None = None,
     prompt_variant: str = "min",
+    diagnostic: bool = False,
 ) -> int:
     """Append reads in input order, with at most concurrency decisions in flight.
 
@@ -280,6 +281,7 @@ def collect(
     if state_format not in ("pretty", "compact"):
         raise ValueError("state_format must be pretty or compact")
     model = model or getattr(reader, "model", getattr(reader, "model_id_or_path", "fake"))
+    diagnostic = diagnostic or getattr(reader, "backend", None) == "fixture"
     output = Path(output)
     revision = revision or getattr(reader, "revision", None)
     if revision is None and getattr(reader, "backend", None) == "fixture":
@@ -309,6 +311,7 @@ def collect(
             prompt_variant=prompt_variant,
             state_format=state_format,
             group_size=group_size,
+            diagnostic=diagnostic,
         )
         if index.get(binding) is None:
             planned.append((item, binding))
@@ -356,6 +359,7 @@ def collect(
                 "revision": revision,
                 "tokenizer_revision": binding["tokenizer_revision"],
                 "binding_sha256": binding["binding_sha256"],
+                "diagnostic": diagnostic,
                 "rendered_input_sha256": binding["rendered_input_sha256"],
                 "prompt_variant": prompt_variant,
                 "source": item.source,
@@ -416,6 +420,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", "--out", default="reads.jsonl")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument(
+        "--diagnostic",
+        action="store_true",
+        help="mark reads ineligible for strict fitting/selection",
+    )
     add_reader_arguments(parser)
     args = parser.parse_args(argv)
     count = collect(
@@ -429,6 +438,7 @@ def main(argv: list[str] | None = None) -> None:
         model=args.hf_model if args.backend == "hf" else args.model,
         revision=args.revision,
         prompt_variant=args.prompt_variant,
+        diagnostic=args.diagnostic,
     )
     print(f"Wrote {count} new reads to {args.output}")
 

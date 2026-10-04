@@ -273,3 +273,44 @@ def test_tokenizer_only_lazy_cache_per_pinned_revision(monkeypatch):
     with pytest.raises(ValueError, match="pinned"):
         cached_tokenizer("fixture", "main")
     readers._TOKENIZERS.clear()
+
+
+def test_vllm_exact_field_rejection_is_a_loud_preflight_error(monkeypatch):
+    import urllib.error
+
+    def rejected(*args, **kwargs):
+        raise urllib.error.HTTPError("http://fixture", 400, "unknown logprob_token_ids", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", rejected)
+    reader = VLLMChatReader("http://fixture", "fixture", tokenizer=StubTokenizer())
+    with pytest.raises(ValueError, match="exact token gather rejected.*raw_logits"):
+        reader.read([], ["A", "B"])
+
+
+def test_vllm_rejects_server_prompt_token_mismatch(monkeypatch):
+    import io
+
+    payload = {
+        "prompt_token_ids": [8, 7],
+        "choices": [
+            {
+                "logprobs": {
+                    "content": [
+                        {
+                            "token": "token_id:65",
+                            "top_logprobs": [
+                                {"token": "token_id:65", "logprob": 0},
+                                {"token": "token_id:66", "logprob": 0},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+    }
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda *a, **kw: io.BytesIO(json.dumps(payload).encode())
+    )
+    with pytest.raises(ValueError, match="server prompt token ids"):
+        VLLMChatReader("http://fixture", "fixture", tokenizer=StubTokenizer()).read([], ["A", "B"])

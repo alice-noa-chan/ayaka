@@ -60,9 +60,17 @@ def test_http_roundtrip_and_gets(running_server):
     assert response == {
         "model": "fake",
         "answers": {
-            "n": {"type": "noul", "noul": 0.75},
-            "c": {"type": "choice", "choice": "b", "probabilities": {"a": 0.25, "b": 0.75}},
-            "s": {"type": "score", "score": 0.75, "probabilities": {"0": 0.25, "1": 0.75}},
+            "n": {"type": "noul", "noul": pytest.approx(0.75)},
+            "c": {
+                "type": "choice",
+                "choice": "b",
+                "probabilities": pytest.approx({"a": 0.25, "b": 0.75}),
+            },
+            "s": {
+                "type": "score",
+                "score": pytest.approx(0.75),
+                "probabilities": pytest.approx({"0": 0.25, "1": 0.75}),
+            },
         },
         "usage": {"input_tokens": 30, "output_tokens": 3},
     }
