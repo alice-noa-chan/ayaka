@@ -1,0 +1,464 @@
+{
+  "version": 1,
+  "date": "2026-10-04",
+  "scope": "exploratory saved ayaka-base and continuation pilot dev policies; not frozen 12B or official sealed-inclusive evaluation",
+  "execution": {
+    "model_forwards": 0,
+    "fitting_steps": 0,
+    "new_gpu_seconds": 0
+  },
+  "test_opened": false,
+  "selected_policy": null,
+  "models": {
+    "parent": {
+      "model_id": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+      "n": 2672,
+      "independent_cases": 495,
+      "calibration_n": 1664,
+      "calibration_independent_cases": 379,
+      "arms": {
+        "raw": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 29.904192620317883,
+              "nll": 1.5508199220337113,
+              "ece": 0.22284404627890353,
+              "brier": 0.6438220791349916
+            },
+            "noul": {
+              "n": 720,
+              "cc": -35.27777777777777,
+              "nll": 0.9003456523392237,
+              "ece": 0.27067834990236106,
+              "brier": 0.26114575903030013,
+              "abstentions": 367
+            },
+            "score": {
+              "n": 1040,
+              "cc": 35.15222693347621,
+              "nll": 1.5244469281249782,
+              "ece": 0.17953392237138288,
+              "brier": 0.6791951640085925,
+              "rps": 0.17449660536478107
+            }
+          },
+          "cc_equal_types": 9.926213925338773,
+          "proper_loss": 0.8752207265792387,
+          "p50_s": 0.192449588499926,
+          "p95_s": 0.2610173104500631,
+          "reasoning_tokens": 0
+        },
+        "raw_commit": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 29.904192620317883,
+              "nll": 1.5508199220337113,
+              "ece": 0.22284404627890353,
+              "brier": 0.6438220791349916
+            },
+            "noul": {
+              "n": 720,
+              "cc": 9.166666666666657,
+              "nll": 0.97946139275277,
+              "ece": 0.31749622533830907,
+              "brier": 0.2906763274324083,
+              "abstentions": 0
+            },
+            "score": {
+              "n": 1040,
+              "cc": 35.15222693347621,
+              "nll": 1.5244469281249782,
+              "ece": 0.17953392237138288,
+              "brier": 0.6791951640085925,
+              "rps": 0.17449660536478107
+            }
+          },
+          "cc_equal_types": 24.74102874015358,
+          "proper_loss": 0.9015926400504207,
+          "p50_s": 0.192449588499926,
+          "p95_s": 0.2610173104500631,
+          "reasoning_tokens": 0
+        },
+        "calibrated": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 29.904192620317883,
+              "nll": 1.3241929310042113,
+              "ece": 0.14862624507856748,
+              "brier": 0.5934808130201734
+            },
+            "noul": {
+              "n": 720,
+              "cc": -83.33333333333333,
+              "nll": 0.6567942127907035,
+              "ece": 0.11407235371463526,
+              "brier": 0.19372773170097343,
+              "abstentions": 660
+            },
+            "score": {
+              "n": 1040,
+              "cc": 34.75267097228931,
+              "nll": 1.3386683517816915,
+              "ece": 0.14188378871332924,
+              "brier": 0.6411881362750353,
+              "rps": 0.15972084357261684
+            }
+          },
+          "cc_equal_types": -6.225489913575378,
+          "proper_loss": 0.7135693291225106,
+          "p50_s": 0.192449588499926,
+          "p95_s": 0.2610173104500631,
+          "reasoning_tokens": 0
+        },
+        "calibrated_commit": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 29.904192620317883,
+              "nll": 1.3241929310042113,
+              "ece": 0.14862624507856748,
+              "brier": 0.5934808130201734
+            },
+            "noul": {
+              "n": 720,
+              "cc": 9.166666666666657,
+              "nll": 0.8466749307362765,
+              "ece": 0.2673984718040609,
+              "brier": 0.2694504945642028,
+              "abstentions": 0
+            },
+            "score": {
+              "n": 1040,
+              "cc": 34.75267097228931,
+              "nll": 1.3386683517816915,
+              "ece": 0.14188378871332924,
+              "brier": 0.6411881362750353,
+              "rps": 0.15972084357261684
+            }
+          },
+          "cc_equal_types": 24.607843419757952,
+          "proper_loss": 0.7768629017710348,
+          "p50_s": 0.192449588499926,
+          "p95_s": 0.2610173104500631,
+          "reasoning_tokens": 0
+        }
+      },
+      "input_sha256": {
+        "raw": "812238b807f690d3905ab45c342175b66b6fd8bf0bfa87b1e409c4c4c0d0349b",
+        "calibrated": "487911125da90628f8fb032c051ae9d100e31d74e7691745db53fb491eec71a9",
+        "calibration": "af9cbd15c892692a7eca43ad2265c650ec9eee75dc5f4466f4770596fa53cfda"
+      },
+      "calibrated_commit_delta": 30.83333333333333,
+      "calibrated_commit_paired": {
+        "fixed": 393,
+        "broken": 0,
+        "score_improved": 0,
+        "score_worsened": 0,
+        "score_count_tolerance": 1e-06,
+        "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+        "mean_nll_gain": -0.05116546291946731,
+        "cc_delta_95ci": [
+          27.268518518518515,
+          34.72222222222222
+        ],
+        "bootstrap_seed": 15,
+        "bootstrap_replicates": 2000,
+        "bootstrap_unit": "underlying_case",
+        "independent_cases": 495
+      },
+      "limitations": [
+        "existing ayaka checkpoint reads do not measure a new frozen letter-reader system",
+        "saved probabilities cannot recover saturated logits",
+        "report tags and disjoint rows do not cryptographically prove which inputs fitted temperatures",
+        "input metadata does not independently prove full prompt/candidate-string identity",
+        "stored latency is prior inference timing; postprocessing latency was not measured",
+        "policy development already examined dev; no promotion or sealed-inclusive claim"
+      ]
+    },
+    "pilot": {
+      "model_id": "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d",
+      "n": 2672,
+      "independent_cases": 495,
+      "calibration_n": 1664,
+      "calibration_independent_cases": 379,
+      "arms": {
+        "raw": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 28.437753135387293,
+              "nll": 1.484685866081619,
+              "ece": 0.1881284041550042,
+              "brier": 0.6204829594756592
+            },
+            "noul": {
+              "n": 720,
+              "cc": -57.5,
+              "nll": 0.8352796925712003,
+              "ece": 0.16128027172665169,
+              "brier": 0.222675264719011,
+              "abstentions": 497
+            },
+            "score": {
+              "n": 1040,
+              "cc": 37.48621429071133,
+              "nll": 1.5319362134891885,
+              "ece": 0.16683726428219905,
+              "brier": 0.6660921902443074,
+              "rps": 0.17152075009541243
+            }
+          },
+          "cc_equal_types": 2.807989142032875,
+          "proper_loss": 0.8304954362494105,
+          "p50_s": 0.19325906999938525,
+          "p95_s": 0.26619559520008784,
+          "reasoning_tokens": 0
+        },
+        "raw_commit": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 28.437753135387293,
+              "nll": 1.484685866081619,
+              "ece": 0.1881284041550042,
+              "brier": 0.6204829594756592
+            },
+            "noul": {
+              "n": 720,
+              "cc": 13.611111111111107,
+              "nll": 0.9638314661185614,
+              "ece": 0.28342121173239837,
+              "brier": 0.2737580144793085,
+              "abstentions": 0
+            },
+            "score": {
+              "n": 1040,
+              "cc": 37.48621429071133,
+              "nll": 1.5319362134891885,
+              "ece": 0.16683726428219905,
+              "brier": 0.6660921902443074,
+              "rps": 0.17152075009541243
+            }
+          },
+          "cc_equal_types": 26.511692845736576,
+          "proper_loss": 0.8733460274318642,
+          "p50_s": 0.19325906999938525,
+          "p95_s": 0.26619559520008784,
+          "reasoning_tokens": 0
+        },
+        "calibrated": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 28.437753135387293,
+              "nll": 1.3001867909691613,
+              "ece": 0.1417804405933768,
+              "brier": 0.5870064348649661
+            },
+            "noul": {
+              "n": 720,
+              "cc": -60.55555555555557,
+              "nll": 0.7295268015799989,
+              "ece": 0.1216805045313255,
+              "brier": 0.21021836588200785,
+              "abstentions": 522
+            },
+            "score": {
+              "n": 1040,
+              "cc": 37.38603987297314,
+              "nll": 1.330666193227763,
+              "ece": 0.13874925341726918,
+              "brier": 0.6350225853530601,
+              "rps": 0.15812047243912306
+            }
+          },
+          "cc_equal_types": 1.756079150934956,
+          "proper_loss": 0.7292780216627611,
+          "p50_s": 0.19325906999938525,
+          "p95_s": 0.26619559520008784,
+          "reasoning_tokens": 0
+        },
+        "calibrated_commit": {
+          "method": "jevbench-v1.5-headline-A-equal-types-local",
+          "official_composite": null,
+          "sealed": false,
+          "n": 2672,
+          "by_type": {
+            "choice": {
+              "n": 912,
+              "cc": 28.437753135387293,
+              "nll": 1.3001867909691613,
+              "ece": 0.1417804405933768,
+              "brier": 0.5870064348649661
+            },
+            "noul": {
+              "n": 720,
+              "cc": 13.611111111111107,
+              "nll": 0.8690639000449771,
+              "ece": 0.2750567219048422,
+              "brier": 0.2656701426211431,
+              "abstentions": 0
+            },
+            "score": {
+              "n": 1040,
+              "cc": 37.38603987297314,
+              "nll": 1.330666193227763,
+              "ece": 0.13874925341726918,
+              "brier": 0.6350225853530601,
+              "rps": 0.15812047243912306
+            }
+          },
+          "cc_equal_types": 26.47830137315718,
+          "proper_loss": 0.7757903878177538,
+          "p50_s": 0.19325906999938525,
+          "p95_s": 0.26619559520008784,
+          "reasoning_tokens": 0
+        }
+      },
+      "input_sha256": {
+        "raw": "398496d9000123eba7459d6f80c7952b2904dbdc205b87550b3dc9f9907e1154",
+        "calibrated": "c46776c1643154f6bb66dc8a7d70278d19a0c9a5af4282197a0730a7ab4b1063",
+        "calibration": "d539d80c1c94f9d3607bed98f50c5f7daa579a9869c1b0dd777d060f50a014ae"
+      },
+      "calibrated_commit_delta": 24.722222222222225,
+      "calibrated_commit_paired": {
+        "fixed": 297,
+        "broken": 0,
+        "score_improved": 0,
+        "score_worsened": 0,
+        "score_count_tolerance": 1e-06,
+        "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+        "mean_nll_gain": -0.03759981695164204,
+        "cc_delta_95ci": [
+          21.203703703703706,
+          28.37962962962963
+        ],
+        "bootstrap_seed": 15,
+        "bootstrap_replicates": 2000,
+        "bootstrap_unit": "underlying_case",
+        "independent_cases": 495
+      },
+      "limitations": [
+        "existing ayaka checkpoint reads do not measure a new frozen letter-reader system",
+        "saved probabilities cannot recover saturated logits",
+        "report tags and disjoint rows do not cryptographically prove which inputs fitted temperatures",
+        "input metadata does not independently prove full prompt/candidate-string identity",
+        "stored latency is prior inference timing; postprocessing latency was not measured",
+        "policy development already examined dev; no promotion or sealed-inclusive claim"
+      ]
+    }
+  },
+  "matched_raw_commit_checkpoint_comparison": {
+    "cc_delta": 1.7706641055829948,
+    "by_type": {
+      "choice": {
+        "n": 912,
+        "cc_delta": -1.4664394849305893,
+        "nll_delta": -0.06613405595209243,
+        "brier_delta": -0.02333911965933233,
+        "ece_delta": -0.034715642123899326,
+        "fixed": 45,
+        "broken": 55
+      },
+      "noul": {
+        "n": 720,
+        "cc_delta": 4.44444444444445,
+        "nll_delta": -0.01562992663420859,
+        "brier_delta": -0.016918312953099812,
+        "ece_delta": -0.0340750136059107,
+        "fixed": 40,
+        "broken": 24,
+        "transitions": {
+          "no->no": 483,
+          "no->yes": 64,
+          "yes->yes": 173
+        },
+        "argmax_credit_delta": 0.022222222222222223,
+        "abstention_credit_penalty_delta": 0.0,
+        "thresholded_credit_delta": 0.022222222222222223,
+        "decomposition": "thresholded credit = argmax credit - credit lost to abstention",
+        "nll_improved_but_cc_regressed": false
+      },
+      "score": {
+        "n": 1040,
+        "cc_delta": 2.3339873572351237,
+        "nll_delta": 0.007489285364210341,
+        "brier_delta": -0.013102973764285042,
+        "ece_delta": -0.012696658089183827,
+        "rps_delta": -0.002975855269368638,
+        "improved": 541,
+        "worsened": 379,
+        "count_tolerance": 1e-06
+      }
+    },
+    "paired": {
+      "fixed": 85,
+      "broken": 79,
+      "score_improved": 541,
+      "score_worsened": 379,
+      "score_count_tolerance": 1e-06,
+      "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+      "mean_nll_gain": 0.023869367300210293,
+      "cc_delta_95ci": [
+        -0.8447894293008756,
+        4.353384170322472
+      ],
+      "bootstrap_seed": 15,
+      "bootstrap_replicates": 2000,
+      "bootstrap_unit": "underlying_case",
+      "independent_cases": 495
+    },
+    "postprocessing": {
+      "lower": 0.199,
+      "upper": 0.801,
+      "tie_at_half": "yes"
+    },
+    "source_input_sha256": {
+      "parent": "812238b807f690d3905ab45c342175b66b6fd8bf0bfa87b1e409c4c4c0d0349b",
+      "pilot": "398496d9000123eba7459d6f80c7952b2904dbdc205b87550b3dc9f9907e1154"
+    }
+  },
+  "receipt_sha256": {
+    "parent.json": "cad1be7b589936097a561704de80aa202f52227553ba5ae0f3e90ee5c7b7edc9",
+    "pilot.json": "acc5f61428c734422b563455b7af1bdad664f7a668f2e60e53b7aed98f6c274f",
+    "checkpoints-raw-commit.json": "41e3c166b6c743c8d875925baa5567a045c0a034afdf2314382fdb5057ea9cc9"
+  },
+  "validation": {
+    "related_tests_passed": 25,
+    "swift_server_tests_passed": 13,
+    "integration_tests_passed": 633,
+    "integration_tests_skipped": 1,
+    "peer_review": "requested; no approval observed"
+  }
+}
