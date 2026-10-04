@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "datasets": [
+    {
+      "name": "v2_calibration",
+      "paths": ["runs/v2-pretraining-20261002-ready/calibration.jsonl"]
+    },
+    {
+      "name": "v2_dev",
+      "paths": ["runs/v2-pretraining-20261002-ready/dev.jsonl"]
+    },
+    {
+      "name": "cygnet_calibration",
+      "paths": ["ayaka/swift/data/cygnet_calibration_items.jsonl"],
+      "expected_items": 241
+    },
+    {
+      "name": "jevbench_public",
+      "paths": [
+        "ayaka/eval/data/jevbench_public/easy.jsonl",
+        "ayaka/eval/data/jevbench_public/hard.jsonl",
+        "ayaka/eval/data/jevbench_public/original.jsonl"
+      ],
+      "expected_items": 231
+    }
+  ],
+  "notices": [
+    "ayaka/swift/data/cygnet_LICENSE",
+    "ayaka/swift/data/cygnet_ATTRIBUTION.md",
+    "ayaka/eval/data/jevbench_public/LICENSE"
+  ]
+}
