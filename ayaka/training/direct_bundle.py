@@ -175,6 +175,7 @@ def _gold_verifier(splits, natural_registry, *, allow_tiny):
             raise ValueError("natural gold requires the pinned raw-source registry")
         if not natural_registry.local_files_verified and not allow_tiny:
             raise ValueError("injected natural raw fixtures are restricted to tiny CPU mechanics")
+        natural_registry.verify_files()
     elif natural_registry is not None:
         raise ValueError("unused natural registry does not belong to an authored-only bundle")
 
@@ -185,12 +186,16 @@ def _gold_verifier(splits, natural_registry, *, allow_tiny):
             else verify_authored_gold(sample, question)
         )
 
+    verify.verify_files = natural_registry.verify_files if natural else lambda: None
+    verify.natural_registry = natural_registry
+
     return verify, natural_registry.binding if natural else None
 
 
 @scoped_tokenizer_preparation
 def _context_audit(splits, tok, cfg, architecture, verify_gold, input_encoding=None):
     contexts = {}
+    verify_gold.verify_files()
     vocab_size = architecture["native_output_shape"][0]
     for split, samples in splits.items():
         rendered_rows = []
@@ -237,6 +242,7 @@ def _context_audit(splits, tok, cfg, architecture, verify_gold, input_encoding=N
             "rendered_rows_sha256": fingerprint(rendered_rows),
             "questions": len(rendered_rows),
         }
+    verify_gold.verify_files()
     return contexts
 
 
@@ -298,6 +304,7 @@ def _prepare(
         context_audit=contexts,
         workload=finite_workload(inventory, **schedule),
     )
+    verify_gold.verify_files()
     return items, report, inventory, groups
 
 
@@ -379,6 +386,7 @@ def prepare_bundle(
     verify_test_gold, _ = _gold_verifier(
         splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
     )
+    natural_registry = verify_test_gold.natural_registry
     test_context = _context_audit(
         {"test": splits["test"]}, tok, cfg, architecture, verify_test_gold, input_encoding
     )["test"]
@@ -450,6 +458,7 @@ def prepare_bundle(
         ],
     }
     verify_metadata(metadata, cfg.backbone, cfg.backbone_revision, path=native_root)
+    verify_test_gold.verify_files()
     root.mkdir(parents=True, exist_ok=False)
     for name, raw in payloads.items():
         (root / name).write_bytes(raw)
@@ -554,6 +563,10 @@ def audit_bundle(
         for split in DEVELOPMENT_SPLITS
     }
     teachers = json.loads((root / "teacher_reads.json").read_bytes())
+    verify_gold, _ = _gold_verifier(
+        splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
+    )
+    natural_registry = verify_gold.natural_registry
     items, report, inventory, groups = _prepare(
         splits,
         tok,
@@ -577,6 +590,7 @@ def audit_bundle(
     verify_metadata(
         recipe["native_metadata"], cfg.backbone, cfg.backbone_revision, path=native_root
     )
+    verify_gold.verify_files()
     return manifest, recipe, items, inventory, groups
 
 

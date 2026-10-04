@@ -324,7 +324,9 @@ def test_sparse_pairs_are_reported_and_other_split_public_duplicate_or_unanchore
         )
 
 
-def test_real_offline_cli_exports_authored_gold_with_saved_fast_tokenizer(tmp_path):
+@pytest.mark.parametrize("native_upload", [False, True])
+def test_real_offline_cli_exports_authored_gold_with_saved_fast_tokenizer(tmp_path, native_upload):
+    from ayaka.backbone import tiny_text_config
     from ayaka.data.reasoning_v2 import curriculum
 
     sample, _ = next(iter(curriculum("train", 1)))
@@ -342,6 +344,8 @@ def test_real_offline_cli_exports_authored_gold_with_saved_fast_tokenizer(tmp_pa
         paths[name] = tmp_path / (name + ".json")
         paths[name].write_bytes(raw)
     tok.hf.save_pretrained(tmp_path / "tokenizer")
+    if native_upload:
+        tiny_text_config().save_pretrained(tmp_path / "tokenizer")
     command = [sys.executable, "-m", "ayaka.training.teacher_artifacts"]
     for name, path in paths.items():
         command.extend(["--" + name, str(path)])
@@ -354,13 +358,18 @@ def test_real_offline_cli_exports_authored_gold_with_saved_fast_tokenizer(tmp_pa
             "--expected-paired-sha256",
             fingerprint(paired),
             "--mechanics-only",
-            "--mechanics-tokenizer",
+            "--native-path" if native_upload else "--mechanics-tokenizer",
             str(tmp_path / "tokenizer"),
             "--out",
             str(tmp_path / "export"),
         ]
     )
-    environment = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+    environment = {
+        **os.environ,
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_HOME": str(tmp_path / "empty-cache"),
+    }
     completed = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=90)
     assert completed.returncode == 0, completed.stderr
     report = json.loads((tmp_path / "export/receipt.json").read_bytes())
@@ -370,12 +379,20 @@ def test_real_offline_cli_exports_authored_gold_with_saved_fast_tokenizer(tmp_pa
     assert report["model_loaded"] is report["paid_execution_started"] is False
     assert report["mechanics_only"] and report["promotable"] is False
     assert "PRIVATE STEPS" not in json.dumps([teachers, report])
+    if native_upload:
+        assert set(report["native_metadata"]["files"]) >= {"config.json", "tokenizer.json"}
+        assert not (tmp_path / "empty-cache/hub").exists()
     repeated = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=90)
     assert repeated.returncode != 0 and "fresh directory" in repeated.stderr
     command[command.index(str(tmp_path / "export"))] = str(tmp_path / "rejected")
     command.remove("--mechanics-only")
     rejected = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=90)
-    assert rejected.returncode != 0 and "restricted to explicit random tiny" in rejected.stderr
+    assert rejected.returncode != 0
+    assert (
+        "tiny" in rejected.stderr
+        if native_upload
+        else "restricted to explicit random tiny" in rejected.stderr
+    )
     assert not (tmp_path / "rejected").exists()
 
 

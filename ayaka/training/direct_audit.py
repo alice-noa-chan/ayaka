@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..collate import EncodedQuestion
 from ..config import ElectraConfig
+from ..data.direct_natural import verify_raw_binding
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..prompt import RenderedQuestion
@@ -156,6 +157,9 @@ def audit_snapshot(
     ):
         raise ValueError("bundle/source/tokenizer changed during CPU audit; discard receipt")
     bundles.bound_native_root(cfg, recipe, native_path=native_root)
+    if natural_registry is not None:
+        natural_registry.verify_files()
+    verify_raw_binding(recipe["gold_sources"])
     binding = {
         "version": VERSION,
         "bundle_manifest_sha256": sha256(before[0]),
@@ -211,6 +215,9 @@ def create_audit_receipt(
     ):
         raise ValueError("audit receipt must be outside the native loader directory")
     raw = canonical(snapshot.binding) + b"\n"
+    if natural_registry is not None:
+        natural_registry.verify_files()
+    verify_raw_binding(snapshot.recipe["gold_sources"])
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("xb") as stream:
         stream.write(raw)

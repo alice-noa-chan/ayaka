@@ -20,6 +20,12 @@ from .schema import Candidate, Question, Sample
 from .transforms import HELPSTEER_LEVELS
 
 VERSION = "ayaka-raw-human-direct-gold-1"
+PINNED_RAW_SHA256 = {
+    "helpsteer2": "c0d7e91d738d42e8a08070db26c4c09a9c7631308e1f0fd380ff43d130c9f713",
+    "commonsense_qa": "b0449767ed986bfc2ca52b1244a46ef12f732756727f3cb0a4ab69ac8b3d282b",
+    "massive_ko": "3b5e11303fb75aa42d70b5be42b5052192c17911363388c8c15749f61a9c6d00",
+    "massive_ja": "90fb4b86ba1b6ff76d07deb21c9b4d08a5fba329e09f79c14ae64a5c01fb1c6e",
+}
 
 
 def local_raw_sources():
@@ -36,6 +42,9 @@ def local_raw_sources():
                 repo, filename, repo_type="dataset", revision=revision, local_files_only=True
             )
         )
+        expected = PINNED_RAW_SHA256[source]
+        if file_digest(path) != expected:
+            raise ValueError(f"raw human source differs from its pinned byte anchor: {source}")
         if filename.endswith(".gz"):
             with gzip.open(path, "rt", encoding="utf-8") as stream:
                 rows = [json.loads(line) for line in stream if line.strip()]
@@ -47,13 +56,19 @@ def local_raw_sources():
         result[source] = {
             "rows": rows,
             "features": features,
+            "local_path": path,
             "provenance": {
                 "repo": repo,
                 "revision": revision,
                 "file": filename,
-                "sha256": file_digest(path),
+                "sha256": expected,
             },
         }
+        if file_digest(path) != expected:
+            raise ValueError(f"raw human source changed during parsing: {source}")
+    for source, data in result.items():
+        if file_digest(data["local_path"]) != PINNED_RAW_SHA256[source]:
+            raise ValueError(f"raw human source changed during collection: {source}")
     return result
 
 
@@ -67,6 +82,40 @@ def _ordinal_target(value):
         else (high - value if i == low else value - low if i == high else 0.0)
         for i in range(5)
     }
+
+
+def verify_raw_binding(binding):
+    """Recheck bound cached files without reparsing the complete human corpus."""
+    if binding is None:
+        return
+    if binding.get("version") != VERSION or type(binding.get("local_files_verified")) is not bool:
+        raise ValueError("unsupported raw human file binding")
+    if binding["local_files_verified"] is False:
+        if binding.get("scope") != "injected CPU fixture only":
+            raise ValueError("raw fixture binding must retain its explicit mechanics scope")
+        return
+    if binding.get("local_files_verified") is not True or set(binding.get("sources", {})) != set(
+        SOURCES
+    ):
+        raise ValueError("raw human source inventory changed")
+    from huggingface_hub import hf_hub_download
+
+    from ..training.direct_state import file_digest
+
+    for source, (repo, revision, filename, _) in SOURCES.items():
+        expected = {
+            "repo": repo,
+            "revision": revision,
+            "file": filename,
+            "sha256": PINNED_RAW_SHA256[source],
+        }
+        if binding["sources"][source] != expected:
+            raise ValueError(f"raw human file binding differs from pinned policy: {source}")
+        path = hf_hub_download(
+            repo, filename, repo_type="dataset", revision=revision, local_files_only=True
+        )
+        if file_digest(path) != expected["sha256"]:
+            raise ValueError(f"raw human source changed after validation: {source}")
 
 
 def _intent_description(ontology, index, language):
@@ -116,6 +165,37 @@ class NaturalGoldRegistry:
             if self.local_files_verified
             else "injected CPU fixture only",
         }
+        self._memory_sha256 = self._memory_identity()
+
+    def _memory_identity(self):
+        return fingerprint(
+            {
+                "local_files_verified": self.local_files_verified,
+                "binding": self.binding,
+                "sources": {
+                    source: {key: data[key] for key in ("rows", "features", "provenance")}
+                    for source, data in self.raw.items()
+                },
+            }
+        )
+
+    def verify_files(self):
+        """Recheck actual anchored raw bytes before committing prepared outputs."""
+        if self._memory_identity() != self._memory_sha256:
+            raise ValueError("parsed human sources or bindings changed after validation")
+        if not self.local_files_verified:
+            return
+        from ..training.direct_state import file_digest
+
+        if set(self.raw) != set(SOURCES):
+            raise ValueError("raw human source inventory changed")
+        for source, data in self.raw.items():
+            expected = PINNED_RAW_SHA256[source]
+            if (
+                data["provenance"]["sha256"] != expected
+                or file_digest(data["local_path"]) != expected
+            ):
+                raise ValueError(f"raw human source changed after validation: {source}")
 
     def _row(self, source, index):
         if (

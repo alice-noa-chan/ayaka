@@ -522,6 +522,9 @@ def main(argv=None):
     )
     parser.add_argument("--mechanics-only", action="store_true")
     parser.add_argument(
+        "--native-path", type=Path, help="complete offline native model/tokenizer package"
+    )
+    parser.add_argument(
         "--mechanics-tokenizer",
         type=Path,
         help="saved local fast tokenizer, required only for random tiny mechanics; never a model override",
@@ -538,6 +541,13 @@ def main(argv=None):
     from .direct_bundle import _gold_verifier, local_tokenizer
 
     cfg = ElectraConfig(**json.loads(args.config.read_bytes()))
+    from .native_metadata import inspect_metadata, verify_metadata
+
+    if args.native_path is not None and args.mechanics_tokenizer is not None:
+        raise ValueError("native-path and mechanics-tokenizer cannot be combined")
+    metadata, native_root = inspect_metadata(
+        cfg.backbone, cfg.backbone_revision, path=args.native_path
+    )
     if args.mechanics_tokenizer is not None:
         if not args.mechanics_only or cfg.backbone != "tiny":
             raise ValueError(
@@ -550,14 +560,19 @@ def main(argv=None):
         from ..tokenization import HFTokenizer
 
         tok = HFTokenizer(
-            AutoTokenizer.from_pretrained(args.mechanics_tokenizer, local_files_only=True), "tiny"
+            AutoTokenizer.from_pretrained(
+                args.mechanics_tokenizer, local_files_only=True, trust_remote_code=False
+            ),
+            "tiny",
         )
     else:
-        if cfg.backbone == "tiny":
+        if cfg.backbone == "tiny" and args.native_path is None:
             raise ValueError(
                 "Swift tiny mechanics requires --mechanics-only and --mechanics-tokenizer"
             )
-        tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only)
+        tok = local_tokenizer(
+            cfg, allow_tiny=args.mechanics_only, native_path=native_root, expected_metadata=metadata
+        )
     verify, sources = _gold_verifier({"train": samples}, None, allow_tiny=args.mechanics_only)
 
     def reads(path):
@@ -582,10 +597,19 @@ def main(argv=None):
         paid_execution_started=False,
         model_loaded=False,
         optimizer_steps=0,
+        native_metadata=metadata,
     )
+    payloads = {
+        "teacher_reads.json": canonical(teachers) + b"\n",
+        "receipt.json": canonical(report) + b"\n",
+    }
+    verify_metadata(metadata, cfg.backbone, cfg.backbone_revision, path=native_root)
+    if args.train.read_bytes() != raw:
+        raise ValueError("train corpus changed during teacher export")
+    verify.verify_files()
     args.out.mkdir(parents=True, exist_ok=False)
-    (args.out / "teacher_reads.json").write_bytes(canonical(teachers) + b"\n")
-    (args.out / "receipt.json").write_bytes(canonical(report) + b"\n")
+    for name, payload in payloads.items():
+        (args.out / name).write_bytes(payload)
     print(
         json.dumps(
             {
