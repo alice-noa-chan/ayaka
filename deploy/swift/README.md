@@ -15,10 +15,11 @@ The experimental candidate-generation extension below is outside the fixed-candi
 ## Run
 
 One 48 GB GPU (TBD: cards measured). The model must be readable from the Hugging Face cache or the Hub.
+Set `AYAKA_API_KEY` to the local key used by clients before exposing the container.
 
 ```bash
 docker build -f deploy/swift/Dockerfile -t ayaka-swift .
-docker run --gpus all -p 8009:8009 -e HOST=0.0.0.0 \
+docker run --gpus all -p 8009:8009 -e HOST=0.0.0.0 -e AYAKA_API_KEY \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface" ayaka-swift
 ```
 
@@ -28,7 +29,8 @@ Without Docker: `pip install vllm==0.30.0 && pip install --no-deps -e .`, then
 Warm up until this returns HTTP 200:
 
 ```bash
-curl -s http://127.0.0.1:8009/v1/systemone -H 'Content-Type: application/json' -d '{"state": "warm-up",
+curl -s http://127.0.0.1:8009/v1/systemone -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer ${AYAKA_API_KEY:-}" -d '{"state": "warm-up",
   "questions": {"decision": {"type": "noul", "instructions": "Is this a warm-up?",
   "criteria": {"false": "no", "true": "yes"}}}}'
 ```
@@ -38,8 +40,8 @@ Then run the harness:
 ```bash
 python3 -m jevbench.cli run \
   --tasks <JEVBENCH>/datasets/public/easy.jsonl,<JEVBENCH>/datasets/public/original.jsonl,<JEVBENCH>/datasets/public/hard.jsonl \
-  --adapter typesafe --endpoint http://127.0.0.1:8009 --key-env '' \
-  --model ayaka-swift --cost-basis self_hosted_gpu --reserve-usd 0 \
+  --adapter typesafe --endpoint http://127.0.0.1:8009 --key-env AYAKA_API_KEY \
+  --model jev-latest --cost-basis self_hosted_gpu --reserve-usd 0 \
   --results <OUT>/results.jsonl --raw-dir <OUT>/raw --ledger <OUT>/ledger.jsonl --manifest <OUT>/manifest.json \
   --run-label ayaka-swift --delay-s 0
 ```
@@ -48,8 +50,11 @@ python3 -m jevbench.cli run \
 
 ## Status codes
 
-422 for an input the system does not take (over the context limit, an unknown question type, a reasoning budget,
-non-uniform Score levels); 502 when vLLM fails; 400 for a body that is not JSON.
+422 for an invalid body or field (an unknown model/question type, a reasoning budget,
+non-uniform Score levels), including malformed JSON. Missing/invalid keys return 401;
+full request admission returns 429 with `retry-after`; backend queue overload returns 529;
+backend failures return 502; deadlines return 504. Every response includes a fresh
+`x-typesafe-request-id` UUID.
 
 ## Experimental Choice candidate generation
 
@@ -58,7 +63,7 @@ the benchmark always uses fixed candidates.** The Swift implementation follows t
 text proposal/partition rules in [the v2 API](../../docs/MULTIMODAL_AND_CANDIDATES.md),
 with the namespace and reasoning differences described here.
 
-No policy, or `{"mode":"fixed"}`, preserves the ordinary response bytes and makes
+No policy, or `{"mode":"fixed"}`, preserves the ordinary inference path and makes
 zero extra backend calls. Generation is opt-in for each Choice question. Prefer
 top-level `ayaka.questions.<question id>.candidate_generation`; the official TypeSafe
 SDK can send this object through `extra_body`. The legacy per-question
@@ -187,3 +192,82 @@ downloads or generation-quality measurements are needed.
 
 `python deploy/swift/harness_smoke.py --jevbench <JEVBENCH>` runs JevBench's own `typesafe` adapter and scorer
 against the Swift server with a fake reader. All 231 public items return valid answers (scores are meaningless).
+
+
+## Official SDK compatibility and service controls
+
+Both `ayaka.swift.server` and `ayaka.serve` accept `jev-latest`, `jev-preview`, the
+served name, and the configured versioned `--model-id`. These aliases enable SDK
+drop-in use; Ayaka is an independent model and does not claim to be Jev. Set
+`--model-id ayaka-swift-<release>` for a deployed version, with
+`--model-description` and `--model-release-date` for `/v1/models`. The response
+always identifies the actual served version, regardless of the requested alias.
+`GET /v1/models` returns `{"models":[{"name":...,"description":...,"release_date":...}]}`.
+
+Install the optional test/client extra with `pip install -e ".[sdk-compat]"`.
+The ordinary official SDK retains its standard fields. `ayaka.client` subclasses
+its response models to retain top-level and per-answer `ayaka` metadata:
+
+```python
+from typesafe_sdk import Choice, TypeSafeClient
+from ayaka.client import AyakaResponse, system_one
+
+with TypeSafeClient(api_key="local-key", base_url="http://127.0.0.1:8009") as client:
+    result = system_one(
+        client,
+        "An invoice",
+        {"kind": Choice(criteria={"invoice": None, "other": None})},
+        ayaka={"reasoning": {"mode": "off"}},
+    )
+    print(result.answers["kind"].confidence, result.answers["kind"].ayaka)
+    # Equivalent official call:
+    result = client.system_one(
+        "An invoice",
+        {"kind": Choice(criteria={"invoice": None, "other": None})},
+        extra_body={"ayaka": {"reasoning": {"mode": "off"}}},
+        response_model=AyakaResponse,
+    )
+```
+
+Instructions and criteria accept strings, objects and arrays. Structured prompt
+values are compact JSON; Score legends preserve each supplied level description.
+Choice supports 2–255 options and Score 2–10 levels. Choice confidence measures
+excess above uniform probability; Score confidence measures spread about the first
+modal level against the uniform mean absolute deviation. Noul has no separate
+confidence field. These formulas live only in `ayaka.jev_api`, including after
+candidate expansion merges its final joint distribution.
+
+All HTTP extension diagnostics and usage breakdowns live under `ayaka`. Preferred
+request settings are `ayaka.reasoning`, `ayaka.media`, and
+`ayaka.questions.<name>.{reasoning,candidate_generation}`. Historical request aliases
+remain accepted; conflicting duplicates return 422. Internal v1 Python callers
+retain their existing diagnostic aliases. Per-answer calibration is `fitted`,
+`unfitted`, `unvalidated_generated_partition`, or `unvalidated_image`.
+
+`--api-key-env NAME` defaults to `AYAKA_API_KEY`. A nonempty key requires Bearer
+authentication on POST and `/v1/models`. `/health` remains open. Non-loopback binds
+require a key unless `--allow-no-key` is explicit. `--max-inflight` defaults to 32
+and `--request-timeout-s` to 60. Admission remains occupied until timed-out backend
+work finishes; a deadline cannot cancel an already-running model call. `/metrics`
+returns stdlib Prometheus counters, latency buckets and token totals, with bounded
+labels and no request content or IDs. A timed-out inference's actual token spend
+is counted when it finishes. v1 idempotency replay continues to avoid repeated
+inference and token accounting; cache conflicts remain 409.
+
+## Experimental Swift image input
+
+Jev itself is text-only. Swift additionally accepts the image contract in
+[the multimodal API](../../docs/MULTIMODAL_AND_CANDIDATES.md) through `ayaka.media`
+or its `media` alias: 1–4 base64 PNG/JPEG/WebP images, 8 MiB each, 16 MiB total,
+single frames with at most 16 million pixels each, and a 24 MiB HTTP limit.
+Pillow validates MIME, decoding and orientation before inference. Swift forwards
+images to the same vLLM backend as data-URI image content parts. Remote URLs and
+local paths are rejected. The configured backend/model must support images;
+Swift's local HF reader does not support this extension.
+
+Image answers report `ayaka.calibration="unvalidated_image"`. Text temperatures,
+position bias, commitment and reasoning routing are disabled for the image request.
+Image-expanded token counts come from vLLM; the text-only prefix equality check
+remains in force for text requests. Image perception, canonical token behavior and
+calibration on the pretrained backend remain unmeasured; CPU tests verify transport
+and bookkeeping only. Generated partitions remain text-only.

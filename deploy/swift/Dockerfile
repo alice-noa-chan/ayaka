@@ -1,6 +1,6 @@
 # Ayaka Swift: frozen google/gemma-4-12B-it, one-token canonical letter readout, fitted decision policy.
 #   docker build -f deploy/swift/Dockerfile -t ayaka-swift .
-#   docker run --gpus all -p 8009:8009 -e HOST=0.0.0.0 -v $HF_HOME:/root/.cache/huggingface ayaka-swift
+#   docker run --gpus all -p 8009:8009 -e HOST=0.0.0.0 -e AYAKA_API_KEY -v $HF_HOME:/root/.cache/huggingface ayaka-swift
 FROM vllm/vllm-openai:v0.30.0@sha256:8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90
 
 WORKDIR /opt/ayaka

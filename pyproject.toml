@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+sdk-compat = ["typesafe-sdk==0.7.2"]
 data = ["datasets>=3.0"]
 beam = ["beam-client>=0.2.200"]
 vision = ["pillow>=10.4", "torchvision>=0.21,<1", "transformers>=5.17,<6"]
