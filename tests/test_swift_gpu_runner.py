@@ -437,6 +437,8 @@ def runner_fixture(
     failure=None,
     cap_after_p1=False,
     with_lora_arm=False,
+    with_matched_2x2=False,
+    native_seconds=0,
     max_minutes=125,
     allow_partial=False,
     started=100.0,
@@ -487,6 +489,27 @@ def runner_fixture(
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         datasets.append({"name": name, "paths": [str(path)]})
     manifest = {"group_size": 20, "datasets": list(reversed(datasets))}
+    if with_matched_2x2:
+        from scripts.swift import matched_2x2
+
+        public_rows = [
+            json.loads(line)
+            for line in (tmp_path / "jevbench_public.jsonl").read_text().splitlines()
+        ]
+        monkeypatch.setattr(
+            matched_2x2,
+            "public_items",
+            lambda directory: {
+                row["id"]: {
+                    "tier": "standard",
+                    "type": row["question"]["type"],
+                    "family": "?",
+                    "expected": row["expected"],
+                    "labels": row["labels"],
+                }
+                for row in public_rows
+            },
+        )
     events, active, commands = [], [], []
     current = [None]
 
@@ -518,6 +541,51 @@ def runner_fixture(
                 current[0] = command[offset + 1]
                 Path(command[offset + 3]).write_text(
                     json.dumps({"model": current[0], "revision": "a" * 40})
+                )
+            elif "--prepare-checkpoint" in command:
+                assert not active
+                output = Path(command[command.index("--output") + 1])
+                adapter = output / "swift_adapter"
+                adapter.mkdir(parents=True)
+                (adapter / "adapter_config.json").write_text(
+                    json.dumps(
+                        {
+                            "base_model_name_or_path": "first",
+                            "revision": "a" * 40,
+                        }
+                    )
+                )
+                (adapter / "adapter_model.safetensors").write_bytes(b"CPU fake adapter")
+                (output / "checkpoint.json").write_text(
+                    json.dumps(
+                        {
+                            "checkpoint_path": str(output / "native_snapshot"),
+                            "swift_adapter_path": str(adapter),
+                        }
+                    )
+                )
+                events.append(("prepare_matched_checkpoint",))
+            elif "--cell" in command:
+                assert not active, "vLLM must exit before either native HF load"
+                output = Path(command[command.index("--output") + 1])
+                output.mkdir(parents=True)
+                cell = command[command.index("--cell") + 1]
+                events.append(("native", cell))
+                now[0] += native_seconds
+                self.remaining()
+                (output / "results.jsonl").write_text(
+                    "".join(
+                        json.dumps(
+                            {
+                                "id": row["id"],
+                                "pred": row["expected"],
+                                "expected": row["expected"],
+                                "ok": True,
+                            }
+                        )
+                        + "\n"
+                        for row in public_rows
+                    )
                 )
             elif any(str(part).endswith("parity.py") for part in command):
                 if priority_seconds:
@@ -661,6 +729,7 @@ def runner_fixture(
         concurrency=3,
         prompt_variants=list(gpu_runner.FIXED_VARIANTS),
         with_lora_arm=with_lora_arm,
+        with_matched_2x2=with_matched_2x2,
         lora_path=tmp_path / "adapter",
         lora_revision="b" * 40,
     )
@@ -695,7 +764,7 @@ def test_runner_reference_exit_before_vllm_and_parity_aborts_bulk(tmp_path, monk
             assert diagnostic["samples"]
         return
     assert progress["status"] == "complete"
-    assert [p["status"] for p in progress["priorities"]] == ["complete"] * 5 + ["skipped"]
+    assert [p["status"] for p in progress["priorities"]] == ["complete"] * 5 + ["skipped"] * 2
     assert len([e for e in events if e[0] == "probe"]) == 4
     assert {e[1] for e in events if e[0] == "probe"} >= set(progress["best_two_variants"])
     assert ("reasoning_fit",) in events and ("reasoning_gate",) in events
@@ -726,6 +795,7 @@ def test_runner_last_command_at_deadline_is_incomplete_and_later_priorities_skip
         "skipped",
         "skipped",
         "skipped",
+        "skipped",
     ]
     assert len([e for e in events if e[0] == "collect"]) == 16
     assert not any(e[0] == "probe" for e in events)
@@ -742,6 +812,41 @@ def test_optional_lora_arm_only_runs_with_flag_and_records_adapter_hash(tmp_path
     assert len(arm["adapter_sha256"]) == 64
     assert arm["revision"] == "a" * 40 and arm["adapter_revision"] == "b" * 40
     assert sum("--lora-modules" in command for command in commands) == 1
+    command = next(c for c in commands if "--lora-modules" in c)
+    assert command[command.index("--max-lora-rank") + 1] == "64"
+
+
+def test_matched_p4_selected_public_variant_then_sequential_native_cells(tmp_path, monkeypatch):
+    code, args, events, commands = runner_fixture(
+        tmp_path, monkeypatch, with_matched_2x2=True, max_minutes=144
+    )
+    assert code == 0
+    state = json.loads((args.output / "progress.json").read_text())
+    assert all(p["status"] == "complete" for p in state["priorities"])
+    arm_reads = [e for e in events if e[0] == "collect" and e[1] == "ayaka-large-swift"]
+    assert arm_reads == [
+        ("collect", "ayaka-large-swift", "jevbench_public", state["matched_variant"])
+    ]
+    native = [e for e in events if e[0] == "native"]
+    assert native == [("native", "frozen_native"), ("native", "lora_native")]
+    assert events.index(arm_reads[0]) < events.index(native[0]) < events.index(native[1])
+    receipt = json.loads((args.output / "matched_2x2/input_files.json").read_text())
+    assert receipt["complete"] and receipt["used_for_gates"] is False
+    assert set(receipt["sha256"]) == {"frozen_native", "frozen_swift", "lora_native", "lora_swift"}
+    assert sum("--prepare-checkpoint" in command for command in commands) == 1
+
+
+def test_p5_timeout_retains_diagnostic_inputs_and_respects_absolute_cap(tmp_path, monkeypatch):
+    code, args, events, _ = runner_fixture(
+        tmp_path, monkeypatch, with_matched_2x2=True, max_minutes=144, native_seconds=19 * 60
+    )
+    assert code == 124
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["priorities"][-1]["status"] == "timeout"
+    assert state["priorities"][-1]["work_deadline_elapsed_s"] <= 144 * 60 - 120
+    assert [e for e in events if e[0] == "native"] == [("native", "frozen_native")]
+    receipt = json.loads((args.output / "matched_2x2/input_files.json").read_text())
+    assert receipt["complete"] is False and receipt["used_for_fit_or_selection"] is False
 
 
 def test_reference_failure_keeps_invalid_artifact_and_never_starts_vllm(tmp_path, monkeypatch):
@@ -760,7 +865,7 @@ def test_admission_includes_environment_all_enabled_work_loads_and_cleanup():
     assert admission["planned_minutes"] == 105
     assert admission["environment_prep_minutes"] == 3
     assert admission["cleanup_reserve_seconds"] == 120
-    assert [p["load_minutes"] for p in admission["priorities"]] == [5, 0, 0, 0, 5, 5]
+    assert [p["load_minutes"] for p in admission["priorities"]] == [5, 0, 0, 0, 5, 5, 4]
     assert admission["refused"] and not any(p["admitted"] for p in admission["priorities"])
     assert gpu_runner.admission_plan(models, 125, with_lora_arm=True)["planned_minutes"] == 125
 
@@ -823,7 +928,9 @@ def test_r15_counterexample_60_second_cap_never_extends_any_deadline(tmp_path, m
     assert state["status"] == "partial"
     assert state["hard_deadline_elapsed_s"] == 60
     assert state["finished_steps"] == []
-    assert [p["skip_reason"] for p in state["priorities"]] == ["not_admitted"] * 5 + ["disabled"]
+    assert [p["skip_reason"] for p in state["priorities"]] == ["not_admitted"] * 5 + [
+        "disabled"
+    ] * 2
 
 
 def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypatch):
@@ -841,10 +948,10 @@ def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypa
     )
     assert code == 0
     initial = initial_states[0]
-    assert [p["status"] for p in initial["priorities"]] == ["pending"] + ["skipped"] * 5
+    assert [p["status"] for p in initial["priorities"]] == ["pending"] + ["skipped"] * 6
     assert [p["skip_reason"] for p in initial["priorities"]] == [None] + ["not_admitted"] * 4 + [
         "disabled"
-    ]
+    ] * 2
     state = json.loads((args.output / "progress.json").read_text())
     assert state["status"] == "partial" and state["priorities"][0]["status"] == "complete"
     assert not any(e[0] in ("collect", "probe") for e in events)

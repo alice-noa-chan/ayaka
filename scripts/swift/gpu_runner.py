@@ -33,6 +33,12 @@ from scripts.swift.inputs import (  # noqa: E402
     sha256,
 )
 from scripts.swift.latency_probe import write_json  # noqa: E402
+from scripts.swift.matched_native import (  # noqa: E402
+    BASE_REVISION,
+    CHECKPOINT,
+    CHECKPOINT_REVISION,
+    native_command,
+)
 from scripts.swift.parity import CENTERED_LOG_MASS_MAX_ABS_NATS, COHORT  # noqa: E402
 
 VLLM_VERSION = "0.30.0"
@@ -40,7 +46,7 @@ GEMMA_12B_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
 DEFAULT_KWARGS = {"enable_thinking": False}
 # Planning estimates, not measured throughput. Loads are additional to priority
 # work: each new model/adapter needs an HF reference and a fresh vLLM server.
-PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P1R": 20, "P2": 5, "P3": 20, "P4": 15}
+PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P1R": 20, "P2": 5, "P3": 20, "P4": 15, "P5": 15}
 ENVIRONMENT_PREP_MINUTES = 3
 HF_LOAD_MINUTES = 2
 VLLM_LOAD_MINUTES = 3
@@ -79,6 +85,8 @@ def model_options(path: Path | None, models: list[dict]) -> dict:
         "--override-generation-config",
         "--enable-lora",
         "--lora-modules",
+        "--max-lora-rank",
+        "--lora-dtype",
         "--dtype",
         "--max-model-len",
         "--gpu-memory-utilization",
@@ -168,7 +176,7 @@ def serve_command(model: dict, port: int, options: dict) -> list[str]:
     ]
 
 
-def priority_plan(models, *, with_lora_arm=False):
+def priority_plan(models, *, with_lora_arm=False, with_matched_2x2=False):
     primary = models[0]["model"]
     secondary = models[1]["model"] if len(models) > 1 else "<E4B omitted>"
     return [
@@ -205,21 +213,37 @@ def priority_plan(models, *, with_lora_arm=False):
         {
             "id": "P4",
             "minutes": PRIORITY_MINUTES["P4"],
-            "enabled": with_lora_arm,
-            "work": "optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer (--with-lora-arm)",
+            "enabled": with_lora_arm or with_matched_2x2,
+            "work": "published ayaka-large LoRA, selected P1 variant, 231 public Swift reads; DIAGNOSTIC ONLY"
+            if with_matched_2x2
+            else "optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer (--with-lora-arm)",
+        },
+        {
+            "id": "P5",
+            "minutes": PRIORITY_MINUTES["P5"],
+            "enabled": with_matched_2x2,
+            "work": "stop vLLM/free GPU memory -> sequential frozen + published v1 native HF bf16, context=8192, 231 public items each; DIAGNOSTIC ONLY, never selection/gates",
         },
     ]
 
 
-def admission_plan(models, minutes, *, with_lora_arm=False, allow_partial=False):
+def admission_plan(
+    models, minutes, *, with_lora_arm=False, with_matched_2x2=False, allow_partial=False
+):
     """Admit only a prefix whose estimated setup, loads, work and cleanup fit."""
     if not math.isfinite(minutes) or minutes <= 0:
         raise ValueError("max minutes must be finite and positive")
-    priorities = priority_plan(models, with_lora_arm=with_lora_arm)
+    priorities = priority_plan(
+        models, with_lora_arm=with_lora_arm, with_matched_2x2=with_matched_2x2
+    )
     overhead = ENVIRONMENT_PREP_MINUTES + CLEANUP_RESERVE_SECONDS / 60
     for priority in priorities:
         priority["load_minutes"] = (
-            HF_LOAD_MINUTES + VLLM_LOAD_MINUTES if priority["id"] in ("P0", "P3", "P4") else 0
+            2 * HF_LOAD_MINUTES
+            if priority["id"] == "P5"
+            else HF_LOAD_MINUTES + VLLM_LOAD_MINUTES
+            if priority["id"] in ("P0", "P3", "P4")
+            else 0
         )
         priority["total_minutes"] = priority["minutes"] + priority["load_minutes"]
     total = overhead + sum(p["total_minutes"] for p in priorities if p["enabled"])
@@ -269,13 +293,23 @@ def plan(
     variants=FIXED_VARIANTS,
     *,
     with_lora_arm=False,
+    with_matched_2x2=False,
     allow_partial=False,
 ):
     admission = admission_plan(
-        models, minutes, with_lora_arm=with_lora_arm, allow_partial=allow_partial
+        models,
+        minutes,
+        with_lora_arm=with_lora_arm,
+        with_matched_2x2=with_matched_2x2,
+        allow_partial=allow_partial,
     )
     lines = [
-        f"Prerequisites already installed: vllm=={VLLM_VERSION}; locally cached models/tokenizers (no automatic installs/downloads)",
+        f"Prerequisites already installed: vllm=={VLLM_VERSION}; locally cached models/tokenizers "
+        + (
+            "(only the matched P4 checkpoint may be fetched; no installs)"
+            if with_matched_2x2
+            else "(no automatic installs/downloads)"
+        ),
         f"Absolute wall-clock cap: {minutes:g} minutes; stop unfinished priorities at their capped deadline",
         f"Cleanup/pack reserve: {CLEANUP_RESERVE_SECONDS}s inside the cap; every work deadline <= hard deadline minus reserve",
         "Time budget table / pre-launch admission (minutes; estimates, no GPU measurements):",
@@ -323,6 +357,28 @@ def plan(
         "Output: HF references, parity.json, load_times.json, variant reads, top-two latency, selection, env.txt, progress.json; out.tar.zst + SHA256 includes partials"
     )
     lines.append(f"Per-model/variant inventory: {decisions} decisions, {reads} model reads")
+    if with_matched_2x2:
+        lines += [
+            "Matched 2x2 implies P4; public items were seen before: this explains a gap, selects nothing, and never enters fitting/selection/gates.",
+            f"P4 fetches only {CHECKPOINT}@{CHECKPOINT_REVISION} on the GPU job; base/tokenizer remain cached at {BASE_REVISION}.",
+            "P4 matched arm: selected P1 variant, adapter-only Swift raw letter probabilities; detached-text adapter keys are renamed for the full HF/vLLM LM, payload unchanged.",
+            "P5: 462 native decisions (two cells x 231); 15 work + 4 HF load minutes. Process exit frees each native model before the next loads.",
+            "Native frozen config is pinned hybrid with zero gates (effective LM on labeled items); native v1 checkpoint also restores head/gates/temperatures.",
+        ]
+        for cell in ("frozen_native", "lora_native"):
+            lines.append(
+                "  "
+                + shlex.join(
+                    native_command(
+                        cell,
+                        Path("<published pinned checkpoint snapshot>"),
+                        Path("out/matched_2x2") / cell / "report.json",
+                    )
+                )
+            )
+        lines.append(
+            "Output: matched_2x2/input_files.json, native results.jsonl/report.json/load_times.json with exact CLI argv and revisions; partials retained"
+        )
     return "\n".join(lines)
 
 
@@ -616,6 +672,7 @@ def execute(args, models, manifest, started, options):
         models,
         args.max_minutes,
         with_lora_arm=getattr(args, "with_lora_arm", False),
+        with_matched_2x2=getattr(args, "with_matched_2x2", False),
         allow_partial=getattr(args, "allow_partial", False),
     )
     require_admission(admission, args.max_minutes)
@@ -646,6 +703,7 @@ def execute(args, models, manifest, started, options):
     gpu = "unavailable (preflight/startup interrupted)"
     backend_url = f"http://127.0.0.1:{args.vllm_port}"
     active_model = None
+    matched_checkpoint = None
 
     def checkpoint(step=None):
         if step:
@@ -785,6 +843,8 @@ def execute(args, models, manifest, started, options):
         if model.get("lora_path"):
             command += [
                 "--enable-lora",
+                "--max-lora-rank",
+                "64",
                 "--lora-modules",
                 model["served_model"] + "=" + model["lora_path"],
             ]
@@ -1054,6 +1114,93 @@ def execute(args, models, manifest, started, options):
             model["slug"] + "/reasoning_fit",
         )
 
+    def collect_matched_swift(arm):
+        start_model(arm)
+        variant = json.loads((args.output / models[0]["slug"] / "policy.json").read_text())[
+            "prompt_variant"
+        ]
+        public = next(d for d in manifest["datasets"] if d["name"] == "jevbench_public")
+        directory = args.output / arm["slug"] / variant
+        directory.mkdir(exist_ok=True)
+        run(
+            [
+                sys.executable,
+                "-m",
+                "ayaka.swift.collect",
+                *public["paths"],
+                "--output",
+                str(directory / "jevbench_public.reads.jsonl"),
+                "--prompt-variant",
+                variant,
+                *reader_flags(arm),
+                "--concurrency",
+                str(args.concurrency),
+                "--diagnostic",
+            ],
+            directory / "collect.log",
+            "P4/matched_public_swift",
+        )
+        state["matched_variant"] = variant
+        checkpoint(state["current_step"])
+
+    def collect_matched_native():
+        nonlocal active_model
+        from scripts.swift.matched_2x2 import NOTICE, load_cell, public_items
+
+        supervisor.stop()
+        active_model = None
+        if matched_checkpoint is None:
+            raise RuntimeError("P5 requires P4's published checkpoint receipt")
+        directory = args.output / "matched_2x2"
+        directory.mkdir(exist_ok=True)
+        variant = state["matched_variant"]
+        paths = {
+            "frozen_native": directory / "frozen_native/results.jsonl",
+            "frozen_swift": args.output
+            / models[0]["slug"]
+            / variant
+            / "jevbench_public.reads.jsonl",
+            "lora_native": directory / "lora_native/results.jsonl",
+            "lora_swift": args.output
+            / "ayaka_large_lora"
+            / variant
+            / "jevbench_public.reads.jsonl",
+        }
+        receipt = {
+            "complete": False,
+            "role": "diagnostic",
+            "notice": NOTICE,
+            "used_for_fit_or_selection": False,
+            "used_for_gates": False,
+            "prompt_variant": variant,
+            "swift_probability_source": "raw_probs (direct letter readout)",
+            "base_revision": BASE_REVISION,
+            "checkpoint_revision": CHECKPOINT_REVISION,
+            "files": {name: str(path) for name, path in paths.items()},
+        }
+        write_json(directory / "input_files.json", receipt)
+        for cell in ("frozen_native", "lora_native"):
+            # Blocking child exit releases model/allocator/CUDA context before the next cell.
+            run(
+                [
+                    sys.executable,
+                    str(REPO / "scripts/swift/matched_native.py"),
+                    "--cell",
+                    cell,
+                    "--checkpoint",
+                    matched_checkpoint["checkpoint_path"],
+                    "--output",
+                    str(directory / cell),
+                ],
+                directory / (cell + ".log"),
+                "P5/" + cell,
+            )
+        items = public_items(REPO / "ayaka/eval/data/jevbench_public")
+        for path in paths.values():
+            load_cell(path, items)
+        receipt.update(complete=True, sha256={name: sha256(path) for name, path in paths.items()})
+        write_json(directory / "input_files.json", receipt)
+
     def interrupted(signum, frame):
         raise KeyboardInterrupt(f"received signal {signum}")
 
@@ -1101,11 +1248,27 @@ def execute(args, models, manifest, started, options):
                 collect_reasoning(models[0])
             elif priority["id"] == "P3":
                 collect_model(models[1])
-            else:
+            elif priority["id"] == "P4":
                 # Release the previous backend before local adapter hashing,
                 # which can take time even without launching another model.
                 supervisor.stop()
                 active_model = None
+                if getattr(args, "with_matched_2x2", False):
+                    prep = args.output / "matched_2x2/published_checkpoint"
+                    run(
+                        [
+                            sys.executable,
+                            str(REPO / "scripts/swift/matched_native.py"),
+                            "--prepare-checkpoint",
+                            "--output",
+                            str(prep),
+                        ],
+                        args.output / "matched_checkpoint.log",
+                        "P4/published_checkpoint",
+                    )
+                    matched_checkpoint = json.loads((prep / "checkpoint.json").read_text())
+                    args.lora_path = Path(matched_checkpoint["swift_adapter_path"])
+                    args.lora_revision = CHECKPOINT_REVISION
                 arm = {
                     **models[0],
                     "slug": "ayaka_large_lora",
@@ -1122,6 +1285,8 @@ def execute(args, models, manifest, started, options):
                     raise ValueError(
                         "LoRA adapter base/revision differs from the pinned comparison base"
                     )
+                if config.get("r", 64) != 64:
+                    raise ValueError("ayaka-large arm requires its published rank-64 adapter")
                 arm["adapter_sha256"] = fingerprint(
                     {
                         p.relative_to(args.lora_path).as_posix(): sha256(p)
@@ -1129,7 +1294,12 @@ def execute(args, models, manifest, started, options):
                         if p.is_file()
                     }
                 )
-                collect_model(arm)
+                if getattr(args, "with_matched_2x2", False):
+                    collect_matched_swift(arm)
+                else:
+                    collect_model(arm)
+            elif priority["id"] == "P5":
+                collect_matched_native()
             supervisor.remaining()
             priority.update(status="complete", finished_elapsed_s=time.monotonic() - started)
             checkpoint(priority["id"])
@@ -1259,11 +1429,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--health-timeout", type=float, default=600)
     parser.add_argument("--with-lora-arm", action="store_true")
     parser.add_argument(
+        "--with-matched-2x2",
+        action="store_true",
+        help="implies P4 with the pinned published checkpoint; P5 is public diagnostic only",
+    )
+    parser.add_argument(
         "--lora-path", type=Path, help="already cached ayaka-large adapter directory"
     )
     parser.add_argument("--lora-revision", help="immutable adapter receipt SHA")
     args = parser.parse_args(argv)
     try:
+        if args.with_matched_2x2:
+            if args.lora_path or args.lora_revision:
+                raise ValueError(
+                    "matched 2x2 uses the fixed published checkpoint; omit --lora-path/revision"
+                )
+            args.with_lora_arm = True
         if (
             args.concurrency < 1
             or args.max_minutes <= 0
@@ -1278,6 +1459,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("the minimal plan fixes prompt variants to min,cygnet,rules,labeled")
         if (
             args.with_lora_arm
+            and not args.with_matched_2x2
             and not args.dry_run
             and (
                 not args.lora_path
@@ -1302,10 +1484,20 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("fixed plan requires primary 12B and secondary E4B model slots")
         if tuple(model["model"] for model in models) != FIXED_MODELS:
             raise ValueError("fixed plan model slots are gemma-4-12B-it then gemma-4-E4B-it")
+        if args.with_matched_2x2 and models[0]["requested_revision"] != BASE_REVISION:
+            raise ValueError("matched 2x2 requires the exact pinned 12B base revision")
         options = model_options(args.model_options, models)
         manifest, _ = inventory(REPO, args.manifest)
         if {dataset["name"] for dataset in manifest["datasets"]} != set(DATASET_ORDER):
             raise ValueError("fixed plan requires calibration, dev, Cygnet and public datasets")
+        if args.with_matched_2x2:
+            public = next(d for d in manifest["datasets"] if d["name"] == "jevbench_public")
+            expected_paths = {
+                f"ayaka/eval/data/jevbench_public/{tier}.jsonl"
+                for tier in ("easy", "original", "hard")
+            }
+            if public["items"] != 231 or set(public["paths"]) != expected_paths:
+                raise ValueError("matched 2x2 requires the same 231 canonical public-tier items")
         if not any(
             d["name"] == "jevbench_public" and d["items"] >= 200 for d in manifest["datasets"]
         ):
@@ -1321,6 +1513,7 @@ def main(argv: list[str] | None = None) -> int:
                 options,
                 args.prompt_variants,
                 with_lora_arm=args.with_lora_arm,
+                with_matched_2x2=args.with_matched_2x2,
                 allow_partial=args.allow_partial,
             ),
             flush=True,

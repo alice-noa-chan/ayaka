@@ -1,7 +1,8 @@
 # Swift collection and exact read receipts
 
 The live runner targets Linux, Python 3.11 and one GPU. Dependencies, model
-weights, tokenizers and any optional adapter must already be available. It
+weights, tokenizers and optional adapters must already be available, except the
+explicitly requested pinned checkpoint fetch in matched P4 described below. It
 checks installed `vllm==0.30.0`; it never runs pip or downloads a tokenizer.
 `--dry-run` inventories inputs and prints the fixed plan without GPU, model
 loading, subprocesses or network calls.
@@ -34,12 +35,14 @@ bash scripts/swift/collect_gpu.sh --max-minutes 75 --allow-partial
 | P2 | 5 | 0 | 200 public diagnostic requests per best two variants; 200 non-public direct and 200 routed system requests; reasoning gate |
 | P3 | 20 | 5 | E4B x the same variants/datasets, with its own sequential HF/vLLM parity |
 | P4 | 15 | 5 | Optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer |
+| P5 | 15 | 4 | Optional matched 2×2: stop vLLM; two sequential native HF bf16 cells, 231 public items each, context 8192; DIAGNOSTIC ONLY |
 | Environment prep | 3 | 0 | Environment preflight |
 | Cleanup/pack | 2 | 0 | Fixed 120-second reserve inside the cap |
 
 These are planning estimates, not measured throughput. Each new model/adapter
 adds 2 minutes for HF loading and 3 for vLLM loading. The enabled plan totals
-105 minutes; enabling P4 gives 125 minutes. Before environment prep or model
+105 minutes; enabling P4 gives 125 minutes. `--with-matched-2x2` implies P4 and
+adds P5's two HF loads, for **144 minutes**. Before environment prep or model
 loading, the runner refuses an over-budget plan. The default 75-minute cap
 therefore needs a larger cap or `--allow-partial`. With that flag, only the
 priority prefix whose full estimated total fits is admitted; at 75 minutes this
@@ -68,12 +71,112 @@ context 16384, GPU utilization 0.90 and prefix caching. Extra server arguments
 cannot override the pinned tokenizer, revisions, dtype, context, logits mode,
 server name or address. Chat kwargs default to `{"enable_thinking": false}`.
 
-P4 is enabled only by `--with-lora-arm`, with a cached `--lora-path` and pinned
+Standalone P4 is enabled by `--with-lora-arm`, with a cached `--lora-path` and pinned
 `--lora-revision`. The runner checks adapter base/revision metadata, hashes local
 adapter files, reads an HF+PEFT reference, and serves the adapter with vLLM LoRA.
 PEFT must already be installed for that arm. The receipt records adapter and
 base-tokenizer provenance. This compares a native letter weight arm on the same
 serving base; it does not reproduce ayaka-large's published hybrid system.
+
+## Matched 2×2 diagnostic (Task 14)
+
+**DIAGNOSTIC ONLY. The 231 public items were seen before. This explains a gap;
+it selects nothing and never enters fitting, selection or gates.** The Swift
+variant is already fixed by the non-public P1/P2 policy before this arm runs.
+
+```bash
+python scripts/swift/gpu_runner.py --dry-run --with-matched-2x2 --max-minutes 144
+# On the prepared GPU host only (E4B revision and dependencies already present):
+bash scripts/swift/collect_gpu.sh --with-matched-2x2 --max-minutes 144
+# At 125 minutes, --allow-partial admits through P4 and marks P5 not_admitted.
+```
+
+With this flag, P4 fetches the published `alice-noa-chan/ayaka-large` checkpoint
+at `267605ee22f2b5f934d81e5fbee691952d2e6f55` in a supervised GPU-job child.
+There are no downloads during dry-run or CPU verification. The base and tokenizer
+must remain cached at `707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`; alternate pins
+or `--lora-path/revision` are refused for the matched arm. P4 checks the checkpoint
+config and source hashes, then measures only the selected Swift variant's 231
+direct public letter reads. P1 supplies its frozen-base counterpart. Neither
+Swift cell applies bias, routing or a newly selected policy.
+
+The released adapter's keys address Ayaka's detached `Gemma4TextModel`. The helper
+renames those keys to the full HF LM prefix required by HFReader/vLLM, streaming
+the unchanged safetensors payload without allocating the adapter tensors. Its
+receipt records source/converted hashes and the exact key mapping. P4 still runs
+the existing HF/vLLM parity gate and sets `--max-lora-rank 64` for the published
+adapter ([vLLM 0.30's default capacity is 16](https://docs.vllm.ai/en/v0.30.0/api/vllm/config/lora/)).
+This verifies backend agreement; real GPU
+adapter loading and model quality remain unmeasured until the job runs.
+
+P5 stops every vLLM process group before native loading. Each native cell runs
+the existing `ayaka.eval.jevbench.main` with its normal CLI arguments, through a
+recording wrapper in [matched_native.py](matched_native.py). The wrapper adds
+load timing and flushed per-item partials without changing evaluator behavior:
+
+```bash
+python -m ayaka.eval.jevbench --zero-shot electra-large \
+  --tiers easy,original,hard --device cuda --dtype bfloat16 \
+  --max-seq-len 8192 --out out/matched_2x2/frozen_native/report.json
+python -m ayaka.eval.jevbench --ckpt /path/to/pinned/published/snapshot \
+  --tiers easy,original,hard --device cuda --dtype bfloat16 \
+  --max-seq-len 8192 --out out/matched_2x2/lora_native/report.json
+```
+
+The original checkpoint snapshot is used unchanged for native evaluation. The
+native subprocesses run offline and exit sequentially, freeing each CUDA context
+before the next load. `load_times.json` records exact native CLI argv, launcher
+argv, base/tokenizer/checkpoint revisions, model+tokenizer load time, completion
+count and errors. `results.jsonl` preserves predictions, probabilities, tier,
+type, family and latency even on interruption. `report.json` is the usual native
+report plus a diagnostic receipt. The existing work deadline and cleanup reserve
+apply to checkpoint preparation, both loads and every native item. P5 adds no
+fresh time budget after the cap; an incomplete cell cannot become a complete 2×2.
+
+The current large config already pins the required base revision, and both model
+and tokenizer loaders use it. No evaluator edits or revision override are needed.
+`--zero-shot electra-large` creates a `hybrid` config with zero gates and unit
+temperatures: on these labeled public items the returned readout is effectively
+LM-only, with the random pointer head inactive. The published native checkpoint
+also restores its pointer head, gates and temperatures alongside LoRA. Thus the
+native weight effect is the complete checkpoint effect. The Swift weight effect
+is adapter-only. The column effect combines serialization and readout and cannot
+separate their individual contributions.
+
+After collection, `out/matched_2x2/input_files.json` gives the four matched paths,
+hashes and selected variant. Analyze them on CPU with the two continuity sources:
+
+```bash
+python scripts/swift/matched_2x2.py \
+  --frozen-native out/matched_2x2/frozen_native/results.jsonl \
+  --frozen-swift out/google_gemma-4-12B-it/SELECTED/jevbench_public.reads.jsonl \
+  --lora-native out/matched_2x2/lora_native/results.jsonl \
+  --lora-swift out/ayaka_large_lora/SELECTED/jevbench_public.reads.jsonl \
+  --cygnet-reference /path/to/cygnet-recipe/runs/l40s-pinned/results.jsonl \
+  --historical-v1 runs/runpod-large-v1-20260927/runs/large-v1/jevbench_report.json \
+  --output out/matched_2x2/analysis.json
+```
+
+The defaults for continuity are the supplied local Cygnet clone and historical
+v1 report. Outputs are JSON and a Markdown sibling: accuracy per tier, type and
+tier×type; four conditional effects; equal-cell row/column marginal effects;
+interaction `(LoRA Swift - frozen Swift) - (LoRA native - frozen native)`;
+paired discordance, exact two-sided McNemar p-values for the four edges and two
+diagonals; per-family counts and discordant IDs. Cygnet is the fifth reference
+column; historical v1 is a sixth continuity column with separate comparisons.
+McNemar does not apply to averaged marginal effects or the interaction, which
+are not pairs of binary outcomes. Tests are descriptive and unadjusted.
+
+All six files must have exactly the same canonical 231 IDs; missing/extra/duplicate
+IDs, inconsistent gold/type/tier/family or malformed probabilities are refused.
+Noul `no/yes` and `false/true` labels are aligned. Swift uses `raw_probs` argmax;
+Cygnet uses its published prediction (`ok` means transport success there).
+
+The supplied continuity files contain hard **72/111 v1 vs 85/111 Cygnet**, with
+**19 Cygnet-only vs 6 v1-only** discordances (not 5). Both historical v1
+measurements predate `c7f10cb`; current P5 explicitly uses the 8192 inference
+budget. The six-column report keeps history separate from the new cells, so a
+context-budget change cannot silently be attributed to LoRA or serialization.
 
 ## Canonical raw readout
 
