@@ -22,6 +22,7 @@ from ..eval.read_artifact import fingerprint
 from ..prompt import RenderedQuestion
 from . import direct_bundle as bundles
 from .batching import TrainItem, _noul_canonical
+from .direct_corpus_plan import recipe_plan, validate_contract
 from .direct_holdout import DEVELOPMENT_SPLITS, validate_commitment
 from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
@@ -176,6 +177,9 @@ def audit_snapshot(
         "execution_attested": False,
         "promotable": False,
     }
+    preparation = json.loads(before[2]["preparation.json"])
+    if "corpus_contract" in preparation:
+        binding["corpus_contract"] = preparation["corpus_contract"]
     return AuditedBundle(
         manifest, recipe, items, inventory, groups, _splits(before[2]), binding, tok
     )
@@ -295,6 +299,7 @@ def load_audited_bundle(
     if manifest["source_sha256"] != binding["source_sha256"]:
         raise ValueError("bundle training source differs from the CPU audit")
     recipe = json.loads(payloads["recipe.json"])
+    corpus_plan = recipe_plan(recipe)
     cfg = ElectraConfig(**recipe["model"])
     if recipe["allow_tiny"] and not allow_tiny:
         raise ValueError("audited tiny bundles require explicit mechanics-only mode")
@@ -326,7 +331,7 @@ def load_audited_bundle(
         raise ValueError("actual tokenizer or serving recipe differs from the CPU audit")
     splits, items = _splits(payloads), _items(payloads["train_items.jsonl"])
     audit_splits(splits, development_only=True)
-    validate_commitment(json.loads(payloads["test_commitment.json"]), splits)
+    commitment = validate_commitment(json.loads(payloads["test_commitment.json"]), splits)
     inventory, groups, offset = [], [], 0
     for sample, aliases in zip(splits["train"], binding["prefix_aliases"], strict=True):
         group = items[offset : offset + len(sample.questions)]
@@ -366,6 +371,19 @@ def load_audited_bundle(
         or json.loads(payloads["preparation.json"])["workload"] != binding["workload"]
     ):
         raise ValueError("audited rows, inventory or complete schedule differ")
+    contract = validate_contract(
+        corpus_plan, splits, commitment, inventory, groups, recipe["schedule"]
+    )
+    preparation = json.loads(payloads["preparation.json"])
+    if contract is None:
+        if "corpus_contract" in binding or "corpus_contract" in preparation:
+            raise ValueError("partial audited corpus contract")
+    elif (
+        binding.get("corpus_contract") != contract
+        or preparation.get("corpus_contract") != contract
+        or recipe.get("corpus_contract") != contract
+    ):
+        raise ValueError("audited corpus contract differs from original sources and whole epochs")
     bundles.bound_native_root(cfg, recipe, native_path=native_root)
     return AuditedBundle(manifest, recipe, items, inventory, groups, splits, binding, tok)
 

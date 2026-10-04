@@ -13,6 +13,7 @@ from pathlib import Path
 from ..data.schema import Sample
 from ..data.source_groups import group_evidence, identities
 from ..eval.read_artifact import fingerprint
+from .direct_corpus_plan import split_summary, validate_summary
 from .direct_distillation import _sha
 from .prepare_v2 import LINEAGE_KEYS, canonical, sha256
 
@@ -50,7 +51,7 @@ def signatures(sample):
     }
 
 
-def make_commitment(samples, *, context, counts):
+def make_commitment(samples, *, context, counts, corpus_contract=None):
     if not samples or any(s.metadata.get("split") != "test" for s in samples):
         raise ValueError("holdout storage requires nonempty test samples")
     raw = b"\n".join(canonical(s.to_json()) for s in samples) + b"\n"
@@ -64,6 +65,15 @@ def make_commitment(samples, *, context, counts):
         "counts": counts,
         "contains_original_inputs_or_gold": False,
     }
+    if corpus_contract is not None:
+        if not isinstance(corpus_contract, dict):
+            raise ValueError("opaque corpus contract must be an object")
+        result["corpus_contract"] = corpus_contract
+        if corpus_contract != {
+            "plan_sha256": corpus_contract.get("plan_sha256"),
+            "summary": split_summary(samples, corpus_contract.get("plan_sha256")),
+        }:
+            raise ValueError("opaque corpus contract must match original test membership")
     return result, raw
 
 
@@ -75,7 +85,7 @@ def validate_commitment(commitment, development):
         or commitment.get("contains_original_inputs_or_gold") is not False
     ):
         raise ValueError("require opaque test commitments")
-    if set(commitment) != {
+    fields = {
         "version",
         "split",
         "raw_sha256",
@@ -84,7 +94,15 @@ def validate_commitment(commitment, development):
         "context_audit",
         "counts",
         "contains_original_inputs_or_gold",
-    }:
+    }
+    if "corpus_contract" in commitment:
+        fields.add("corpus_contract")
+        extension = commitment["corpus_contract"]
+        if not isinstance(extension, dict) or set(extension) != {"plan_sha256", "summary"}:
+            raise ValueError("opaque corpus contract fields differ")
+        _sha(extension["plan_sha256"], "plan_sha256")
+        validate_summary(extension["summary"])
+    if set(commitment) != fields:
         raise ValueError("holdout commitment must contain only the known opaque fields")
     context, counts = commitment.get("context_audit"), commitment.get("counts")
     if (
@@ -116,6 +134,8 @@ def validate_commitment(commitment, development):
             )
         ):
             raise ValueError("holdout category counts are invalid")
+        if key != "types" and sum(counts[key].values()) != counts["samples"]:
+            raise ValueError("holdout sample category counts disagree")
     if sum(counts["types"].values()) != counts["questions"] or set(counts["types"]) - {
         "noul",
         "choice",
@@ -264,7 +284,10 @@ def open_holdout(
         raise ValueError("holdout original bytes differ from the preparation commitment")
     samples = [Sample.from_json(json.loads(line)) for line in raw.splitlines()]
     actual, _ = make_commitment(
-        samples, context=commitment["context_audit"], counts=commitment["counts"]
+        samples,
+        context=commitment["context_audit"],
+        counts=commitment["counts"],
+        corpus_contract=commitment.get("corpus_contract"),
     )
     if actual != commitment:
         raise ValueError("holdout content/lineage differs from the preparation commitment")

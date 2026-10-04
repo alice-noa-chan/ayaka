@@ -21,6 +21,16 @@ from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..losses import LossWeights
 from ..tokenization import HFTokenizer, ToyTokenizer
+from .direct_corpus_plan import (
+    MARKER,
+    plan_sha256,
+    preparation_binding,
+    prepared_groups_sha256,
+    recipe_plan,
+    split_summary,
+    validate_contract,
+    whole_epochs,
+)
 from .direct_distillation import prepare_direct_distillation
 from .direct_holdout import (
     DEVELOPMENT_SPLITS,
@@ -260,6 +270,7 @@ def _prepare(
     allow_tiny=False,
     holdout_commitment,
     input_encoding=None,
+    corpus_plan=None,
 ):
     # Verify development gold and opaque test commitments. Original holdout
     # gold/context was checked during preparation; the trainer cannot open it.
@@ -304,6 +315,11 @@ def _prepare(
         context_audit=contexts,
         workload=finite_workload(inventory, **schedule),
     )
+    contract = validate_contract(
+        corpus_plan, splits, holdout_commitment, inventory, groups, schedule
+    )
+    if contract is not None:
+        report["corpus_contract"] = contract
     verify_gold.verify_files()
     return items, report, inventory, groups
 
@@ -339,6 +355,8 @@ def prepare_bundle(
     holdout_out=None,
     input_encoding=None,
     native_path=None,
+    corpus_plan=None,
+    preparation_guard=None,
 ):
     """Validate all data/tokens/settings before creating a fresh output directory."""
     root = Path(out)
@@ -383,15 +401,35 @@ def prepare_bundle(
         else None,
     )
     counts = audit_splits(splits)
+    if corpus_plan is None and any(
+        MARKER in sample.metadata for samples in splits.values() for sample in samples
+    ):
+        raise ValueError("partial corpus plan markers require a complete planned contract")
     verify_test_gold, _ = _gold_verifier(
         splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
     )
     natural_registry = verify_test_gold.natural_registry
+    preparation_binding(
+        corpus_plan,
+        cfg,
+        tokenizer_sha256,
+        metadata,
+        input_encoding,
+        natural_registry.binding if natural_registry is not None else None,
+    )
     test_context = _context_audit(
         {"test": splits["test"]}, tok, cfg, architecture, verify_test_gold, input_encoding
     )["test"]
     commitment, holdout_raw = make_commitment(
-        splits["test"], context=test_context, counts=counts["test"]
+        splits["test"],
+        context=test_context,
+        counts=counts["test"],
+        corpus_contract={
+            "plan_sha256": plan_sha256(corpus_plan),
+            "summary": split_summary(splits["test"], plan_sha256(corpus_plan)),
+        }
+        if corpus_plan is not None
+        else None,
     )
     development = {split: splits[split] for split in DEVELOPMENT_SPLITS}
     development_registry = (
@@ -413,6 +451,7 @@ def prepare_bundle(
         allow_tiny=allow_tiny,
         holdout_commitment=commitment,
         input_encoding=input_encoding,
+        corpus_plan=corpus_plan,
     )
     recipe = {
         "version": VERSION,
@@ -433,6 +472,12 @@ def prepare_bundle(
         "reasoning_training_tokens": 0,
         "initialization": "fresh_lora_from_pinned_native_base",
     }
+    if corpus_plan is not None:
+        recipe.update(
+            corpus_plan=corpus_plan,
+            corpus_plan_sha256=plan_sha256(corpus_plan),
+            corpus_contract=report["corpus_contract"],
+        )
     payloads = {
         f"{split}.jsonl": b"\n".join(canonical(s.to_json()) for s in splits[split]) + b"\n"
         for split in DEVELOPMENT_SPLITS
@@ -466,6 +511,8 @@ def prepare_bundle(
     }
     verify_metadata(metadata, cfg.backbone, cfg.backbone_revision, path=native_root)
     verify_test_gold.verify_files()
+    if preparation_guard is not None:
+        preparation_guard()
     root.mkdir(parents=True, exist_ok=False)
     for name, raw in payloads.items():
         (root / name).write_bytes(raw)
@@ -514,6 +561,7 @@ def audit_bundle(
     if manifest.get("source_sha256") != _source_hashes():
         raise ValueError("training source snapshot changed; rebuild the CPU bundle")
     recipe = json.loads((root / "recipe.json").read_bytes())
+    corpus_plan = recipe_plan(recipe)
     if (
         recipe.get("version") != VERSION
         or recipe.get("verifier") != VERIFIER_VERSION
@@ -586,9 +634,12 @@ def audit_bundle(
         allow_tiny=allow_tiny,
         holdout_commitment=json.loads((root / "test_commitment.json").read_bytes()),
         input_encoding=input_encoding,
+        corpus_plan=corpus_plan,
     )
     if report["gold_sources"] != recipe.get("gold_sources"):
         raise ValueError("raw human source file binding changed; prepare a new bundle")
+    if corpus_plan is not None and report["corpus_contract"] != recipe["corpus_contract"]:
+        raise ValueError("recipe corpus contract differs from regenerated preparation")
     if (
         canonical(report) + b"\n" != (root / "preparation.json").read_bytes()
         or _item_bytes(items) != (root / "train_items.jsonl").read_bytes()
@@ -605,6 +656,18 @@ def training_batches(recipe, inventory, groups, *, start_step=0):
     """Replay a fixed schedule; resuming skips whole steps without changing its seed."""
     schedule = recipe["schedule"]
     _validate_schedule(schedule)
+    plan = recipe_plan(recipe)
+    if plan is not None:
+        contract = recipe["corpus_contract"]
+        if (
+            whole_epochs(plan, inventory, schedule) != contract["whole_epochs"]
+            or len(groups) != len(inventory)
+            or any(
+                len(group) != len(row["rows"]) for group, row in zip(groups, inventory, strict=True)
+            )
+            or prepared_groups_sha256(groups) != contract["prepared_groups_sha256"]
+        ):
+            raise ValueError("actual corpus training groups differ from the frozen complete epochs")
     if type(start_step) is not int or not 0 <= start_step <= schedule["steps"]:
         raise ValueError("resume step must be inside the complete fixed schedule")
     for step, batch in enumerate(scheduled_batches(inventory, **schedule)):
