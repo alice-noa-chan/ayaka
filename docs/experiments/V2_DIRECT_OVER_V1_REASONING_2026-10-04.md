@@ -569,3 +569,80 @@ runner도 별도 절제군 준비 항목이다. Swift 공통 `token_input`의 Ba
 `SwiftReadIndex`의 canonical dict 순서 문제는 Claude 담당자에게 수정 요청을 남겼다.
 이번 bridge/converter의 방어를 공유 Swift 코드의 해결로 부르지 않는다.
 **전체 학습 직전 준비 완료나 v2 off의 v1 reasoning 대비 향상은 아직 증명하지 못했다.**
+
+## 학습 서버 시작 전 감사의 재사용과 데이터 재읽기 수정
+
+`465c18f`의 `training.direct_audit`는 CPU에서 전체 gold/token/teacher/schedule
+regeneration을 완료한 뒤 별도 감사 receipt를 만든다. receipt와 원래 bundle manifest의
+**각각 외부에 고정한 raw-byte SHA256**을 모두 요구한다. 현재 파일에서 새로 계산한
+hash만으로 원래 외부 anchor를 대체하지 않는다. 감사 중 payload·source·dependency·
+tokenizer 변경은 저장 전에 실패한다. receipt는 bundle/default holdout 밖 새 파일에
+저장하며 custom holdout 경로의 위치는 자동 추론하지 않는다.
+
+서버의 빠른 경로는 모든 payload를 hash 확인한 같은 메모리 bytes에서 data-only
+dataclass로 읽는다. pickle이나 전체 재토큰화, 원본 natural source archive 읽기는
+하지 않는다. 현재 source·survey·meta architecture·tokenizer/backend/template/설정은
+대조한다. 후보/정답/recipe mapping과 opaque holdout 격리를 검사하고 전체 inventory와
+fixed schedule을 다시 계산한다. Decimal ordinal·teacher 분포·샘플 내 prefix 객체
+공유를 유지하며 frozen replay는 나중에 native snapshot에 따로 묶는다.
+이는 신뢰한 CPU regeneration 결과의 재사용이며 backend 실행 증명/동시 수정 격리나
+성능 승격은 아니다. 기존 직접 bundle v5/schema와 Swift recipe2는 유지한다.
+
+```bash
+# GPU 할당 전에 같은 고정 소스에서 전체 CPU 감사를 수행한다.
+python -m ayaka.training.direct_audit \
+  --bundle /path/to/development-bundle \
+  --expected-manifest-sha256 ORIGINAL_BUNDLE_SHA256 \
+  --out /path/to/new-cpu-audit.json
+
+# 반환한 receipt SHA를 bundle 밖에 고정한 후 빠른 CPU 검사를 사용할 수 있다.
+python -m ayaka.training.run_direct audit \
+  --bundle /path/to/development-bundle \
+  --expected-bundle-sha256 ORIGINAL_BUNDLE_SHA256 \
+  --audit-receipt /path/to/new-cpu-audit.json \
+  --expected-audit-receipt-sha256 PINNED_AUDIT_RECEIPT_SHA256
+```
+
+`76ba69b`는 위 두 receipt flags를 `profile/train`에도 연결했다. 생략하면 full
+regeneration이 기본이다. 두 경로 모두 감사한 split 메모리와 **같은 tokenizer 객체**를
+Trainer/replay/calibration/dev에 전달해 검증 후 파일/토크나이저 재읽기를 없앤다.
+profiler도 source ID 대신 original sample 객체로 행을 연결해 같은 출처 ID의 서로
+다른 질문들이 덮어써지지 않는다. original test는 읽지 않는다.
+
+논리적 감사 내용은 optimizer continuation에 묶고 외부 receipt-file digest/로드 mode는
+로그로 남긴다. 같은 외부 bundle anchor를 쓰면 full→fast 재개가 가능하다. actual
+native weight/header 검증, 명시적 CUDA 실행/전체 잔액 admission, 커널 probability/
+loss/gradient parity 및 실측 전체 schedule/disk admission은 계속 학습 전에 수행한다.
+실제 random native LoRA의 full/fast/interrupted-resumed 최종 trainable tensor와 dev
+확률이 정확히 같았다. 관련92tests, teacher/CLI 후속4tests, runner38tests 및 실제
+pipeline CLI1test가 통과했다. 독립 read-only 리뷰도 두 단위의 blocker를 찾지 못했다.
+
+고정 `76ba69b`의 실제 cached Gemma12B tokenizer에서 같은96행의 warmed CPU
+startup 감사는 **6.4074초 → 2.1252초 (3.015배)**, backend 직렬화6회→2회였다.
+item 전체 bytes·inventory·split·논리 binding이 같았고 같은 tokenizer를 사용했다.
+tokenizer load9.0153초는 별도다. 단일 CPU 관측이며 GPU/학습 throughput 측정이 아니다.
+calibration/dev는 평가 때 여전히 입력을 렌더링한다. 전체 GPU 학습이3배 빨라졌다고
+해석하지 않는다. `.dev/direct-native-swift-input-76ba69b-cpu-20261004/startup-comparison.json`
+참조. 실제 native tokenizer prepare/regeneration audit도 통과했다.
+
+```text
+bundle manifest: 812dc760c864e0c898ae3b1ca4f7b09cb553e51a5ffa5ada9a572260b41da717
+holdout manifest: d08397de36f04146af5b5522e6b668adf660db63275af91fb7be57f0debeea95
+CPU audit receipt: 82a9fd28a4feb6781ff0d9d4eca8c0a0618a74632c967f04f3d7cd235a44db7f
+```
+
+새 control도 train96/10715tokens/26lineages/3completebatches, teacher/optimizer/GPU/
+download0, native weights ready=False다. 독립 검토에서 **빈 HF 캐시의 서버에 arbitrary
+`--snapshot-path`만 업로드하면 초기 metadata/tokenizer audit가 cache repo를 요구하는
+문제**도 확인했다. native snapshot inventory는 현재 tokenizer 자산을 포함하지 않는다.
+업로드만으로 즉시 실행하는 경로에는 검증된 local metadata 경로와 full config/tokenizer
+binding이 추가로 필요하다. portable receipt의 transformers/tokenizers/peft 버전도 맞춰야
+하며 source checkout의 approved survey file을 함께 전달해야 한다. 이 조건들과 앞의
+실제 품질/가중치/CUDA 조건을 충족하기 전에는 학습 직전 전체 완료로 표시하지 않는다.
+
+최종 고정 `76ba69b` Git archive 전체 검사는 **1900 passed, 2 skipped / 565.32초**,
+source 변경0, stable_pass=True, Ruff lint/format292files로 통과했다.
+`.dev/codex-direct-audit-full-76ba69b-20261004.json` 참조. archive SHA는
+`f4f93ac8ddf52d1138697901225b3a07c8c7d6b7f47d5d974e5c496ff04dc824`다.
+기존 optional SDK 미설치 skip 등 두 skip은 그대로이며 실제 CUDA kernel 검사를
+CPU 결과로 대체하지 않는다. private test/artifacts/deploy는 복사하거나 변경하지 않았다.
