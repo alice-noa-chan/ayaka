@@ -507,3 +507,20 @@ for example `b.pipeline_4090.remote(["eval", "--model", "electra-small", "--zero
 A checkpoint directory contains `electra_config.json`, the LoRA `adapter/`,
 `head.pt` (pointer head, gate, temperatures), `meta.json`, and alongside it
 `report.json` and `jevbench_report.json`.
+
+## Status (2026-10-04)
+
+- **Benchmark request.** The three published models are requested in
+  [JevBench issue #132](https://github.com/fstandhartinger/jevbench/issues/132), pinned to code commit
+  `475bec3` and the Hugging Face revisions listed there. The models are frozen. At the time of writing, the
+  live board (v1.5.6) did not list them yet.
+- **TypeSafe SDK compatibility.** `ayaka.serve` speaks the `/v1/systemone` wire format that JevBench's
+  `typesafe` adapter uses. The official TypeSafe Python SDK (`typesafe-sdk` 0.7.2) is stricter: it requires
+  `confidence` on Choice and Score answers, a `legend` on Score answers, a `{"models": [...]}` listing and the
+  `jev-latest` alias. This v1 server does not send those yet, so SDK calls can fail validation; JevBench is not
+  affected. A fix is being developed and verified on the `ayaka-v2-experiments` branch
+  ([design](https://github.com/alice-noa-chan/ayaka/blob/ayaka-v2-experiments/docs/experiments/JEV_API_COMPAT_2026-10-04.md)).
+  Only that serving-code fix would come to `main`; the published weights do not change.
+- **Ongoing work** happens on the experimental
+  [`ayaka-v2-experiments`](https://github.com/alice-noa-chan/ayaka/tree/ayaka-v2-experiments) branch. It does not
+  supersede v1, and nothing there has been measured or released yet.
