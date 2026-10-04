@@ -26,7 +26,7 @@ from ..eval.v2 import summarize, typed_row
 from ..losses import LossWeights
 from ..model.electra import ElectraDecisionModel
 from ..primitives import QuestionSpec
-from .batching import _noul_canonical, sample_to_items
+from .batching import _noul_canonical
 from .calibrate import apply_temperatures, fit_temperatures
 from .direct_budget import STAGES, admit_workflow
 from .direct_budget import VERSION as BUDGET_VERSION
@@ -43,6 +43,7 @@ from .frozen_replay import attach_base_replay
 from .native_snapshot import verify_snapshot
 from .optimization import OptimizationConfig, optimize_and_verify
 from .prepare_v2 import canonical
+from .swift_direct import direct_readout_binding, encode_direct_sample
 from .throughput import completion_plan, profile_overheads, profile_production
 from .trainer import TrainConfig, Trainer
 from .workload import stress_indices
@@ -90,7 +91,7 @@ def read_splits(root):
     }
 
 
-def evaluate_direct(trainer, samples, split):
+def evaluate_direct(trainer, samples, split, *, input_encoding=None):
     """Serial, isolated original-input reads. No gradients or trace generation."""
     rows = []
     for sample in samples:
@@ -106,8 +107,14 @@ def evaluate_direct(trainer, samples, split):
                 for key in ("source_example_id", "task_family", "language")
                 if key in sample.metadata
             }
-            item = sample_to_items(
-                Sample(sample.state, [q], metadata), trainer.tok, trainer.model.cfg
+            item = encode_direct_sample(
+                Sample(sample.state, [q], metadata),
+                trainer.tok,
+                trainer.model.cfg,
+                input_encoding=input_encoding,
+                context_limit=max(
+                    trainer.model.cfg.max_seq_len, trainer.model.cfg.serve_max_seq_len
+                ),
             )[0]
             probs = trainer.predict([item])[0]
             if trainer.device.type == "cuda":
@@ -136,6 +143,7 @@ def evaluate_direct(trainer, samples, split):
                     "latency_s": latency,
                     "reasoning_tokens": 0,
                     "route": "direct",
+                    "direct_readout_binding": direct_readout_binding(item),
                 }
             )
     return {
@@ -324,7 +332,9 @@ def run_pipeline(
     history = train_fixed_schedule(trainer, recipe, inventory, groups, on_step=save_progress)
     _write(root, "history.json", history)
     application.rollback()  # calibration/export use portable native inference kernels
-    raw_calibration = evaluate_direct(trainer, splits["calibration"], "calibration")
+    raw_calibration = evaluate_direct(
+        trainer, splits["calibration"], "calibration", input_encoding=recipe["input_encoding"]
+    )
     rows = raw_calibration["rows"]
     temperatures = fit_temperatures(
         [[math.log(max(p, 1e-12)) for p in row["probs"]] for row in rows],
@@ -341,7 +351,11 @@ def run_pipeline(
         {"temperatures": temperatures, "split": "calibration", "binding": binding},
     )
     for split in ("dev",):
-        _write(root, f"{split}.json", evaluate_direct(trainer, splits[split], split))
+        _write(
+            root,
+            f"{split}.json",
+            evaluate_direct(trainer, splits[split], split, input_encoding=recipe["input_encoding"]),
+        )
     # Original test is absent from the development bundle. A separate evaluator
     # opens its holdout only after dev selection has been frozen externally.
     probe_probs = trainer.predict(probes)
@@ -350,6 +364,9 @@ def run_pipeline(
         "optimizer_steps": trainer.step_i,
         "complete_schedule": trainer.step_i == tcfg.steps,
         "inference_mode": "off",
+        "input_encoding": recipe["input_encoding"],
+        "input_recipe": recipe["input_recipe"],
+        "input_recipe_sha256": fingerprint(recipe["input_recipe"]),
         "promotable": False,
         "mechanics_only": mechanics_only,
         "calibration_split": "calibration",

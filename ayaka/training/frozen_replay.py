@@ -8,6 +8,7 @@ import torch
 
 from ..eval.read_artifact import fingerprint
 from .batching import _noul_canonical
+from .swift_direct import direct_readout_binding, validate_direct_input_items
 
 VERSION = "ayaka-frozen-native-replay-1"
 
@@ -23,6 +24,7 @@ def attach_base_replay(trainer, samples, groups, native_weights_sha256, *, saved
 
     if trainer.step_i or trainer.opt.state:
         raise ValueError("frozen native replay must be bound before optimizer updates")
+    validate_direct_input_items([item for group in groups for item in group])
     if trainer.model.cfg.readout != "lm" or not hasattr(trainer.model.backbone, "disable_adapter"):
         raise ValueError("frozen native replay requires a LoRA native LM model")
     if (
@@ -56,6 +58,7 @@ def attach_base_replay(trainer, samples, groups, native_weights_sha256, *, saved
                         ),
                         "candidate_ids": [c.id for c in _noul_canonical(q).candidates],
                         "count": len(item.target),
+                        "direct_readout_binding": direct_readout_binding(item),
                     }
                 )
     if not selected:

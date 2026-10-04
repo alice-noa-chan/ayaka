@@ -8,16 +8,108 @@ integer Score levels) back to those candidates. No model or trace is loaded.
 from __future__ import annotations
 
 import copy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from ..collate import EncodedQuestion
 from ..eval.read_artifact import fingerprint
-from ..prompt import RenderedQuestion
-from ..swift.prompt import parse_question
-from .batching import FLAGGED_EVIDENCE, TrainItem, _noul_canonical
+from ..prompt import RenderedQuestion, render_prefix, render_question
+from ..swift.prompt import parse_question, validate_prompt_variant
+from ..swift.readers import READOUT
+from .batching import FLAGGED_EVIDENCE, TrainItem, _noul_canonical, question_view, sample_to_items
 from .swift_evidence import prepare_swift_evidence_inputs, validate_swift_evidence_inputs
 
 VERSION = "ayaka-swift-direct-inputs-1"
+
+
+def normalize_input_encoding(value=None):
+    """Explicit per-run selection; serving defaults and v1 are unchanged."""
+    value = {"encoder": "ayaka_segmented"} if value is None else copy.deepcopy(value)
+    if not isinstance(value, dict):
+        raise ValueError("direct input encoding must be an object")
+    if value.get("encoder") == "ayaka_segmented" and set(value) == {"encoder"}:
+        return value
+    allowed = {"encoder", "prompt_variant", "state_format", "chat_template_kwargs"}
+    if value.get("encoder") != "swift_canonical" or set(value) - allowed:
+        raise ValueError("unsupported direct input encoder or encoding fields")
+    value.setdefault("prompt_variant", "min")
+    value.setdefault("state_format", "pretty")
+    value.setdefault("chat_template_kwargs", {"enable_thinking": False})
+    validate_prompt_variant(value["prompt_variant"])
+    if not isinstance(value["state_format"], str) or value["state_format"] not in {
+        "pretty",
+        "compact",
+    }:
+        raise ValueError("Swift direct state format must be pretty or compact")
+    kwargs = value["chat_template_kwargs"]
+    if (
+        not isinstance(kwargs, dict)
+        or kwargs.get("enable_thinking", False)
+        or any(
+            key in kwargs
+            for key in ("return_dict", "return_tensors", "tokenize", "add_generation_prompt")
+        )
+    ):
+        raise ValueError("Swift direct chat kwargs must retain non-thinking canonical transport")
+    fingerprint(value)  # require a serializable immutable preparation recipe
+    return value
+
+
+def input_serving_recipe(tok, input_encoding=None):
+    encoding = normalize_input_encoding(input_encoding)
+    if encoding["encoder"] == "ayaka_segmented":
+        return {"version": "ayaka-segmented-direct-inputs-1", **encoding}
+    native = getattr(tok, "hf", tok)
+    backend = getattr(native, "backend_tokenizer", None)
+    if not getattr(native, "is_fast", False) or backend is None:
+        raise ValueError("Swift direct input requires a fast offset tokenizer")
+    return {
+        "version": VERSION,
+        "readout": READOUT,
+        **{key: value for key, value in encoding.items() if key != "encoder"},
+        "chat_template_sha256": fingerprint(native.chat_template),
+        "tokenizer_sha256": fingerprint(backend.to_str()),
+    }
+
+
+def encode_direct_sample(sample, tok, cfg, *, input_encoding=None, context_limit=None):
+    """Full original inputs on the declared encoder, never silent truncation."""
+    encoding = normalize_input_encoding(input_encoding)
+    limit = cfg.max_seq_len if context_limit is None else context_limit
+    if encoding["encoder"] == "swift_canonical":
+        return swift_sample_to_items(
+            sample,
+            tok,
+            cfg,
+            context_limit=limit,
+            **{k: v for k, v in encoding.items() if k != "encoder"},
+        )
+    prefix = render_prefix(sample.state, tok)
+    for q in sample.questions:
+        rendered = render_question(question_view(_noul_canonical(q)), tok, cfg.max_label_candidates)
+        if len(prefix) + len(rendered.suffix_ids) > limit:
+            raise ValueError("complete original direct input does not fit; refuse truncation")
+    return sample_to_items(sample, tok, replace(cfg, max_seq_len=limit))
+
+
+def direct_readout_binding(item):
+    """Compact exact direct-probability observation contract for saved teachers."""
+    if item.direct_input_binding is None:
+        return None
+    validate_direct_input_items([item])
+    return copy.deepcopy(
+        {
+            key: item.direct_input_binding[key]
+            for key in (
+                "version",
+                "recipe_sha256",
+                "candidate_ids",
+                "displayed_candidate_ids",
+                "messages_sha256",
+                "input_token_ids_sha256",
+                "canonical_token_ids_sha256",
+            )
+        }
+    )
 
 
 def swift_question(question):

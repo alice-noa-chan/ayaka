@@ -21,9 +21,7 @@ from ..data.reasoning_v2 import SPLITS
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..losses import LossWeights
-from ..prompt import render_prefix, render_question
 from ..tokenization import HFTokenizer, ToyTokenizer
-from .batching import _noul_canonical, question_view
 from .direct_distillation import prepare_direct_distillation
 from .direct_holdout import (
     DEVELOPMENT_SPLITS,
@@ -35,9 +33,10 @@ from .direct_holdout import (
 from .direct_preflight import inspect_direct_model
 from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
+from .swift_direct import encode_direct_sample, input_serving_recipe, normalize_input_encoding
 from .workload import describe_rows, finite_workload, scheduled_batches
 
-VERSION = "ayaka-direct-bundle-4"
+VERSION = "ayaka-direct-bundle-5"
 STATUS = "cpu_prepared_no_model_or_optimizer_execution"
 FILES = {f"{split}.jsonl" for split in DEVELOPMENT_SPLITS} | {
     "test_commitment.json",
@@ -134,7 +133,7 @@ def _tokenizer_identity(tok, cfg):
                 "pad": tok.pad_id,
             }
         )
-    if cfg.backbone == "tiny" or not isinstance(tok, HFTokenizer) or tok.name != cfg.backbone:
+    if not isinstance(tok, HFTokenizer) or tok.name != cfg.backbone:
         raise ValueError("tokenizer must match the declared model")
     backend = getattr(tok.hf, "backend_tokenizer", None)
     if backend is None:
@@ -177,7 +176,7 @@ def _gold_verifier(splits, natural_registry, *, allow_tiny):
     return verify, natural_registry.binding if natural else None
 
 
-def _context_audit(splits, tok, cfg, architecture, verify_gold):
+def _context_audit(splits, tok, cfg, architecture, verify_gold, input_encoding=None):
     contexts = {}
     vocab_size = architecture["native_output_shape"][0]
     for split, samples in splits.items():
@@ -186,22 +185,20 @@ def _context_audit(splits, tok, cfg, architecture, verify_gold):
             source = sample.metadata.get("source_example_id")
             if not isinstance(source, str) or not source.strip():
                 raise ValueError("explicit source IDs are required for every reserved split")
-            prefix = render_prefix(sample.state, tok)
-            for q in sample.questions:
+            limit = (
+                cfg.max_seq_len if split == "train" else max(cfg.max_seq_len, cfg.serve_max_seq_len)
+            )
+            encoded = encode_direct_sample(
+                sample, tok, cfg, input_encoding=input_encoding, context_limit=limit
+            )
+            for q, item in zip(sample.questions, encoded, strict=True):
                 gold = verify_gold(sample, q)
                 if gold != {c.id: q.target_distribution.get(c.id, 0) for c in q.candidates}:
                     raise ValueError(
                         "independently verified reserved gold disagrees with stored targets"
                     )
-                rendered = render_question(
-                    question_view(_noul_canonical(q)), tok, cfg.max_label_candidates
-                )
-                tokens = prefix + rendered.suffix_ids
-                limit = (
-                    cfg.max_seq_len
-                    if split == "train"
-                    else max(cfg.max_seq_len, cfg.serve_max_seq_len)
-                )
+                rendered = item.enc.rendered
+                tokens = item.enc.prefix_ids + rendered.suffix_ids
                 if len(tokens) > limit:
                     raise ValueError(
                         "full direct evaluation/training input overflows; refuse truncation"
@@ -242,6 +239,7 @@ def _prepare(
     natural_registry=None,
     allow_tiny=False,
     holdout_commitment,
+    input_encoding=None,
 ):
     # Verify development gold and opaque test commitments. Original holdout
     # gold/context was checked during preparation; the trainer cannot open it.
@@ -260,10 +258,17 @@ def _prepare(
     verify_gold, gold_sources = _gold_verifier(
         splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
     )
-    contexts = _context_audit(splits, tok, cfg, architecture, verify_gold)
+    contexts = _context_audit(splits, tok, cfg, architecture, verify_gold, input_encoding)
     contexts["test"] = holdout_commitment["context_audit"]
     items, report = prepare_direct_distillation(
-        splits, tok, cfg, teacher_reads, verify_gold, weights=weights, development_only=True
+        splits,
+        tok,
+        cfg,
+        teacher_reads,
+        verify_gold,
+        weights=weights,
+        development_only=True,
+        input_encoding=input_encoding,
     )
     report["split_counts"]["test"] = holdout_commitment["counts"]
     report["split_sha256"]["test"] = holdout_commitment["split_sha256"]
@@ -311,6 +316,7 @@ def prepare_bundle(
     optimizations=None,
     natural_registry=None,
     holdout_out=None,
+    input_encoding=None,
 ):
     """Validate all data/tokens/settings before creating a fresh output directory."""
     root = Path(out)
@@ -338,6 +344,8 @@ def prepare_bundle(
     schedule = {"steps": steps, "rows_per_step": rows_per_step, "seed": seed}
     _validate_schedule(schedule)
     tokenizer_sha256 = _tokenizer_identity(tok, cfg)
+    input_encoding = normalize_input_encoding(input_encoding)
+    input_recipe = input_serving_recipe(tok, input_encoding)
     optimizations = optimizations or OptimizationConfig()
     architecture = inspect_direct_model(
         cfg,
@@ -349,7 +357,7 @@ def prepare_bundle(
         splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
     )
     test_context = _context_audit(
-        {"test": splits["test"]}, tok, cfg, architecture, verify_test_gold
+        {"test": splits["test"]}, tok, cfg, architecture, verify_test_gold, input_encoding
     )["test"]
     commitment, holdout_raw = make_commitment(
         splits["test"], context=test_context, counts=counts["test"]
@@ -366,6 +374,7 @@ def prepare_bundle(
         natural_registry=natural_registry,
         allow_tiny=allow_tiny,
         holdout_commitment=commitment,
+        input_encoding=input_encoding,
     )
     recipe = {
         "version": VERSION,
@@ -373,6 +382,8 @@ def prepare_bundle(
         "loss_weights": asdict(weights),
         "schedule": schedule,
         "tokenizer_sha256": tokenizer_sha256,
+        "input_encoding": input_encoding,
+        "input_recipe": input_recipe,
         "allow_tiny": allow_tiny,
         "verifier": VERIFIER_VERSION,
         "gold_sources": report["gold_sources"],
@@ -481,6 +492,14 @@ def audit_bundle(
     tok = tok if tok is not None else local_tokenizer(cfg, allow_tiny=allow_tiny)
     if _tokenizer_identity(tok, cfg) != recipe.get("tokenizer_sha256"):
         raise ValueError("tokenizer or chat template changed")
+    if "input_encoding" not in recipe or "input_recipe" not in recipe:
+        raise ValueError("v5 direct bundle requires an explicit input encoder and serving recipe")
+    input_encoding = normalize_input_encoding(recipe["input_encoding"])
+    if (
+        input_encoding != recipe["input_encoding"]
+        or input_serving_recipe(tok, input_encoding) != recipe["input_recipe"]
+    ):
+        raise ValueError("direct input encoder or actual serving recipe changed")
     weights = LossWeights(**recipe["loss_weights"])
     if weights.pointer_aux != 0:
         raise ValueError("native direct-student arm does not train a pointer auxiliary loss")
@@ -503,6 +522,7 @@ def audit_bundle(
         natural_registry=natural_registry,
         allow_tiny=allow_tiny,
         holdout_commitment=json.loads((root / "test_commitment.json").read_bytes()),
+        input_encoding=input_encoding,
     )
     if report["gold_sources"] != recipe.get("gold_sources"):
         raise ValueError("raw human source file binding changed; prepare a new bundle")
@@ -543,6 +563,11 @@ def main(argv=None):
     prepare.add_argument("--base-replay-weight", default=0, type=float)
     prepare.add_argument("--mechanics-only", action="store_true")
     prepare.add_argument(
+        "--input-encoder", choices=("ayaka_segmented", "swift_canonical"), default="ayaka_segmented"
+    )
+    prepare.add_argument("--prompt-variant", choices=("min", "cygnet", "rules", "labeled"))
+    prepare.add_argument("--state-format", choices=("pretty", "compact"))
+    prepare.add_argument(
         "--attention", choices=("native", "sdpa", "flash_attention_2"), default="native"
     )
     prepare.add_argument("--liger", action="store_true")
@@ -552,6 +577,11 @@ def main(argv=None):
     audit.add_argument("--expected-manifest-sha256")
     args = parser.parse_args(argv)
     if args.command == "prepare":
+        encoding = {"encoder": args.input_encoder}
+        for field in ("prompt_variant", "state_format"):
+            if getattr(args, field) is not None:
+                encoding[field] = getattr(args, field)
+        encoding = normalize_input_encoding(encoding)
         cfg = ElectraConfig(**json.loads(args.config.read_bytes()))
         tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only)
         splits = {
@@ -582,6 +612,7 @@ def main(argv=None):
             allow_tiny=args.mechanics_only,
             optimizations=OptimizationConfig(attention=args.attention, liger=args.liger),
             holdout_out=args.holdout_out,
+            input_encoding=encoding,
         )
     else:
         manifest, _, _, _, _ = audit_bundle(

@@ -16,9 +16,14 @@ from ..eval.read_artifact import fingerprint
 from ..eval.v2 import typed_row
 from ..losses import LossWeights
 from ..primitives import QuestionSpec
-from ..prompt import render_prefix, render_question
-from .batching import _noul_canonical, question_view, sample_to_items
+from .batching import _noul_canonical
 from .prepare_v2 import audit_splits
+from .swift_direct import (
+    direct_readout_binding,
+    encode_direct_sample,
+    normalize_input_encoding,
+    validate_direct_input_items,
+)
 
 VERSION = "ayaka-direct-distillation-preparation-1"
 
@@ -80,6 +85,7 @@ def make_teacher_read(
     trace_sha256,
     generated_tokens,
     finish_reason="eos",
+    direct_readout=None,
 ):
     """Snapshot a declared completed teacher read; preserve raw probabilities.
 
@@ -107,7 +113,7 @@ def make_teacher_read(
     order = [original_ids.index(c.id) for c in q.candidates]
     p = _distribution(probs, len(question.candidates))
     d = _distribution(direct_probs, len(question.candidates))
-    return {
+    result = {
         "version": VERSION,
         "question_sha256": question_fingerprint(sample, question),
         "model_sha256": model_sha256,
@@ -121,9 +127,14 @@ def make_teacher_read(
         "direct_probs": [d[i] for i in order],
         "execution_attested": False,
     }
+    if direct_readout is not None:
+        if not isinstance(direct_readout, dict):
+            raise ValueError("direct readout binding must be an object")
+        result["direct_readout_binding"] = copy.deepcopy(direct_readout)
+    return result
 
 
-def _check_read(read, sample, q):
+def _check_read(read, sample, q, item):
     if (
         not isinstance(read, dict)
         or read.get("version") != VERSION
@@ -141,6 +152,12 @@ def _check_read(read, sample, q):
         raise ValueError("teacher requires a nonempty completed trace within the v2 budget")
     if read.get("execution_attested") is not False:
         raise ValueError("this preparation contract does not attest backend execution")
+    if item.direct_input_binding is not None and read.get(
+        "direct_readout_binding"
+    ) != direct_readout_binding(item):
+        raise ValueError(
+            "teacher direct probabilities require the exact Swift input/readout binding"
+        )
     return _distribution(read.get("probs"), len(q.candidates)), _distribution(
         read.get("direct_probs"), len(q.candidates)
     )
@@ -172,7 +189,15 @@ def _teacher_filter(q, teacher, direct, target):
 
 
 def prepare_direct_distillation(
-    splits, tok, cfg, teacher_reads, verify_gold, *, weights=None, development_only=False
+    splits,
+    tok,
+    cfg,
+    teacher_reads,
+    verify_gold,
+    *,
+    weights=None,
+    development_only=False,
+    input_encoding=None,
 ):
     """Audit reserved splits, then prepare only original-input train items.
 
@@ -198,6 +223,7 @@ def prepare_direct_distillation(
     if not callable(verify_gold):
         raise ValueError("an independent gold verifier is required")
     counts = audit_splits(splits, development_only=development_only)
+    input_encoding = normalize_input_encoding(input_encoding)
     expected = {}
     for sample in splits["train"]:
         source = sample.metadata.get("source_example_id")
@@ -219,15 +245,7 @@ def prepare_direct_distillation(
         clean = copy.deepcopy(sample)
         for key in ("verified_traces", "teacher_probs", "teacher"):
             clean.metadata.pop(key, None)
-        prefix = render_prefix(clean.state, tok)
-        for q in clean.questions:
-            view = question_view(_noul_canonical(q))
-            if (
-                len(prefix) + len(render_question(view, tok, cfg.max_label_candidates).suffix_ids)
-                > cfg.max_seq_len
-            ):
-                raise ValueError("complete original direct input does not fit; refuse truncation")
-        direct_items = sample_to_items(clean, tok, cfg)
+        direct_items = encode_direct_sample(clean, tok, cfg, input_encoding=input_encoding)
         for q, item in zip(clean.questions, direct_items, strict=True):
             q = _noul_canonical(q)
             identity = f"{sample.metadata['source_example_id']}/{q.id}"
@@ -241,7 +259,7 @@ def prepare_direct_distillation(
             read = teacher_reads.get(identity)
             teacher, reasons = None, ["no_saved_teacher"]
             if read is not None:
-                teacher, direct = _check_read(read, sample, q)
+                teacher, direct = _check_read(read, sample, q, item)
                 reasons = _teacher_filter(q, teacher, direct, target)
             accepted = not reasons
             items.append(
@@ -255,10 +273,13 @@ def prepare_direct_distillation(
                     "input_tokens": item.length,
                     "teacher_accepted": accepted,
                     "reasons": reasons,
+                    "direct_readout_binding": direct_readout_binding(item),
                 }
             )
+    validate_direct_input_items(items)
     return items, {
         "version": VERSION,
+        "input_encoding": input_encoding,
         "promotable": False,
         "execution_attested": False,
         "split_counts": counts,
