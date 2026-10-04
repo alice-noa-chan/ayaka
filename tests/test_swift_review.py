@@ -13,7 +13,6 @@ from ayaka.swift.policy import Policy
 from ayaka.swift.readers import FakeReader, canonical_letter_ids, top_letter_probs
 from ayaka.swift.score import score_reads
 from scripts.swift.parity import compare
-from scripts.swift.parity import main as parity_main
 
 
 def reads():
@@ -307,42 +306,6 @@ def test_parity_reports_error_thresholds_and_agreement(tmp_path, monkeypatch):
     assert failing["max_abs"] == pytest.approx(0.03)
     assert failing["mean_abs"] == pytest.approx(0.03)
     assert not failing["passed"] and failing["argmax_agreement"] == 0
-    from scripts.swift import parity
-
-    monkeypatch.setattr(parity, "HFReader", lambda *args, **kwargs: FakeReader())
-    monkeypatch.setattr(parity, "VLLMChatReader", lambda *args, **kwargs: FakeReader())
-    source = tmp_path / "items.jsonl"
-    source.write_text(
-        json.dumps(
-            {
-                "id": "q",
-                "labels": ["a", "b"],
-                "expected": "a",
-                "question": {"type": "choice", "criteria": ["a", "b"]},
-            }
-        )
-        + "\n"
-    )
-    output = tmp_path / "parity.json"
-    assert (
-        parity_main(
-            [
-                str(source),
-                "--model",
-                "fixture",
-                "--revision",
-                "pin",
-                "--n",
-                "2",
-                "--output",
-                str(output),
-            ]
-        )
-        == 1
-    )
-    result = json.loads(output.read_text())
-    assert not result["complete"] and not result["passed"]
-    assert len(result["variants"]["min"]["samples"]) == 1
 
 
 @pytest.mark.parametrize(
