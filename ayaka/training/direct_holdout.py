@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 
 from ..data.schema import Sample
+from ..data.source_groups import group_evidence, identities
 from ..eval.read_artifact import fingerprint
 from .direct_distillation import _sha
 from .prepare_v2 import LINEAGE_KEYS, canonical, sha256
 
-VERSION = "ayaka-direct-holdout-1"
+VERSION = "ayaka-direct-holdout-2"
 DEVELOPMENT_SPLITS = ("train", "router_train", "dev", "calibration")
 
 
@@ -38,6 +39,8 @@ def signatures(sample):
     )
     return {
         "state_sha256": fingerprint(sample.state),
+        "evidence_sha256": fingerprint(group_evidence(sample)),
+        "identity_sha256": sorted(fingerprint(value) for value in identities(sample)),
         "content_sha256": sha256(canonical(content)),
         "lineage_sha256": {
             key: fingerprint(sample.metadata[key])
@@ -128,14 +131,21 @@ def validate_commitment(commitment, development):
         or commitment.get("counts", {}).get("samples") != len(members)
     ):
         raise ValueError("holdout commitment members/counts mismatch")
-    hashes = {key: set() for key in ("state_sha256", "content_sha256")}
+    hashes = {key: set() for key in ("state_sha256", "content_sha256", "evidence_sha256")}
+    identity_hashes = set()
     lineage = {}
     for row in members:
-        if set(row) != {"state_sha256", "content_sha256", "lineage_sha256"}:
+        if set(row) != {*hashes, "lineage_sha256", "identity_sha256"}:
             raise ValueError("holdout commitments must contain hashes only")
         for key in hashes:
             _sha(row[key], key)
             hashes[key].add(row[key])
+        refs = row["identity_sha256"]
+        if not isinstance(refs, list) or not refs or refs != sorted(set(refs)):
+            raise ValueError("holdout identities must be sorted unique hashes")
+        for value in refs:
+            _sha(value, "identity_sha256")
+            identity_hashes.add(value)
         if not isinstance(row["lineage_sha256"], dict) or not row["lineage_sha256"].get(
             "source_lineage"
         ):
@@ -156,8 +166,12 @@ def validate_commitment(commitment, development):
             raise ValueError("holdout isolation only accepts development splits")
         for sample in samples:
             row = signatures(sample)
-            if any(row[key] in hashes[key] for key in hashes) or any(
-                value in lineage.get(key, set()) for key, value in row["lineage_sha256"].items()
+            if (
+                identity_hashes.intersection(row["identity_sha256"])
+                or any(row[key] in hashes[key] for key in hashes)
+                or any(
+                    value in lineage.get(key, set()) for key, value in row["lineage_sha256"].items()
+                )
             ):
                 raise ValueError("development/holdout evidence or lineage overlap")
     return commitment

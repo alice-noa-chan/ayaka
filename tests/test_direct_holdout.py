@@ -89,7 +89,13 @@ def test_originals_live_only_in_separate_holdout_and_training_audit_never_opens_
     read_splits(root)
     assert commitment["contains_original_inputs_or_gold"] is False
     member = commitment["members"][0]
-    assert set(member) == {"state_sha256", "content_sha256", "lineage_sha256"}
+    assert set(member) == {
+        "state_sha256",
+        "content_sha256",
+        "lineage_sha256",
+        "evidence_sha256",
+        "identity_sha256",
+    }
     text = (root / "test_commitment.json").read_text()
     assert splits["test"][0].metadata["source_example_id"] not in text
     assert str(splits["test"][0].state) not in text
@@ -110,6 +116,16 @@ def test_overlap_is_rejected_even_when_questions_or_gold_change(prepared, field)
         sample.metadata[field] = "shared-original-document"
         commitment = copy.deepcopy(commitment)
         commitment["members"][0]["lineage_sha256"][field] = fingerprint(sample.metadata[field])
+    with pytest.raises(ValueError, match="overlap"):
+        validate_commitment(commitment, development)
+
+
+@pytest.mark.parametrize("field", ["derived_from", "translation_of", "lineage_ids"])
+def test_holdout_parent_aliases_match_other_identity_fields(prepared, field):
+    _, _, splits, commitment, _ = prepared
+    development = copy.deepcopy({s: splits[s] for s in DEVELOPMENT_SPLITS})
+    parent = splits["test"][0].metadata["source_example_id"]
+    development["train"][0].metadata[field] = [parent] if field == "lineage_ids" else parent
     with pytest.raises(ValueError, match="overlap"):
         validate_commitment(commitment, development)
 

@@ -3,12 +3,13 @@
 import gzip
 import hashlib
 import json
-import unicodedata
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 from .decontam import Decontaminator
 from .schema import Candidate, Question, Sample, one_hot
+from .source_groups import connected_groups, evidence
 from .transforms import helpsteer2_scores, intent_choice
 
 SOURCES = {
@@ -44,15 +45,6 @@ def digest(value):
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
     ).hexdigest()
-
-
-def evidence(sample):
-    state = sample.state
-    if isinstance(state, dict) and "prompt" in state:
-        state = state["prompt"]  # all responses to the same HelpSteer prompt stay together
-    return unicodedata.normalize(
-        "NFKC", json.dumps(state, ensure_ascii=False, sort_keys=True)
-    ).casefold()
 
 
 def valid_provenance(metadata):
@@ -167,36 +159,66 @@ def local_sources():
     return sources, provenance
 
 
-def partition_sources(sources, reserved, *, fits, train_limit=512, heldout_limit=64):
+def partition_sources(
+    sources,
+    reserved,
+    *,
+    fits,
+    train_limit=512,
+    heldout_limit=64,
+    quotas=None,
+    fits_by_split=None,
+):
     """Remove public/previous evaluation evidence before assigning any training row."""
     if any(type(n) is not int or n < 1 for n in (train_limit, heldout_limit)):
         raise ValueError("natural source limits must be positive")
+    expected = {(source, split) for source in sources for split in SPLITS}
+    if quotas is not None and (
+        set(quotas) != set(sources)
+        or any(set(limits) != set(SPLITS) for limits in quotas.values())
+        or any(type(n) is not int or n < 1 for limits in quotas.values() for n in limits.values())
+    ):
+        raise ValueError("natural quotas require positive sample limits for every source/split")
     blocker = Decontaminator.from_jevbench()
-    blocked = {evidence(sample) for sample in reserved}
-    blocked_lineages = {sample.metadata.get("source_lineage") for sample in reserved}
+    rows = [(source, sample) for source, samples in sources.items() for sample in samples]
+    for source, sample in rows:
+        if sample.metadata.get("source") != source or not valid_provenance(sample.metadata):
+            raise ValueError(
+                "natural source has unapproved revision, split or human-label provenance"
+            )
+        if not sample.metadata.get("source_lineage"):
+            raise ValueError("natural source requires a primary source_lineage")
+    all_samples = [sample for _, sample in rows] + list(reserved)
+    row_groups, groups = connected_groups(all_samples)
+    blocked = set(row_groups[len(rows) :])
+    blocked.update(
+        row_groups[i] for i, (_, sample) in enumerate(rows) if blocker.sample_hit(sample)
+    )
+    assignment = {id(sample): groups[row_groups[i]] for i, (_, sample) in enumerate(rows)}
+    excluded = {id(sample) for i, (_, sample) in enumerate(rows) if row_groups[i] in blocked}
     result = {split: [] for split in SPLITS}
     counts, removed, seen = Counter(), Counter(), set()
     for source, samples in sources.items():
         for sample in sorted(samples, key=lambda s: digest(s.to_json())):
-            if not valid_provenance(sample.metadata):
-                raise ValueError(
-                    "natural source has unapproved revision, split or human-label provenance"
-                )
-            content = evidence(sample)
-            if (
-                content in blocked
-                or sample.metadata["source_lineage"] in blocked_lineages
-                or blocker.sample_hit(sample)
-            ):
+            if id(sample) in excluded:
                 removed["reserved_or_public_overlap"] += 1
                 continue
-            # Identical evidence across IDs must not become independent train/test cases.
-            identity = (source, content)
+            # Prompt groups determine splits; only complete identical annotations
+            # are duplicates. Different responses and fractional ratings survive.
+            questions = sample.to_json()["questions"]
+            for question in questions:
+                question.pop("id")
+                question["candidates"].sort(key=lambda candidate: candidate["id"])
+            identity = (
+                source,
+                digest({"state": sample.state, "questions": sorted(questions, key=digest)}),
+            )
             if identity in seen:
                 removed["duplicate_evidence"] += 1
                 continue
             seen.add(identity)
-            bucket = int(digest(sample.metadata["source_lineage"])[:8], 16) % 100
+            group = assignment[id(sample)]
+            bucket = int(digest(group["key"])[:8], 16) % 100
             split = (
                 "train"
                 if bucket < 72
@@ -211,21 +233,35 @@ def partition_sources(sources, reserved, *, fits, train_limit=512, heldout_limit
             limit = train_limit if split == "train" else heldout_limit
             if source in {"helpsteer2", "commonsense_qa"} and split == "train":
                 limit = max(1, train_limit // 2)
+            if quotas is not None:
+                limit = quotas[source][split]
             if counts[source, split] >= limit:
+                removed["quota_excluded"] += 1
                 continue
-            if not fits(sample):
+            if not (fits_by_split(sample, split) if fits_by_split is not None else fits(sample)):
                 removed["context_overflow_whole_sample"] += 1
                 continue
-            sample.metadata.update(split=split, split_policy="source_group_hash_v1")
+            sample = deepcopy(sample)
+            sample.metadata.update(
+                split=split,
+                split_policy="source_group_closure_v2",
+                source_group_id=group["id"],
+                lineage_ids=group["identities"],
+            )
             result[split].append(sample)
             counts[source, split] += 1
-    expected = {(source, split) for source in sources for split in SPLITS}
     if set(counts) != expected:
         raise ValueError("each natural source requires nonempty independent splits")
+    if quotas is not None and any(
+        counts[source, split] != quotas[source][split] for source, split in expected
+    ):
+        raise ValueError("natural source quota cannot be filled within its independent split")
     return result, {
         "counts": {f"{source}/{split}": n for (source, split), n in counts.items()},
         "removed": dict(removed),
         "reserved_samples": len(reserved),
-        "split_policy": "source groups; formats and ontologies shared across splits",
+        "split_policy": "source groups with transitive aliases and evidence; formats and ontologies shared across splits",
+        "dedup_policy": "identical state, question contracts and gold only; prompt siblings retained",
+        "quota_unit": "whole samples; every question retained; group members remain in one split",
         "target_provenance": "human labels; no generated rationale added",
     }

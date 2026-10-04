@@ -17,6 +17,28 @@ from importlib import resources
 from .schema import Sample
 
 _WORD = re.compile(r"\w+", re.UNICODE)
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7a3]")
+POLICY = {
+    "version": 2,
+    "word_ngram": 13,
+    "min_exact_words": 4,
+    "cjk_character_ngram": 32,
+    "min_exact_cjk_characters": 12,
+    "min_cjk_characters_per_ngram": 8,
+    "scope": "state, instruction and candidate descriptions; complete lineage exclusion",
+}
+
+
+def _cjk_grams(text):
+    normalized = "".join(_words(text))
+    width = POLICY["cjk_character_ngram"]
+    if len(normalized) < width or not _CJK.search(normalized):
+        return set()
+    return {
+        normalized[i : i + width]
+        for i in range(len(normalized) - width + 1)
+        if len(_CJK.findall(normalized[i : i + width])) >= POLICY["min_cjk_characters_per_ngram"]
+    }
 
 
 def _words(text: str) -> list[str]:
@@ -29,11 +51,7 @@ def _ngrams(words: list[str], n: int) -> set[tuple[str, ...]]:
 
 def _record_texts(rec: dict) -> list[str]:
     q = rec.get("question", {})
-    texts = [
-        rec.get("state")
-        if isinstance(rec.get("state"), str)
-        else json.dumps(rec.get("state"), ensure_ascii=False)
-    ]
+    texts = _state_texts(rec.get("state"))
     texts.append(q.get("instructions") or q.get("instruction") or "")
     crit = q.get("criteria")
     if isinstance(crit, dict):
@@ -41,6 +59,16 @@ def _record_texts(rec: dict) -> list[str]:
     elif isinstance(crit, list):
         texts.extend(str(v) for v in crit)
     return [t for t in texts if t]
+
+
+def _state_texts(state):
+    if isinstance(state, str):
+        return [state]
+    texts = [json.dumps(state, ensure_ascii=False)]
+    values = state.values() if isinstance(state, dict) else state if isinstance(state, list) else []
+    for value in values:
+        texts.extend(_state_texts(value))
+    return texts
 
 
 def jevbench_public_dir() -> str:
@@ -52,12 +80,21 @@ class Decontaminator:
         self.n = n
         self.grams: set[tuple[str, ...]] = set()
         self.exact: set[str] = set()
+        self.cjk_grams: set[str] = set()
+        self.cjk_exact: set[str] = set()
         for t in texts:
             w = _words(t)
             if len(w) >= n:
                 self.grams |= _ngrams(w, n)
             elif len(w) >= min_exact_words:
                 self.exact.add(" ".join(w))
+            normalized = "".join(w)
+            self.cjk_grams.update(_cjk_grams(t))
+            if (
+                len(normalized) < POLICY["cjk_character_ngram"]
+                and len(_CJK.findall(normalized)) >= POLICY["min_exact_cjk_characters"]
+            ):
+                self.cjk_exact.add(normalized)
 
     @classmethod
     def from_jevbench(cls, data_dir: str | None = None, n: int = 13) -> Decontaminator:
@@ -75,15 +112,22 @@ class Decontaminator:
         w = _words(text)
         if " ".join(w) in self.exact:
             return True
+        if (
+            any(exact in "".join(w) for exact in self.cjk_exact)
+            or _cjk_grams(text) & self.cjk_grams
+        ):
+            return True
         if len(w) < self.n:
             return False
         return any(tuple(w[i : i + self.n]) in self.grams for i in range(len(w) - self.n + 1))
 
     def sample_hit(self, s: Sample) -> bool:
-        state = s.state if isinstance(s.state, str) else json.dumps(s.state, ensure_ascii=False)
-        if self.text_hit(state):
+        if any(self.text_hit(text) for text in _state_texts(s.state)):
             return True
-        return any(self.text_hit(q.instruction) for q in s.questions)
+        return any(
+            self.text_hit(q.instruction) or any(self.text_hit(c.description) for c in q.candidates)
+            for q in s.questions
+        )
 
     def filter(self, samples: list[Sample]) -> tuple[list[Sample], int]:
         kept = [s for s in samples if not self.sample_hit(s)]

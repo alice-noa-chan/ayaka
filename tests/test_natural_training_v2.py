@@ -83,6 +83,6 @@ def test_prompt_group_blocks_other_responses_and_overflow_drops_whole_samples():
         train_limit=200,
         heldout_limit=100,
     )
-    assert report["removed"]["reserved_or_public_overlap"] == 1
+    assert report["removed"]["reserved_or_public_overlap"] == 3
     assert report["removed"]["context_overflow_whole_sample"] == 1
     assert all(evidence(s) != evidence(reserved) for samples in result.values() for s in samples)

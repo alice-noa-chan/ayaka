@@ -96,6 +96,8 @@ def audit_splits(splits, *, development_only=False):
     ):
         raise ValueError("all required nonempty independent splits are required")
     seen = {key: {} for key in (*LINEAGE_KEYS, "content")}
+    from ..data.source_groups import connected_groups
+
     counts = {}
     for split, samples in splits.items():
         typed, languages, modalities, families = Counter(), Counter(), Counter(), Counter()
@@ -150,6 +152,13 @@ def audit_splits(splits, *, development_only=False):
             "modalities": dict(modalities),
             "families": dict(families),
         }
+    grouped_rows = [(split, s) for split, rows in splits.items() for s in rows]
+    group_ids, _ = connected_groups([s for _, s in grouped_rows])
+    group_splits = {}
+    for (split, _), group in zip(grouped_rows, group_ids, strict=True):
+        previous = group_splits.setdefault(group, split)
+        if previous != split:
+            raise ValueError(f"cross-split leakage in source evidence/aliases: {previous}/{split}")
     return counts
 
 
