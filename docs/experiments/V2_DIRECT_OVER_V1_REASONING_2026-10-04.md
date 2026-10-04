@@ -111,8 +111,9 @@ teacher가 없는 gold-only 제어군은 `--teacher-reads`를 생략하고 `--di
   이 native LM arm은 label이 있는 최대 26개 후보를 지원한다. 그 이상은 별도
   pointer/hybrid 절제군이 필요하며 자동 fallback으로 학습 구조를 바꾸지 않는다.
 - `training_batches(..., start_step=...)`는 고정된 step/rows/seed 일정과 재현 가능한
-  whole-step 재개 위치를 제공한다. optimizer/checkpoint/RNG 상태 저장·복원까지
-  구현되었다는 뜻은 아니다.
+  whole-step 재개 위치를 제공한다. 후속 `direct_state.py`와 `run_direct.py`는
+  LoRA/AdamW/scheduler/RNG를 함께 저장하고 복원한다. CPU native tiny에서
+  activation checkpointing on/off 모두 연속 실행과 정확히 일치했다.
 - independent gold 검증은 현재 authored 날짜·수치·규칙 자료의 10개 family에
   한정된다. 자연 문서의 judge/score 정답이나 teacher 풀이의 전 단계를 검증하는
   일반 verifier가 아니다. 검증 계산은 자료 준비에서만 실행한다.
@@ -138,7 +139,7 @@ teacher가 없는 gold-only 제어군은 `--teacher-reads`를 생략하고 `--di
 | native output head | 262,144 × 3,840, input과 tied, bias 없음 |
 | LoRA 위치 | q/k/o/gate/up/down 각 48개, v 40개 |
 | 준비 문항 | split별 96개, 총 480개 |
-| 실제 train 일정 | 3 steps × 32 rows = 96 rows, 각 row 1회 |
+| 준비 train 일정 | 3 steps × 32 rows = 96 rows, 각 row 1회 |
 | 일정의 원본 입력 토큰 | 15,250 |
 | split별 최대 입력 길이 | 207–212 tokens |
 | teacher 관측 / 수용 수 | **0 / 0** |
@@ -152,20 +153,24 @@ corpus를 완성했다는 뜻이 아니며 독립된 자연 문항에서 성능�
 
 ## 아직 필요한 작업과 비용 조건
 
-- Claude의 독립 설계 판단 및 새 모듈 코드 리뷰. 요청은
-  `.dev/codex-direct-goal-to-claude-20261004.md`와
-  `.dev/codex-direct-runner-to-claude-20261004.md`에 남겼다. Swift 후속 snapshot과
-  기존 Clef head/objective 리뷰는 받았지만 이 direct 학습 가설/새 모듈 답신은 아직 없다.
+- Claude의 direct 설계·verifier/guard/bundle/meta 리뷰를 받았다. 세 arm(gold-only,
+  teacher-final KL, frozen-base replay KL), 자연 정책 문서의 필요성과 frozen+policy
+  제어군도 넘어야 한다는 조건에 합의했다. mixed-batch와 외부 corpus anchor 지적을
+  반영했다. 새 kernel/state/runner/raw registry 코드의 추가 독립 리뷰는 요청 중이다.
 - 실제 품질 학습 corpus의 준비와 decontamination, authored 형식 밖의 독립 gold
   검증, 실제 saved teacher의 model/prompt/원본 입력 및 실행 provenance 연결.
   새 teacher를 만드는 비용도 전체 예산에 포함한다.
-- 정확한 weights/tokenizer/readout/LoRA 설정에 연결한 학습 runner, checkpoint/resume,
-  학습 뒤 calibration→dev 선택→설정 freeze→독립 test 순서.
+- native runner, checkpoint/resume, calibration-only T fitting, 고정 dev/test 진단과
+  export/reload parity는 구현했다. 실제 승격용 test의 별도 보관·실행, matched arm의
+  dev 선택과 freeze, public composite 비교는 더 필요하다. 현재 bundle test는
+  train stream에 들어가지 않지만 같은 준비 디렉터리에 있는 실험 진단 자료다.
 - 실제 GPU의 logits/cache parity, 처리량·VRAM·serial latency, teacher 준비부터
-  학습/test/회수까지 **잔액 안에서 완주**하는 사전 admission. R15 전체 시간 cap 문제는
-  Claude 측 Swift 담당 범위이며 해결 확인 전 과금 실행하지 않는다. 최신 Swift 소스의
-  fake-clock CPU 재검사에서도 전체 60초 설정이 첫 priority의 work 600초/cleanup 630초로
-  늘어나는 반례가 유지되었다. 신규 GPU/API/process 없이 확인한 결과다.
+  학습/test/회수까지 **잔액 안에서 완주**하는 사전 admission. 전체 11개 stage의
+  prepaid estimator와 측정 후 재admission을 구현했다. 실제 provider 잔액·단가·과금
+  시작 시각과 외부 회수/정리 supervisor는 별도로 검증해야 한다.
+  Swift R15는 Claude의 `96b69aa` 이후 독립 fake-clock 재현에서 해결됐다.
+  1분 full plan은 launch 전 거부, 120분 plan의 모든 deadline은 7200초 안에 유지된다.
+  vLLM 설치/download가 Swift runner cap 밖이라는 제한은 전체 비용에 포함해야 한다.
 - 첫 CPU tiny-LoRA optimizer step은 데이터/손실 연결 검사다. 실제 성능 향상이나
   전체 생산 학습의 완료 증거가 아니다. 낮은 예산으로 실행 가능한 완전한 workload를
   먼저 정하며, 중도 시간 종료를 기본 학습 계획으로 쓰지 않는다.
@@ -175,7 +180,80 @@ corpus를 완성했다는 뜻이 아니며 독립된 자연 문항에서 성능�
 `19f6c3e` immutable CPU bundle, `9f2a8dd` native meta 구조 검사,
 `80c8eb3` 실제 구조/heldout 문맥과 bundle 연결. 단위별 코드/테스트 수정 → lint/format →
 재검사 → 관련 테스트 → diff 검토 → 별도 커밋 순서로 검증했다.
-마지막 전체 CPU 회귀 검사: **1190 passed, 1 skipped / 166.10s**,
+이전 전체 CPU 회귀 검사: **1190 passed, 1 skipped / 166.10s**,
 소스 변경 0. 영수증은 `.dev/codex-direct-bundle-full-20261004.json`에 있다.
 whole-tree Ruff lint/format도 234 Python files에서 통과했다.
-새로운 GPU/API inference와 학습된 checkpoint는 없다.
+새로운 GPU/API inference와 실제 pretrained 기반 학습 checkpoint는 없다.
+
+## 후속 native 실행·최적화 상태
+
+`optimization.py`는 실제 출력 head와 typed loss를 유지하면서 인스턴스별 kernel을
+적용한다. 설치 누락/미지원 요청은 오류로 반환한다. Liger의 전체 vocab CE patch는
+직접 판정 손실에 맞지 않아 사용하지 않는다. 실제 native Gemma4 unified norm의
+weight 의미(offset=0)와 tanh GeGLU에 functional kernel을 적용하고 기존 PEFT
+projection/parameter 객체를 유지한다. norm48개는 scale-free이므로 native를 유지한다.
+
+실제 pinned 12B의 meta topology에서 FA2 지원 head 층40개, head_dim512의 native SDPA
+층8개를 확인했다. FA2는 공식 지원 범위(head dimension ≤256)에만 적용하며 큰 head를
+임의로 분할하지 않는다. [FA2 공식 지원 문서](https://github.com/Dao-AILab/flash-attention#nvidia-cuda-support),
+[Liger functional API](https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/functional.py).
+CPU reference 함수 주입으로 실제 Trainer의 loss/prob/gradient parity와 rollback을
+검사했다. **실제 CUDA FA2/Liger 실행이나 속도 향상을 측정한 것은 아니다.**
+
+bundle은 현재 v3다. kernel 설정과 실제 topology, 원본 human file binding을 recipe에
+저장한다. 이전 v1/v2 준비 receipt는 보존하며 최신 소스로 다시 준비해야 한다.
+실행 시 묶음 밖에 고정한 manifest SHA256을 요구해 전체 payload를 다시 생성한
+다른 corpus가 내부 audit만으로 원래 묶음을 대체하지 못하게 한다.
+
+`native_snapshot.py`는 캐시에 있는 고정 revision의 config/index/safetensors bytes와
+header를 검사한다. strict offline loader는 누락된 text tensor의 random 초기화를
+거부한다. 실제로 쓸 bytes를 묶는 것이며 publisher 원본의 별도 authenticity 증명은 아니다.
+CPU random Gemma 33 shards의 원본 LM logits와 strict 재로딩 logits가 일치했다.
+
+`run_direct.py`는 audit → native parity → backward/optimizer/IO profile → 전체 비용
+재admission → 고정된 모든 step → calibration → 고정 dev/test 진단 → native export
+→ offline reload 확률 일치 순서다. 부족한 비용으로 steps를 자동 줄이지 않는다.
+실제 native profile/train은 `--execute`, CUDA, matching snapshot, 외부 bundle anchor,
+이미 과금된 setup/download/teacher 시간과 quoted prepaid plan을 명시해야 한다.
+CLI 자체가 cloud를 할당하거나 과금을 승인하지는 않는다.
+
+`direct_natural.py`는 HelpSteer2 20,324 rows, CommonsenseQA 9,741 rows,
+MASSIVE ko/ja 각각11,514 rows를 로컬에서 읽고 모두 변환했다(download0).
+raw 인간 라벨/원본 입력/후보/lineage와 변환 gold를 대조하며 기존 source-group hash를
+유지한다. HelpSteer ordinal encoding은 소수 평균도 보존하지만 실제 cached ratings의
+소수 값은 0개였다. MASSIVE는 명시적인 balanced binary intent propositions이며
+60-way Choice 성능으로 보고하지 않는다. rubric/schema를 공유하므로 원본 인간 라벨
+검증과 문법의 독립 검증을 구분한다. **일반 rehearsal이며 자연 정책 문서 reasoning
+자료와 독립 test 성공을 대신하지 않는다.**
+
+`frozen_replay.py`는 LoRA를 실제로 비활성화하고 natural train 입력만 한 번 읽는다.
+기본 native 분포를 정답/추론 teacher와 별도로 저장하며 `base_replay` coefficient는
+기본0이다. 활성화해도 gold NLL과 teacher KL을 대체하지 않는다. saved read의 입력·
+후보 순서·native bytes digest를 optimizer binding에 고정하고 resume에서 같은 원본
+관측을 요구한다. 추가 base 모델과 매 step reference forward는 없다. coefficient의
+최적값과 실제 회귀 방지 효과는 matched pilot에서 측정해야 한다.
+
+후속 커밋: `52ccc99` mixed batch/rounding 회귀, `9b27cb2` kernels, `9008fa4`
+kernel recipe binding, `4ba7529` optimizer continuation, `8b1ad28` strict native snapshot,
+`19b71c2` whole prepaid plan, `d008103` direct pipeline, `e6d83e3` raw human gold,
+`0d2624e` external corpus anchor, `3523e92` frozen-base replay. 각 단위는 코드/관련 테스트
+→ Ruff fix → format → lint/format 재검사 → 관련 테스트 → diff review → 별도 commit으로 진행했다.
+
+최신 통합: **1316 passed, 1 skipped / 189.12s**, source 변경0,
+whole-tree Ruff lint/format **248 files** 통과.
+receipt `.dev/codex-native-runner-kernels-full-20261004.json`은 before/after source hash와
+실제 Git Bash 테스트 환경을 기록했다. tiny CPU의 optimizer/export 결과를 실제
+pretrained 모델 성능으로 계산하지 않는다.
+
+최신 실제 pinned12B meta/tokenizer control은
+`.dev/direct-native-kernels-cpu-20261004/receipt.json`에 저장했다. 외부 manifest anchor:
+
+```text
+19fc8ffa49959df6332e18f866e64d21747e287e676951fa0fcd56998a2d8a5a
+```
+
+이 control은 v3 gold-only authored480문항/teacher0, planned96train rows/optimizer0이다.
+FA2+Liger 설정과 실제 meta topology를 재구성했고 source/tokenizer/full workload audit이
+일치했다. **현재 캐시에는 12B config/tokenizer만 있고 native weight shard가 없다.**
+actual snapshot inspection은 ready=False로 기록했다. 본 품질 corpus, saved teacher,
+GPU 런타임 확인이나 전체 cloud workflow 완료 증거가 아니다.
