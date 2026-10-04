@@ -78,6 +78,8 @@ def latency(variant, seconds=0.04):
         "model": "fixture",
         "revision": "a" * 40,
         "complete": True,
+        "public": False,
+        "split": "dev",
         "concurrency": 1,
         "units": "seconds",
         "completed_reads": 200,
@@ -128,6 +130,10 @@ def test_select_fits_calibration_reports_axes_and_writes_policies(tmp_path, caps
         assert report["speed_source"] == "estimated_speed_axis"
     assert result["variants"]["min"]["paired_vs_min"]["ci_95_A"] == [0, 0]
     assert result["bootstrap"]["B"] == 30 and result["bootstrap"]["seed"] == 15
+    assert result["adoption"]["constants"]["bootstrap_B"] == 2000
+    assert result["adoption"]["constants"]["bootstrap_seed"] == 15
+    assert result["adoption"]["adopted_levers"] == []
+    assert all(not result["policies"][v]["promotable"] for v in PROMPT_VARIANTS if v != "min")
     assert result["bootstrap"]["case_count"] == 4
     output = tmp_path / "selection.json"
     policies = tmp_path / "policies"
@@ -147,6 +153,9 @@ def test_select_fits_calibration_reports_axes_and_writes_policies(tmp_path, caps
     )
     assert json.loads(output.read_text()) == result
     assert Policy.load(policies / "policy.json").prompt_variant == "min"
+    assert (
+        json.loads((policies / "adoption.json").read_text(encoding="utf-8")) == result["adoption"]
+    )
     assert "Selected min" in capsys.readouterr().out
 
 

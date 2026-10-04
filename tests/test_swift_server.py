@@ -184,7 +184,7 @@ def test_policy_variant_mismatch_refused_and_force_renders_requested_variant(tmp
         assert reader.calls[0][0][0]["content"] == RULES_SYSTEM
     finally:
         service.close()
-    service = DecisionService(reader, "fake", prompt_variant="rules")
+    service = DecisionService(reader, "fake", prompt_variant="rules", diagnostic=True)
     assert service.policy.prompt_variant == "rules"
     service.close()
 

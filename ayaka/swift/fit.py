@@ -213,6 +213,7 @@ def fit_policy(
             or invalid_split
             or include_grouped
             or any(row.get("readout") == "alias_sum" for row in rows)
+            or prompt_variant != "min"
         ),
     )
     score_table = []

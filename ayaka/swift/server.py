@@ -8,6 +8,7 @@ import json
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ayaka.reasoning import resolve_settings
@@ -34,6 +35,7 @@ class DecisionService:
         state_format: str = "pretty",
         prompt_variant: str = "min",
         force_variant: bool = False,
+        diagnostic: bool = False,
     ):
         if max_parallel < 1 or max_questions < 1:
             raise ValueError("parallelism and question limits must be positive")
@@ -47,6 +49,22 @@ class DecisionService:
                 f"policy prompt_variant={policy.prompt_variant!r} differs from "
                 f"--prompt-variant {prompt_variant!r}; use --force-variant to override"
             )
+        if diagnostic or force_variant:
+            policy = replace(policy, promotable=False)
+        else:
+            if policy.promotable is not True:
+                raise ValueError("unpromotable Swift policies require --diagnostic serving")
+            from .adopt import validate_adopted_policy
+
+            validate_adopted_policy(policy)
+            if policy.adoption and policy.adoption["model"] != model_name:
+                raise ValueError("adopted policy model differs from serving model")
+            if (
+                policy.adoption
+                and getattr(reader, "backend", None) in ("hf", "vllm")
+                and getattr(reader, "revision", None) != policy.adoption["revision"]
+            ):
+                raise ValueError("adopted policy revision differs from serving reader")
         self.reader = reader
         self.model_name = model_name
         self.policy = policy
@@ -224,7 +242,12 @@ def main(argv: list[str] | None = None) -> None:
     add_reader_arguments(parser)
     parser.add_argument("--policy", help="policy.json; default uses T=1 without commitment")
     parser.add_argument(
-        "--force-variant", action="store_true", help="override policy/variant mismatch"
+        "--force-variant",
+        action="store_true",
+        help="diagnostic override of policy/variant mismatch",
+    )
+    parser.add_argument(
+        "--diagnostic", action="store_true", help="serve unadopted candidates; never promotable"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8009)
@@ -242,6 +265,7 @@ def main(argv: list[str] | None = None) -> None:
             state_format=args.state_format,
             prompt_variant=args.prompt_variant,
             force_variant=args.force_variant,
+            diagnostic=args.diagnostic,
         )
     except ValueError as exc:
         parser.error(str(exc))

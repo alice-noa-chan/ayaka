@@ -153,12 +153,53 @@ exploration still enforces role/public/isolation rules and needs rendered input
 hashes to check overlap. Fresh bound reads need nonempty model/revisions,
 tokenizer revision, runtime, readout and prompt variant with valid Swift hashes.
 
-P1 fits each variant on v2 calibration and ranks it on matching v2 dev. It uses
-local composite A, input-only cost and a declared estimated speed axis, with
-paired whole-case bootstrap (B=2000, seed=15). A confidence interval containing
-zero favors fewer input tokens. P2 probes only the two highest-A variants;
-latency reports do not retroactively refit the policies. The public accuracy
-arm runs after the policy/variant selection is frozen.
+P1 fits each variant on v2 calibration and chooses a single prompt proposal by
+calibration A, breaking ties in the fixed order min, cygnet, rules, labeled. It
+compares that proposal with the existing fitted min policy on matching non-public
+dev. The historical dev ranking and token fallback remain diagnostic reports.
+The final promotable selection always uses the adoption gate. P2 probes the two
+highest-dev-A variants with diagnostic serving; public latency is never fed back
+into fitting or gates. The public accuracy arm runs after the selection is frozen.
+
+### Offline adoption
+
+All new levers default off. Supply the already fitted min policy and bound,
+non-public calibration/dev reads to request optional candidates:
+
+```sh
+python scripts/swift/adopt.py --calibration cal/*.reads.jsonl --dev dev/*.reads.jsonl \
+  --baseline-policy baseline.json --levers variant bias \
+  --output adoption.json --policy policy.json
+```
+
+The fixed sequence is variant then bias; reasoning routing is reserved and refused.
+A variant is chosen on calibration only, then tested once on dev. Bias fits only
+calibration rows for the accepted variant, with frozen temperatures. Its objective
+is mean pre-commit NLL + 0.001/2 times squared offsets. Choice and Score use one
+vector per option count; Noul uses one true-logit intercept. Buckets below 30
+questions have no bias. Bias uses raw canonical letter masses and applies before
+temperature; it requires no additional inference.
+
+For each requested lever, paired whole-case bootstrap uses the existing primitive
+coverage strata, B=2000 and seed=15. Adopt only when the 95% lower bound of delta A
+is strictly positive, delta I's upper bound is at least zero, point delta I is at
+least -0.5, and every primitive's point CC delta is at least -2. An accepted lever
+becomes the next baseline. Rejection leaves it off; there are no dev retries.
+These finite-sample gates provide evidence rather than certainty of future gains.
+
+Token Cost is computed from the measured read counts and declared prices. Speed
+uses complete serial non-public dev probes supplied with --latency, otherwise
+--speed-axis (91) is recorded as assumed. --assume-cost records the fixed
+--cost-axis (56.4) as assumed. Bulk concurrency timings do not supply Speed.
+Public/test reads, diagnostic reads, invalid bindings, role overlap and mismatched
+recipes are refused before fitting. There is no exploratory override in adoption.
+
+adoption.json records constants, fitted candidates, deltas, CIs, reasons and read
+hashes. policy.json contains only accepted levers. If none pass, its parameters
+are exactly the input baseline. Accepted policies carry a receipt bound to their
+parameters and data hashes. Serving refuses optional levers without matching
+passing receipts; --diagnostic/--force-variant explicitly serves unpromotable
+candidates. Candidate-only fits of non-min prompts are never promotable.
 
 ## Outputs and counts
 

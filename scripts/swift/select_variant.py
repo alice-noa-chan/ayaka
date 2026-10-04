@@ -1,15 +1,12 @@
-"""Select prompts using matching non-public dev reads, with policies fitted on v2 calibration.
+"""Fit prompt candidates on non-public calibration; gate one proposal on non-public dev.
 
-Pass only recorded dev items as --dev; fit only recorded --calibration.
-Cygnet calibration remains a separate diagnostic and is never relabeled dev.
-Pick the highest local composite A. If its paired case-bootstrap 95% CI against
-the runner-up includes zero, prefer the one with fewer mean input tokens. With
-equal token counts, retain the higher A (then variant name for an exact tie).
-Default bootstrap: B=2000, seed=15. Policies stay fixed during dev resampling;
-Speed stays fixed at the variant's complete serial probe, or the explicitly
-reported --speed-axis estimate. Cost uses input tokens only, including all
-hierarchical passes, at --usd-in-per-m (default 0.0403). Public accuracy reads
-are refused; public serial latency probes contain timing only and are allowed.
+The promotable selection uses Swift's fixed adoption gate (B=2000, seed=15).
+Prompt choice is fixed on calibration, with no dev retries. The historical
+highest-dev-A/token fallback and configurable bootstrap remain diagnostics only;
+--bootstrap/--seed never change the adoption gate. Public/test accuracy rows and
+public/test latency probes cannot influence adoption. Exploration stays unpromotable.
+Cost uses input tokens at --usd-in-per-m (default 0.0403). Speed uses a complete
+serial non-public dev probe, or an explicitly reported assumed Speed axis.
 """
 
 from __future__ import annotations
@@ -217,16 +214,41 @@ def select_variants(
         }
         if len(signatures) != 1:
             raise ValueError("latency variants must probe the same ordered items and seed")
+    adoption = None
     policies, reports = {}, {}
-    for variant in dev:
-        cal_cost = input_cost(cal[variant], usd_in_per_m)[2]
-        policies[variant] = fit_policy(
-            cal[variant],
+    if not exploratory:
+        from ayaka.swift.adopt import adopt_levers
+
+        baseline = fit_policy(
+            cal["min"],
             fitted_on="v2 calibration (variant selector)",
-            speed_axis=speeds[variant],
-            cost_axis=cal_cost,
-            exploratory=exploratory,
+            speed_axis=estimated_speed,
+            cost_axis=input_cost(cal["min"], usd_in_per_m)[2],
         )
+        adoption = adopt_levers(
+            calibration_rows,
+            dev_rows,
+            baseline,
+            levers=("variant",),
+            latency=latency,
+            assumed_speed=estimated_speed,
+            usd_in_per_m=usd_in_per_m,
+        )
+        policies = {
+            variant: Policy(**values) for variant, values in adoption["variant_policies"].items()
+        }
+        final = Policy(**adoption["final_policy"])
+        policies[final.prompt_variant] = final
+    else:
+        for variant in dev:
+            policies[variant] = fit_policy(
+                cal[variant],
+                fitted_on="v2 calibration (variant selector)",
+                speed_axis=speeds[variant],
+                cost_axis=input_cost(cal[variant], usd_in_per_m)[2],
+                exploratory=True,
+            )
+    for variant in dev:
         tokens, usd, cost = input_cost(dev[variant], usd_in_per_m)
         report = score_reads(dev[variant], policies[variant])
         if report["missing_types"]:
@@ -253,8 +275,21 @@ def select_variants(
     ci = bootstrap["pairwise"][ranked[0]][ranked[1]]["ci_95_A"]
     for variant, report in reports.items():
         report["paired_vs_min"] = bootstrap["vs_min"][variant]
+    selection = choose_variant(reports, ci)
+    if adoption is not None:
+        selection = {
+            **selection,
+            "diagnostic_selected": selection["selected"],
+            "selected": adoption["final_policy"]["prompt_variant"],
+            "token_fallback": False,
+            "rule": "calibration-selected variant; predeclared dev adoption gate against min",
+        }
     return {
-        "promotable": not exploratory and all(policy.promotable for policy in policies.values()),
+        "promotable": not exploratory,
+        "adoption": adoption,
+        "final_policy": adoption["final_policy"]
+        if adoption
+        else asdict(policies[selection["selected"]]),
         "exploratory": exploratory,
         "model": model,
         "revision": revision,
@@ -266,7 +301,7 @@ def select_variants(
         "variants": reports,
         "policies": {variant: asdict(policy) for variant, policy in policies.items()},
         "bootstrap": bootstrap,
-        "selection": choose_variant(reports, ci),
+        "selection": selection,
     }
 
 
@@ -312,7 +347,11 @@ def main(argv: list[str] | None = None) -> None:
     for variant, policy in result["policies"].items():
         Policy(**policy).save(args.policy_dir / f"{variant}.policy.json")
     selected = result["selection"]["selected"]
-    Policy(**result["policies"][selected]).save(args.policy_dir / "policy.json")
+    Policy(**result["final_policy"]).save(args.policy_dir / "policy.json")
+    if result["adoption"] is not None:
+        (args.policy_dir / "adoption.json").write_text(
+            json.dumps(result["adoption"], indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     print(

@@ -534,6 +534,8 @@ def select_model_results(directory: Path) -> dict:
     dev = [r for r in dev if r["readout"] != "grouped_approx"]
     selection = select_variants(calibration, dev)
     write_json(directory / "variant_selection.json", selection)
+    write_json(directory / "adoption.json", selection["adoption"])
+    Policy(**selection["final_policy"]).save(directory / "policy.json")
     for variant, policy in selection["policies"].items():
         Policy(**policy).save(directory / variant / "policy.json")
     return selection
@@ -842,6 +844,7 @@ def execute(args, models, manifest, started, options):
                     *reader_flags(model),
                     "--policy",
                     str(directory / "policy.json"),
+                    "--diagnostic",
                     "--host",
                     "127.0.0.1",
                     "--port",

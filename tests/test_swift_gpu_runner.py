@@ -319,7 +319,9 @@ def test_qwen_thinking_verified_at_resolved_revision_without_downloads(
 
 def test_serial_200_probe_uses_swift_http_and_raw_quantiles(tmp_path):
     reader = FakeReader()
-    service = DecisionService(reader, "fake", max_parallel=1, prompt_variant="cygnet")
+    service = DecisionService(
+        reader, "fake", max_parallel=1, prompt_variant="cygnet", diagnostic=True
+    )
     server = serve(service, port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
