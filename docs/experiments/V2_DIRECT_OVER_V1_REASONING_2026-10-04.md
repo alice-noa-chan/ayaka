@@ -840,3 +840,99 @@ complete native weights와CUDA parity, 전체 workload의 credit admission,
 matched v1 reasoning 대v2 off 품질 측정·최종 독립test와provider 회수/정리가 남는다.
 FA2/Liger는 이 준비에서는meta topology만 확인했으며 GPU 성능 실측은 아니다.
 학습 직전의 모든 조건 완료·성능 향상·승격을 주장하지 않는다.
+
+## 2026-10-05: 정식 direct corpus CLI와 실제 실행 계약
+
+`.dev` human control의 설명을 학습 소비자가 검증하는 정식 계약으로 옮겼다.
+코드 커밋은 네 단위로 나눴다.
+
+- `94dc45f`: 입력 계획·샘플별 marker·source/type/언어 quota와 전체 epoch 검증.
+- `d8f4f4e`: offline `direct_corpus plan/prepare` CLI와 입력/저장 경계 검증.
+- `626a779`: CPU 정적 입력과 runtime frozen-base replay의 호환성.
+- `4d00f56`: 실제 inventory 전체의 runtime 변조 거부.
+
+독립 검토에서 실제 group 교체, 모순된 opaque test 언어 집계,
+파일 저장까지 이어진 tokenizer 재사용 scope, plan 저장 전 tokenizer 누락,
+authored replay와 inventory 분류를 함께 바꾸는 반례를 발견하고 수정했다.
+각 반례에는 회귀 테스트가 있다. Claude의 최신 incoming 문서에는 이 변경에
+대한 새 승인이나 성능 판단이 없으며, outgoing `.dev` 문서로 검토를 요청했다.
+Swift/API의 기존 소유권을 지켰고 `main`은 `475bec37` 그대로다.
+
+계획은 선택 **이전**의 설정과 실제 모델·tokenizer·native metadata·encoder·
+원본 gold registry·공개/기존 평가 inventory를 고정한다. 선택/검증/제외 결과는
+별도 report에 기록한다. 외부 `plan_file_sha256`는 파일 바이트를,
+`corpus_plan_sha256`는 canonical 내용을 고정한다. Fast load에는 원본 human,
+public, private 데이터 캐시를 다시 요구하지 않는다.
+
+공통 검증기는 prepare/full audit/fast load를 연결한다. Opaque holdout2의
+선택적 extension에는 source별 sample/type 집계와 plan/member digest만 둔다.
+원래 test 입력·정답은 별도 저장소에 유지한다. 실제 inventory·prepared row/group
+digest를 고정하고 `E×R % B == 0`, 정확한 steps/seed, 모든 `(sample,row)`의 E회
+방문을 검사한다. 언어별 replacement sampling, 반복 tail, 질문 제거, 실제 group
+교체와 inventory 변조를 거부한다. Plan 관련 필드가 모두 없는 legacy6 경로만
+기존 계약으로 읽는다. 선택 membership 고정은 원본 전체 선택 알고리즘을
+재생했다는 증명이나 미열람 test의 실행 증명이 아니다.
+
+Tokenization 재사용 scope는 메모리 내 선택까지만 유지한다. Bundle·holdout·
+receipt를 쓰기 전에 scope를 닫고 실제 tokenizer를 재직렬화한다. 최종 candidate
+permutation **후** 원래 질문 전체를 native encoder로 검사하며 typed overflow만
+whole-sample 제외로 처리한다. Authored overlap/overflow는 quota 오류로 실패한다.
+입력 파일, 공개/private 목록과 바이트, raw annotation, parsed reserved payload,
+native assets가 변하면 결과 저장을 거부한다.
+
+Frozen-base replay는 유일한 runtime attachment인 `base_probs`만 정적 digest에서
+분리했다. CPU 준비에는 해당 값이 없어야 한다. 학습 전에는 positive replay
+weight의 natural rows 전체에 aligned/finite/normalized 분포를 요구하고 authored와
+gold-only 주입은 거부한다. 기존 native/input/candidate header와 optimizer-state의
+frozen-read digest는 유지한다. 실제 무작위 CPU LoRA 업데이트와 정확한 저장·복원도
+통과했다. Pretrained 학습 결과나 성능 개선의 증거로 사용하지 않는다.
+
+고정 `4d00f56` 전체 CPU 검증:
+
+```text
+Ruff lint/format: 303 files passed
+pytest: 2046 passed, 2 skipped / 793.69 seconds
+exit: 0; source changes: 0; stable_pass: true
+archive SHA: c635fa33078736e470b97e49fcf6b4a0c3ef1cd2ef8cd047c0040e4159122fe6
+receipt: .dev/codex-direct-corpus-full-20261005-final.json
+```
+
+실제 캐시된 Gemma4-12B-it metadata/tokenizer와 byte-pinned human 원본으로 정식
+CLI를 실행했다. Config는 LM readout/r32/alpha64, max_seq_len4096/serve8192,
+Swift canonical/labeled/compact/nonthinking이며 FA2/Liger는 meta preflight 설정이다.
+기존 private 평가 목록은 공급되지 않아 **draft** scope를 명시적으로 보존했다.
+
+- 원본 53,093 rows의 157,417 transformed questions를 전량 raw gold와 대조.
+  이 고정 원본에서 fractional target은 0개이며, 보존 동작은 fixture에서 검증.
+- Train928 samples/1280 questions: human896 + authored384.
+  EN1088/KO96/JA96 (영어85%), Choice512/Noul320/Score448, source lineages614.
+- Router/dev/calibration/test는 각각160 samples/240 questions.
+  Train 전체1epoch40×32, 모든 row min=max1, 267898 text tokens, 최대1670tokens.
+  선택한 corpus의 한 바퀴이며 전체 raw53,093rows의 한 바퀴는 아니다.
+- 원본 registry/public/private/encoder 읽기를 금지한 actual portable load도
+  1280rows/928groups/40batches와 모든 row1회 방문을 재확인했다.
+- 기존 `b029c74` control과 train_items/teacher_reads 바이트, 모든 split의 실제
+  context audit와 schedule SHA가 같다. 새 계약은 검증/재현성 변경이며,
+  모델 출력·성능이나 throughput 개선의 근거가 아니다.
+
+현재 `4d00f56` control은 `.dev/direct-corpus-native-4d00f56-20261005`에 있다.
+
+```text
+plan file SHA: 84f5d6e9f9b954e021b7f056cb01e8e80433f56b59e1cafc8f0c33ba69fb57da
+canonical plan SHA: 87f39d60824b45f54b8d86d6739a2fddb5121afe4b2fcdbd5e6c59ebcf234df7
+bundle SHA: 2a39864cc040b7d2f9e5d759b234718f0b92bd7de5bbfa0e1454b1dca003b52c
+CPU audit SHA: 3ad826be69b8e4d525e8a8b65303c22a044e83f639dca04cf42dd1a25328b278
+holdout SHA: 58a4285fb5554923564ed09bb34df6291a026d4868b9987969b285ce95fe0823
+selection report SHA: 40f517f348fedb03e4ade41db7dfb233dd747a65cde8f9cf572727453eb1e6f1
+portable check SHA: aa2f5bebb6124838e0d65ec8cb74c2cde5bd78aca5c858056784ba87923c1867
+```
+
+명령과 private manifest 계약은 [DIRECT_CORPUS_PREPARATION.md](DIRECT_CORPUS_PREPARATION.md),
+예시 설정은 `direct_corpus_settings.json`에 기록했다. 모든 자체 process가 끝났고
+production optimizer/teacher/GPU/download/paid API는0이다. 전체 CPU suite와 실제
+control은 동시에 실행했으며, CPU/GPU 속도 비교 실험으로 사용하지 않는다.
+
+남은 조건은 prior private inventory, 실제 자연 policy corpus/teacher의 이득,
+complete native weights와CUDA parity/throughput, 전체 workflow credit admission,
+matched v1 reasoning 대비 v2 off의 품질·최종 독립test 및 provider 회수/정리다.
+학습 직전 전체 완료나 v2 off > v1 reasoning을 아직 주장하지 않는다.
