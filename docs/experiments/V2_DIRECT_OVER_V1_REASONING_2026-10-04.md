@@ -160,10 +160,10 @@ corpus를 완성했다는 뜻이 아니며 독립된 자연 문항에서 성능�
 - 실제 품질 학습 corpus의 준비와 decontamination, authored 형식 밖의 독립 gold
   검증, 실제 saved teacher의 model/prompt/원본 입력 및 실행 provenance 연결.
   새 teacher를 만드는 비용도 전체 예산에 포함한다.
-- native runner, checkpoint/resume, calibration-only T fitting, 고정 dev/test 진단과
-  export/reload parity는 구현했다. 실제 승격용 test의 별도 보관·실행, matched arm의
-  dev 선택과 freeze, public composite 비교는 더 필요하다. 현재 bundle test는
-  train stream에 들어가지 않지만 같은 준비 디렉터리에 있는 실험 진단 자료다.
+- native runner, checkpoint/resume, calibration-only T fitting, 고정 dev 진단과
+  export/reload parity, test 원문의 별도 보관은 구현했다. 실제 승격용 test 실행,
+  matched arm의 dev 선택과 freeze, public composite 비교는 더 필요하다.
+  현재 development bundle에는 test 원문이 없으며 opaque commitment만 있다.
 - 실제 GPU의 logits/cache parity, 처리량·VRAM·serial latency, teacher 준비부터
   학습/test/회수까지 **잔액 안에서 완주**하는 사전 admission. 전체 11개 stage의
   prepaid estimator와 측정 후 재admission을 구현했다. 실제 provider 잔액·단가·과금
@@ -200,8 +200,9 @@ projection/parameter 객체를 유지한다. norm48개는 scale-free이므로 na
 CPU reference 함수 주입으로 실제 Trainer의 loss/prob/gradient parity와 rollback을
 검사했다. **실제 CUDA FA2/Liger 실행이나 속도 향상을 측정한 것은 아니다.**
 
-bundle은 현재 v3다. kernel 설정과 실제 topology, 원본 human file binding을 recipe에
-저장한다. 이전 v1/v2 준비 receipt는 보존하며 최신 소스로 다시 준비해야 한다.
+bundle은 현재 v5다. kernel 설정과 실제 topology, 원본 human file binding 및 direct
+input encoding/serving recipe를 저장한다. 이전 준비 receipt는 보존하며 최신 소스로
+다시 준비해야 한다.
 실행 시 묶음 밖에 고정한 manifest SHA256을 요구해 전체 payload를 다시 생성한
 다른 corpus가 내부 audit만으로 원래 묶음을 대체하지 못하게 한다.
 
@@ -211,11 +212,12 @@ header를 검사한다. strict offline loader는 누락된 text tensor의 random
 CPU random Gemma 33 shards의 원본 LM logits와 strict 재로딩 logits가 일치했다.
 
 `run_direct.py`는 audit → native parity → backward/optimizer/IO profile → 전체 비용
-재admission → 고정된 모든 step → calibration → 고정 dev/test 진단 → native export
+재admission → 고정된 모든 step → calibration → 고정 dev 진단 → native export
 → offline reload 확률 일치 순서다. 부족한 비용으로 steps를 자동 줄이지 않는다.
 실제 native profile/train은 `--execute`, CUDA, matching snapshot, 외부 bundle anchor,
 이미 과금된 setup/download/teacher 시간과 quoted prepaid plan을 명시해야 한다.
 CLI 자체가 cloud를 할당하거나 과금을 승인하지는 않는다.
+test 원문은 개발 묶음에서 제거했고, 별도 holdout 저장소는 dev 선택 고정 후 연다.
 
 `direct_natural.py`는 HelpSteer2 20,324 rows, CommonsenseQA 9,741 rows,
 MASSIVE ko/ja 각각11,514 rows를 로컬에서 읽고 모두 변환했다(download0).
@@ -239,13 +241,13 @@ kernel recipe binding, `4ba7529` optimizer continuation, `8b1ad28` strict native
 `0d2624e` external corpus anchor, `3523e92` frozen-base replay. 각 단위는 코드/관련 테스트
 → Ruff fix → format → lint/format 재검사 → 관련 테스트 → diff review → 별도 commit으로 진행했다.
 
-최신 통합: **1316 passed, 1 skipped / 189.12s**, source 변경0,
+이전 통합: **1316 passed, 1 skipped / 189.12s**, source 변경0,
 whole-tree Ruff lint/format **248 files** 통과.
 receipt `.dev/codex-native-runner-kernels-full-20261004.json`은 before/after source hash와
 실제 Git Bash 테스트 환경을 기록했다. tiny CPU의 optimizer/export 결과를 실제
 pretrained 모델 성능으로 계산하지 않는다.
 
-최신 실제 pinned12B meta/tokenizer control은
+당시 실제 pinned12B meta/tokenizer control은
 `.dev/direct-native-kernels-cpu-20261004/receipt.json`에 저장했다. 외부 manifest anchor:
 
 ```text
@@ -257,3 +259,106 @@ FA2+Liger 설정과 실제 meta topology를 재구성했고 source/tokenizer/ful
 일치했다. **현재 캐시에는 12B config/tokenizer만 있고 native weight shard가 없다.**
 actual snapshot inspection은 ready=False로 기록했다. 본 품질 corpus, saved teacher,
 GPU 런타임 확인이나 전체 cloud workflow 완료 증거가 아니다.
+
+## Swift prior 일치·cache·holdout 후속
+
+`faac5ba`, `efc4567`: `swift_evidence.py`는 Swift의 실제 parser/renderer/canonical
+answer token을 사용한다. 전체 입력을 재토큰화하거나 자르지 않고 offset으로
+state-only prefix와 질문 suffix를 나눈다. 경계를 가로지르는 BPE token은 suffix에
+남긴다. 실제 renderer에서 선택지 장식을 도출해 `labeled`의 semantic key가 추가돼도
+prior는 실제 서빙 입력과 같으며 description pooling은 원래 설명을 따른다.
+
+실제 offline fast tokenizer와 random Gemma/Granite에서 native output bias/scaling을
+포함한 HFReader 확률/centered logits가 4 prompt variants × 2 state formats ×
+full/deep/shared cache에서 일치했다. 고정된 실제 12B tokenizer에서도 24 typed inputs의
+전체 ids와 canonical answer ids가 일치했다. `.dev/codex-swift-evidence-labeled-native-inputs-20261004.json`
+참조. **실제 pretrained 확률이나 GPU 성능을 측정한 것은 아니다.**
+
+`83c2b07`: feature extraction의 `cache_strategy=copy_on_write`는 stock non-offloaded
+DynamicCache의 attention layer 객체·counter만 복사하고 immutable prefix KV tensor를
+공유한다. sliding window가 이미 이전 상태를 버렸어도 원본 branch를 보존한다.
+실제 tiny Gemma/Granite의 full-row/deepcopy 결과와 일치하고 원본 cache는 변하지 않았다.
+recurrent/custom/static/offloaded cache는 명시적으로 거부하며 기본 deepcopy는 유지한다.
+branch가 복사하는 prefix KV bytes는 0이다. 이것은 total peak VRAM이나 속도 실측이 아니다.
+
+`a69fe56`: `evidence_permutation.py`는 record/epoch별로 실제 프롬프트를 다시 렌더링한다.
+순서는 gold를 보지 않고 정하며 soft gold와 Score ordinals를 semantic label에 맞게 옮긴다.
+dev에서는 canonical/reverse/cyclic의 최대 3개 고정 view를 모두 비교해 probability range,
+TV, argmax 변화, NLL/RPS 범위를 보고한다. cached tensor의 순열이나 best-view 선택으로
+causal 순서 의존성을 숨기지 않는다. actual tiny backbone의 순서별 변동도 확인했다.
+
+`cfc774f`: v4 development bundle은 train/router_train/dev/calibration만 포함한다.
+prepare 단계에서 test gold와 전체 문맥을 검증한 뒤 원문은 별도 `OUT-holdout`에 저장한다
+(`--holdout-out`으로 다른 격리 경로 지정 가능). development bundle에는 opaque test
+state/content/source/translation/template/rule hashes와 counts/context receipt만 남는다.
+학습용 업로드에는 development bundle만 포함하고 holdout 원문은 별도로 보관한다.
+
+학습 audit와 runner는 private holdout 파일을 열지 않는다. 학습 runner의 자동 test 평가도
+제거했으며 export는 `independent_test_required=True`, `promotable=False`다.
+`open_holdout`은 외부에 고정한 holdout manifest·dev 선택 digest, original bytes와
+development bundle binding을 확인한다. 선택 checkpoint/policy bytes는 후속 evaluator가
+독립 확인해야 한다. 이는 저장 경계이며 OS 접근 제어나 never-seen attestation이 아니다.
+기존 legacy standalone five-split 준비와 v1 checkpoint 동작은 유지한다.
+
+각 단위는 코드/테스트 → lint 수정 → format → 재검사 → 관련 테스트 → diff → 별도
+상세 commit으로 진행했다. 고정 `841134a` snapshot은 **1484 passed, 1 skipped /
+367.71s**, source 변경0, Ruff261 files로 통과했다. Git archive에서 빠진 ignored
+calibration/dev 두 fixture만 hash 확인 후 연결했다. private test/artifacts는 복사하지
+않았다. `.dev/codex-evidence-holdout-frozen-841134a-20261004-r2.json` 참조.
+Swift 소유 파일과 사용자 artifacts는 수정하거나 커밋에 포함하지 않았다.
+
+## 직접 학습·Swift 입력의 연결
+
+`6e17791`: evidence head뿐 아니라 기존 직접 학습 Trainer도 Swift의 full chat input과
+canonical letter readout을 쓰는 opt-in encoder를 추가했다. original candidate order와
+soft gold는 유지하고, 정수순으로 표시하는 Score는 원래 candidate ID/ordinal 의미로
+되돌린다. fractional Score는 integer Swift API로 조용히 반올림하지 않고 거부한다.
+원본 전체 입력·description span·label ID·gold·serving recipe가 바뀌거나 legacy/Swift
+행이 섞이면 forward 전에 실패한다. trace·proposal·image는 이 direct arm에 들어가지 않는다.
+
+실제 random Gemma/Granite에서 **기존 Trainer**의 raw logits/확률이 Swift HFReader와
+4 variants × 2 formats × full/shared prefix 경로에서 일치했다. native full LM과
+공동 typed loss·모든 backbone gradient도 일치했다. 관련196 CPU tests 통과.
+이것은 pretrained 지능 향상을 측정한 결과가 아니다.
+
+`bc75502`: **현재 직접 bundle schema는 v5**다. `input_encoding`과 exact `input_recipe`를
+prepare/audit·teacher filter·학습·calibration/dev·frozen replay·export에 고정한다.
+CLI `--input-encoder swift_canonical --prompt-variant labeled --state-format compact`
+등으로 선택한다. `ayaka_segmented`가 기본이며 기존 v1 입력/체크포인트는 유지한다.
+v3/v4 bundle과 이전 replay receipt는 새로 준비해야 한다. schema 이름만 고치지 않는다.
+
+Swift teacher의 `direct_probs`는 같은 messages/input IDs/canonical IDs/recipe/candidate
+mapping의 `direct_readout_binding`을 요구한다. 다른 prompt의 직접 분포와 비교해
+teacher 이득을 계산하지 않는다. 기존 legacy encoder의 teacher contract는 유지한다.
+digest는 provenance/internal consistency이며 backend execution attestation은 아니다.
+
+작은 실제 LoRA 모델에서 fixed schedule 완주 → calibration/dev → export reload가
+통과했다. step1부터 재개한 최종 trainable tensor는 연속 실행과 완전히 같았다.
+평가는 더 큰 serving context를 사용하며 원본이 넘치면 truncation 없이 거부한다.
+관련169 tests, 최종 Swift bundle15 tests 및 최종39 tests가 통과했다.
+
+고정 `bc75502` 전체 통합은 **1582 passed, 1 skipped / 422.62s**, source 변경0,
+Ruff lint/format268 files로 통과했다. `.dev/codex-swift-direct-full-bc75502-20261004.json`
+참조. 이 snapshot 뒤 상대 세션에서 추가한 uncommitted API/candidates 경로는 포함하지 않는다.
+
+같은 고정 소스에서 실제 cached pinned12B tokenizer+config로 v5 authored control을
+다시 준비하고 전체 audit을 통과했다. `.dev/direct-native-swift-input-bc75502-cpu-20261004/receipt.json`
+참조. 480 authored questions 중 train96rows는 각1회, 세 유형 각32개, 총10715 input
+tokens다. source lineage는26개이며 질문96개를 독립 case96개로 부르지 않는다.
+`labeled/compact` 선택은 입력 연결 검사 설정이며 dev 품질에 의한 승격이 아니다.
+
+```text
+bundle manifest: 499ef21fb1278e50b6c4c2f09278f96b231439029978c3af7bac172e32fc543d
+holdout manifest: d1223c0f4409fb86c65bd1505e1a200af63e2f3099a33e82716bbbd371e34d33
+```
+
+teacher0·optimizer0·downloads0이며 meta FA2/Liger topology를 고정했다. native weights
+ready=False다. 실제 pretrained probabilities, CUDA kernel 실행·속도 또는 품질 학습을
+수행한 것이 아니다. 큰 tokenizer의 반복 준비/audit은 CPU에서 먼저 완료하고 고정해야
+한다. GPU 서버에서 이를 불필요하게 다시 준비해 과금 시간을 쓰지 않는 경로도 보강한다.
+
+남은 실제 준비는 자연 정책·다단계 품질 corpus와 teacher 관측, matched pilot·최종 독립
+평가, 실제 native weights와 CUDA kernel/속도, provider 잔액·견적에 묶인 전체 cloud
+완주·회수·정리 경로다. feature store/head training runner와 selected checkpoint/policy
+bytes를 고정하는 독립 최종 evaluator도 별도 완성이 필요하다.
+이후 작업 전까지 학습 직전 준비 전체 완료나 v1 추론 대비 향상을 주장하지 않는다.
