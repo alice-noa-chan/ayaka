@@ -57,9 +57,12 @@ def fixture_reads(tmp_path):
                 return ReadResult(probs, tokens, 1, 0.01)
 
             path = tmp_path / f"{split}.{variant}.jsonl"
+            reader = FakeReader(read)
+            reader.backend = "hf"
+            reader.logprobs_mode = "raw_logits"
             collect(
                 iter(items),
-                FakeReader(read),
+                reader,
                 path,
                 model="fixture",
                 revision="a" * 40,

@@ -41,9 +41,12 @@ def bound_roles(tmp_path, *, dev_case=None, dev_state=None, dev_lineage=None):
                     )
                 )
             path = tmp_path / f"{split}-{variant}.jsonl"
+            reader = FakeReader()
+            reader.backend = "hf"
+            reader.logprobs_mode = "raw_logits"
             collect(
                 iter(items),
-                FakeReader(),
+                reader,
                 path,
                 model="fixture",
                 revision="a" * 40,
@@ -97,6 +100,7 @@ def test_selector_checks_all_global_overlap_before_fit(tmp_path, monkeypatch, ch
             row["binding"]["token_inputs"][0]["input_token_ids"] = [123]
             row["binding"]["token_inputs"][0]["input_token_ids_sha256"] = fingerprint([123])
             row["pass_bindings"][0]["input_token_ids"] = [123]
+            row["pass_bindings"][0]["messages"] = row["binding"]["messages"]
             rehash(row)
     monkeypatch.setattr(
         select_variant, "fit_policy", lambda *a, **kw: pytest.fail("fitting reached")
@@ -160,3 +164,19 @@ def test_fitter_checks_record_hash_and_diagnostic_mark(tmp_path):
     with pytest.raises(ValueError, match="diagnostic"):
         fit_policy(rows)
     assert fit_policy(rows, exploratory=True).promotable is False
+
+
+def test_role_overlap_checks_adaptive_pass_inputs_too():
+    def row(role):
+        return {
+            "id": role,
+            "source": "corpus",
+            "case_id": role,
+            "rendered_input_sha256": fingerprint(role),
+            "pass_bindings": [
+                {"messages": [{"role": "user", "content": "same adaptive winner prompt"}]}
+            ],
+        }
+
+    with pytest.raises(ValueError, match="overlap"):
+        select_variant.assert_roles_isolated([row("calibration")], [row("dev")])

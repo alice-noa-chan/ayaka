@@ -174,7 +174,7 @@ def test_fitting_requires_explicit_calibration_and_diagnostic_is_not_promotable(
     rows = [{**row, "split": split} for row in reads()]
     with pytest.raises(ValueError, match="calibration only"):
         fit_policy(rows)
-    policy = fit_policy(rows, diagnostic=True)
+    policy = fit_policy(rows, exploratory=True, diagnostic=True)
     assert policy.promotable is False
 
 
@@ -200,7 +200,7 @@ def test_soft_target_counts_validation_and_underflow():
     assert math.isinf(nll([{**saturated, "candidate_log_masses": None}], 1))
     rows = reads()
     rows[0]["gold_distribution"] = {"a": 0.6, "b": 0.4}
-    policy = fit_policy(rows)
+    policy = fit_policy(rows, exploratory=True)
     assert policy.search["hard_n"] == 2 and policy.search["soft_n"] == 1
     for bad in ({"a": 0.5}, {"a": 1, "unknown": 0}, {"a": math.nan, "b": 1}, {"a": True, "b": 0}):
         with pytest.raises(ValueError):
@@ -240,7 +240,7 @@ def test_grouped_reads_are_separate_from_single_pass_fit_and_evaluate(tmp_path):
     assert result["n"] == 3 and result["grouped_excluded_n"] == 1
     assert result["grouped_approx"]["n"] == 1
     assert result["I"] == score_reads(reads())["I"]
-    fitted = fit_policy(rows)
+    fitted = fit_policy(rows, exploratory=True)
     assert fitted.search["grouped_excluded_n"] == 1
     assert fitted.search["hard_n"] == 3
     assert fitted.search["grouped_approx"]["n"] == 1

@@ -25,6 +25,7 @@ from statistics import mean
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from ayaka.eval.read_artifact import fingerprint  # noqa: E402
 from ayaka.swift.binding import validate_bound_reads  # noqa: E402
 from ayaka.swift.collect import load_reads  # noqa: E402
 from ayaka.swift.evaluate import cluster_strata, percentile  # noqa: E402
@@ -77,9 +78,9 @@ def group_reads(rows: list[dict], split: str, *, exploratory=False) -> dict[str,
             or any(part in ("public", "jevbench_public") for part in source_parts)
         ):
             raise ValueError("REFUSING public or unmarked reads; require explicit public=False")
-        if "split" in metadata and row.get("split") != metadata["split"]:
+        if "split" in row and "split" in metadata and row["split"] != metadata["split"]:
             raise ValueError("row and metadata split conflict")
-        if row.get("split") != split:
+        if row.get("split", metadata.get("split")) != split:
             raise ValueError(f"selector role {split} must match recorded split exactly")
         if row.get("readout") == "grouped_approx":
             if not exploratory:
@@ -136,6 +137,11 @@ def assert_roles_isolated(calibration, dev):
             found.add(("input", input_hash))
             for value in binding.get("token_inputs", []):
                 found.add(("tokens", value["input_token_ids_sha256"]))
+            for value in row.get("pass_bindings", []):
+                if value.get("messages"):
+                    found.add(("input", fingerprint(value["messages"])))
+                if value.get("input_token_ids"):
+                    found.add(("tokens", fingerprint(value["input_token_ids"])))
         return found
 
     overlap = keys(calibration) & keys(dev)
