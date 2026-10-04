@@ -747,3 +747,96 @@ binding·사용한 tokenizer 객체가 같다. 별도 tokenizer load는7.3131초
 control의 `startup-comparison.json` 참조. 추가 raw metadata 검증을 포함한 단일 CPU
 관측이며, 전체 GPU 학습 속도/품질 개선이나 CUDA FA2/Liger 성능으로 해석하지 않는다.
 실험/test 프로세스는 모두 정상 종료했고 GPU/paid API/다운로드는 사용하지 않았다.
+
+### 인간 라벨 분할·원본 검증과 실제 native 입력 준비 (2026-10-05)
+
+`ayaka-v2-experiments`에서 세 코드 단위를 별도로 커밋했다. `main`의
+`475bec37e183a021f52bf119408f57c2ac9de3e2`와 Swift/API 소유 범위는 유지했다.
+
+- `2b2cc27`: 원래 질문·primary lineage·example ID·번역·파생·lineage aliases의
+  연결 성분을 먼저 닫고, public/reserved 제외와 split/quota를 적용한다.
+  HelpSteer의 다른 response/rating을 같은 prompt라는 이유로 중복 제거하던
+  문제를 수정했다. 중복은 전체 state/question/gold가 동일한 경우로 한정한다.
+  원래 raw primary ID를 보존하며, text의 공백은 정규화하고 media bytes/path의
+  대소문자는 보존한다. Authored/natural의 교차 참조도 split 감사에 포함한다.
+- 공개 평가 검사는 선택지 설명과 구조화된 state의 문자열도 검사한다.
+  공백 없는 CJK에는 명시된 character/exact 규칙을 추가했다. Opaque holdout2는
+  개별 identity의 해시를 동일 namespace에서 비교해 train의 `derived_from`이
+  test의 `source_example_id`를 참조하는 경우도 원문 없이 거부한다.
+- `a4672f2`: 고정 raw file SHA를 읽기 전/parse 후/최종 출력 전에 재검사한다.
+  메모리의 rows/features/provenance/binding 변경도 감지한다. 준비와 전체 감사는
+  같은 registry를 유지해 전체 corpus의 중복 parse를 제거한다. Full audit/receipt
+  출력 직전 raw byte 검사도 수행하며, 검증 후 교체 시 출력은 생성하지 않는다.
+  이미 외부 해시로 고정된 prepared-row load는 raw cache 없이 계속 동작한다.
+- Teacher 변환 CLI는 `--native-path`로 local package를 받는다. Native metadata의
+  입구/출구를 확인하고, cache fallback이나 mechanics tokenizer와의 동시 override를
+  거부한다. Saved observations를 변환할 뿐 모델/생성 backend는 실행하지 않는다.
+- `b029c74`: natural sample이 test에만 있을 때도 준비가 가능하게 했다. Test/final
+  raw 검사는 outer registry를 유지하고, authored-only development에는 unused
+  registry를 전달하지 않는다. Development 감사는 test 원본이나 raw cache를 열지 않는다.
+
+독립 Codex 검토에서 cross-kind alias, 공백, media case, late-write,
+mutable parsed payload 및 natural-only-test 경계를 발견해 수정했다.
+Claude가 이 단위들을 승인했다는 뜻은 아니며, `.dev`에 결과와 검토 요청을 공유했다.
+
+관련 CPU 검사는 source/holdout147pass(76.20초), raw/native/fast-load128pass
+(178.52초), 최종 serialization/policy32pass(33.55초), holdout corner44pass
+(23.30초)다. 서로 겹치는 검사이므로 독립 테스트 수로 합산하지 않는다.
+마지막 고정 `b029c74` 전체 검사: **1992 passed, 2 skipped / 726.54초**,
+source 변경0, stable_pass=True, exit0. Ruff lint/format **298files** 통과다.
+
+```text
+fixed archive SHA: c13ba2ca95b2424c9a5ebe28a3dbdc9f26d320ca829eefe7efce44d140ab58ba
+full receipt: .dev/codex-raw-gold-full-b029c74-20261005.json
+full log SHA: 3d779f42798ce2ddd85d7e1757b48d991fd3f892e185dbf963564893bcc3eb29
+```
+
+실제 캐시의 고정 인간 라벨 53,093개 raw row를 변환하고 **157,417개 질문 전부**에
+raw gold verifier를 호출했다. HelpSteer101620, CommonsenseQA9741,
+MASSIVEko23028/ja23028이다. 이 파일의 target은 모두 정수/one-hot이었다.
+소수 mean을 adjacent ordinal에 보존하는 계약은 별도 fixture로 검증했으며,
+이 corpus에서 fractional label을 실제 관측했다고 주장하지 않는다.
+
+고정 `b029c74`에서 actual Gemma4-12B native config/tokenizer로 text-only
+mixed direct control을 준비하고 전체 감사했다. 모델 weight·optimizer는 실행하지 않았다.
+
+| 준비 내용 | 실제 결과 |
+|---|---:|
+| Train sample / question | 928 / 1280 |
+| Human rehearsal / authored question | 896 / 384 |
+| EN / KO / JA question | 1088 / 96 / 96 (영어85%) |
+| Choice / Noul / Score | 512 / 320 / 448 |
+| Router-train / dev / calibration / test | 각240문항 |
+| 선택한 train corpus의 전체 epoch | 1회, 40배치 × 32문항 |
+| 모든 prepared row의 실제 schedule 방문 수 | min=max=1, unique1280 |
+| Train text token / 최대 native input | 267898 / 1670 |
+| Reasoning/proposal/teacher/optimizer/GPU/download | 모두0 |
+
+Whole epoch는 **선택한 train1280문항**에 대한 것이다. Raw157417문항 전체를
+학습하거나 main training을 실행했다는 뜻은 아니다. Source/sample quota를 먼저
+정했고 모든 질문을 유지했으며, 부족한 quota를 다른 split에서 채우지 않는다.
+선택지 순열은 원 질문당 한 번만 적용했다. Test 원본은 별도 holdout directory에 둔다.
+
+```text
+control: .dev/direct-human-native-b029c74-cpu-20261005
+plan SHA: 91f84e5ea408810a9947204bac1647af9bc569ddcfaa2abb323f5ad0c06c75d9
+bundle manifest: 8673695562857743a229936d8d96f17939eb9feed31cd25152e2ca50479bfecb
+holdout manifest: 5c8316b149a19a8076ab2077a0a850cac3ca06123234a438d35a34d1e508ea66
+CPU audit: c3dd0aa7d8a47da10dae26c56c73559cef03a8be248d8b76cb7174f6b53ace87
+inventory SHA: 9469eea610ced8bbec13d64d5e391846a4350410c47a69f9370543adb18a2afa
+schedule SHA: d10d1c69b29eb4142dfd41295a5a1b8857d22a92783c96066945717283da6dbd
+```
+
+별도로 고정한 `a4672f2` control과 모든 bundle payload hash가 일치했다.
+선택 단계에 tokenizer identity scope를 재사용해도 행·gold·native token·schedule은
+동일했다. 재생 시 raw registry/gold verifier/token 재생성을 금지하고1280행을
+복원했으며 모든 행1회 방문을 확인했다. 기능적인 준비·재사용 검증으로,
+CPU timing이나 GPU throughput의 비교 결과는 아니다.
+
+이 control에는 prior private reserved inventory를 공급하지 않았다.
+Human rehearsal은 일반 능력 유지이며 natural policy reasoning corpus나
+실측 teacher benefit을 대신하지 않는다. 실제 policy corpus/teacher,
+complete native weights와CUDA parity, 전체 workload의 credit admission,
+matched v1 reasoning 대v2 off 품질 측정·최종 독립test와provider 회수/정리가 남는다.
+FA2/Liger는 이 준비에서는meta topology만 확인했으며 GPU 성능 실측은 아니다.
+학습 직전의 모든 조건 완료·성능 향상·승격을 주장하지 않는다.
