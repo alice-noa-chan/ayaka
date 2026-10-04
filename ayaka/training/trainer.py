@@ -294,6 +294,8 @@ class Trainer:
     def _backward(self, items: list[TrainItem]):
         direct = [it for it in items if it.direct_distillation]
         if direct:
+            if len(direct) != len(items):
+                raise ValueError("direct-distillation batches must not mix legacy training items")
             weights = self.cfg.loss_weights
             if (
                 weights.gold_nll_with_teacher is not True

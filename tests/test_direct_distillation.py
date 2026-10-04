@@ -314,3 +314,20 @@ def test_trainer_rejects_auxiliary_inputs_even_when_empty_before_forward(field):
     trainer.cfg = TrainConfig(loss_weights=LossWeights(gold_nll_with_teacher=True))
     with pytest.raises(ValueError, match="must not contain"):
         trainer.backward_step(items)
+
+
+@pytest.mark.parametrize("operation", ["train_step", "backward_step"])
+@pytest.mark.parametrize(
+    "auxiliary", [None, "reasoning_labels", "proposal_labels", "native_inputs"]
+)
+def test_trainer_rejects_mixed_direct_and_legacy_batch_before_forward(operation, auxiliary):
+    items, _ = prepare_direct_distillation(
+        dataset(), ToyTokenizer(), tiny_config(max_seq_len=2048), {}, verify
+    )
+    legacy = replace(items[0], direct_distillation=False)
+    if auxiliary:
+        legacy = replace(legacy, **{auxiliary: {} if auxiliary == "native_inputs" else []})
+    trainer = Trainer.__new__(Trainer)
+    trainer.cfg = TrainConfig(loss_weights=LossWeights(gold_nll_with_teacher=True))
+    with pytest.raises(ValueError, match="must not mix legacy"):
+        getattr(trainer, operation)([items[1], legacy])

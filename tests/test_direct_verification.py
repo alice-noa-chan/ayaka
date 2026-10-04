@@ -8,6 +8,20 @@ from ayaka.data.direct_verification import _value, verify_authored_gold
 from ayaka.data.reasoning_v2 import OPERATIONS, SPLITS, curriculum
 
 
+@pytest.mark.parametrize("split", SPLITS)
+@pytest.mark.parametrize("index", [-10, -7])
+def test_negative_half_cent_generator_and_independent_verifier_agree(split, index):
+    facts, gold, _, _ = reasoning_v2._case("rounding", index, split)
+    assert _value(facts) == ("rounding", gold)
+
+
+@pytest.mark.parametrize("amount,cents", [("-1.005", -101), ("-0.005", -1), ("0.005", 1)])
+def test_signed_decimal_half_up_ties_are_rounded_away_from_zero(amount, cents):
+    assert _value(
+        f"Amount {amount}. Round to cents using decimal half-up and report integer cents."
+    ) == ("rounding", cents)
+
+
 def test_independent_verifier_matches_all_families_types_splits_and_does_not_call_generator(
     monkeypatch,
 ):
