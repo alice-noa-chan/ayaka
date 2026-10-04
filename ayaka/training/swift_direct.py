@@ -12,6 +12,7 @@ from dataclasses import asdict, replace
 
 from ..collate import EncodedQuestion
 from ..eval.read_artifact import fingerprint
+from ..input_errors import ContextLimitError
 from ..prompt import RenderedQuestion, render_prefix, render_question
 from ..swift.prompt import parse_question, validate_prompt_variant
 from ..swift.readers import READOUT
@@ -89,7 +90,9 @@ def encode_direct_sample(sample, tok, cfg, *, input_encoding=None, context_limit
     for q in sample.questions:
         rendered = render_question(question_view(_noul_canonical(q)), tok, cfg.max_label_candidates)
         if len(prefix) + len(rendered.suffix_ids) > limit:
-            raise ValueError("complete original direct input does not fit; refuse truncation")
+            raise ContextLimitError(
+                "complete original direct input does not fit; refuse truncation"
+            )
     return sample_to_items(sample, tok, replace(cfg, max_seq_len=limit))
 
 

@@ -194,6 +194,7 @@ def create_audit_receipt(
     allow_tiny=False,
     natural_registry=None,
     native_path=None,
+    publication_guard=None,
 ):
     """Write after full CPU verification; pin the returned digest outside the bundle."""
     _digest(expected_manifest_sha256, "bundle manifest")
@@ -222,6 +223,8 @@ def create_audit_receipt(
     if natural_registry is not None:
         natural_registry.verify_files()
     verify_raw_binding(snapshot.recipe["gold_sources"])
+    if publication_guard is not None:
+        publication_guard()
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("xb") as stream:
         stream.write(raw)
