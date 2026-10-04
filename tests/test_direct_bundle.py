@@ -64,6 +64,9 @@ def test_bundle_roundtrip_finite_schedule_and_deterministic_resume(tmp_path):
     assert report["workload"]["unique_prepared_rows"] == 30
     assert report["workload"]["counts"]["route"] == {"direct": 32}
     assert report["workload"]["tokens"]["trace_tokens"] == 0
+    assert set(report["context_audit"]) == set(SPLITS)
+    assert recipe["native_architecture"]["weights_loaded"] is False
+    assert recipe["native_architecture"]["conservative_total_parameters"] < 14_000_000_000
     with pytest.raises(ValueError, match="resume step"):
         list(training_batches(recipe, inventory, groups, start_step=3))
 
@@ -228,3 +231,24 @@ def test_cli_prepare_and_audit_are_cpu_only_and_tiny_is_explicit(tmp_path, capsy
     reports = capsys.readouterr().out
     assert reports.count('"paid_execution_started": false') == 2
     assert reports.count('"optimizer_steps_executed": 0') == 2
+
+
+def test_resigned_architecture_and_native_vocabulary_mismatch_are_rejected(tmp_path, monkeypatch):
+    root = tmp_path / "bundle"
+    bundle(root)
+    recipe = json.loads((root / "recipe.json").read_bytes())
+    recipe["native_architecture"]["conservative_total_parameters"] += 1
+    resign(root, "recipe.json", canonical(recipe) + b"\n")
+    with pytest.raises(ValueError, match="actual native architecture"):
+        audit_bundle(root, allow_tiny=True)
+    real = direct_bundle.inspect_direct_model
+
+    def small_vocabulary(*a, **k):
+        report = real(*a, **k)
+        report["native_output_shape"][0] = 1
+        return report
+
+    monkeypatch.setattr(direct_bundle, "inspect_direct_model", small_vocabulary)
+    with pytest.raises(ValueError, match="vocabulary"):
+        bundle(tmp_path / "bad_vocabulary")
+    assert not (tmp_path / "bad_vocabulary").exists()

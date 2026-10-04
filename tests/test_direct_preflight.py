@@ -26,6 +26,9 @@ def test_meta_inspection_preserves_rng_and_does_not_load_weights(monkeypatch):
     assert report["conservative_total_parameters"] > report["native_text_parameters"]
     assert set(report["lora_targets"]) == set(tiny_config().lora_targets)
     assert report["output_tied_to_input"]
+    assert (
+        inspect_direct_model(tiny_config(readout="lm", max_seq_len=2048))["serving_context"] == 2048
+    )
 
 
 def test_cached_untied_head_and_actual_lora_positions_are_counted(monkeypatch):

@@ -20,9 +20,12 @@ from ..data.reasoning_v2 import SPLITS
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..losses import LossWeights
+from ..prompt import render_prefix, render_question
 from ..tokenization import HFTokenizer, ToyTokenizer
+from .batching import _noul_canonical, question_view
 from .direct_distillation import prepare_direct_distillation
-from .prepare_v2 import canonical, sha256
+from .direct_preflight import inspect_direct_model
+from .prepare_v2 import audit_splits, canonical, sha256
 from .workload import describe_rows, finite_workload, scheduled_batches
 
 VERSION = "ayaka-direct-bundle-1"
@@ -139,16 +142,58 @@ def _tokenizer_identity(tok, cfg):
     )
 
 
-def _prepare(splits, tok, cfg, teacher_reads, weights, schedule):
+def _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture):
     # Verify every reserved split too; no holdout answer enters training or teacher selection.
-    for samples in splits.values():
+    audit_splits(splits)
+    contexts = {}
+    vocab_size = architecture["native_output_shape"][0]
+    for split, samples in splits.items():
+        rendered_rows = []
         for sample in samples:
+            source = sample.metadata.get("source_example_id")
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError("explicit source IDs are required for every reserved split")
+            prefix = render_prefix(sample.state, tok)
             for q in sample.questions:
                 gold = verify_authored_gold(sample, q)
                 if gold != {c.id: q.target_distribution.get(c.id, 0) for c in q.candidates}:
                     raise ValueError(
                         "independently verified reserved gold disagrees with stored targets"
                     )
+                rendered = render_question(
+                    question_view(_noul_canonical(q)), tok, cfg.max_label_candidates
+                )
+                tokens = prefix + rendered.suffix_ids
+                limit = (
+                    cfg.max_seq_len
+                    if split == "train"
+                    else max(cfg.max_seq_len, cfg.serve_max_seq_len)
+                )
+                if len(tokens) > limit:
+                    raise ValueError(
+                        "full direct evaluation/training input overflows; refuse truncation"
+                    )
+                if rendered.label_ids is None:
+                    raise ValueError("this native LM training arm requires labelled candidate sets")
+                if any(
+                    type(t) is not int or not 0 <= t < vocab_size
+                    for t in tokens + rendered.label_ids
+                ):
+                    raise ValueError(
+                        "actual input or label tokens exceed the native output vocabulary"
+                    )
+                rendered_rows.append(
+                    {
+                        "id": sample.metadata["source_example_id"] + "/" + q.id,
+                        "tokens": len(tokens),
+                        "input_sha256": fingerprint(tokens),
+                    }
+                )
+        contexts[split] = {
+            "max_tokens": max(r["tokens"] for r in rendered_rows),
+            "rendered_rows_sha256": fingerprint(rendered_rows),
+            "questions": len(rendered_rows),
+        }
     items, report = prepare_direct_distillation(
         splits, tok, cfg, teacher_reads, verify_authored_gold, weights=weights
     )
@@ -158,7 +203,11 @@ def _prepare(splits, tok, cfg, teacher_reads, weights, schedule):
         inventory.append(describe_rows(sample, group))
         groups.append(group)
         offset += len(group)
-    report.update(verifier=VERIFIER_VERSION, workload=finite_workload(inventory, **schedule))
+    report.update(
+        verifier=VERIFIER_VERSION,
+        context_audit=contexts,
+        workload=finite_workload(inventory, **schedule),
+    )
     return items, report, inventory, groups
 
 
@@ -204,7 +253,10 @@ def prepare_bundle(
     schedule = {"steps": steps, "rows_per_step": rows_per_step, "seed": seed}
     _validate_schedule(schedule)
     tokenizer_sha256 = _tokenizer_identity(tok, cfg)
-    items, report, _, _ = _prepare(splits, tok, cfg, teacher_reads, weights, schedule)
+    architecture = inspect_direct_model(
+        cfg, official_weight_elements=policy.get("backbone_weight_elements")
+    )
+    items, report, _, _ = _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture)
     recipe = {
         "version": VERSION,
         "model": asdict(cfg),
@@ -214,6 +266,7 @@ def prepare_bundle(
         "allow_tiny": allow_tiny,
         "verifier": VERIFIER_VERSION,
         "model_policy": policy,
+        "native_architecture": architecture,
         "inference_mode": "off",
         "reasoning_training_tokens": 0,
         "initialization": "fresh_lora_from_pinned_native_base",
@@ -241,7 +294,7 @@ def prepare_bundle(
         "data_scope": "versioned authored mechanics; not natural-data or JevBench quality evidence",
         "pending": [
             "independent review",
-            "actual native weights/adapter parameter count",
+            "actual pinned native weights",
             "GPU parity and throughput",
             "whole-workload credit admission",
             "trained calibration/dev/frozen independent test",
@@ -290,6 +343,11 @@ def audit_bundle(path, tok=None, *, allow_tiny=False):
     _validate_schedule(recipe.get("schedule"))
     if recipe.get("model_policy") != _model_policy(cfg, allow_tiny=allow_tiny):
         raise ValueError("declared model policy changed")
+    architecture = inspect_direct_model(
+        cfg, official_weight_elements=recipe["model_policy"].get("backbone_weight_elements")
+    )
+    if architecture != recipe.get("native_architecture"):
+        raise ValueError("actual native architecture or LoRA placements changed")
     tok = tok if tok is not None else local_tokenizer(cfg, allow_tiny=allow_tiny)
     if _tokenizer_identity(tok, cfg) != recipe.get("tokenizer_sha256"):
         raise ValueError("tokenizer or chat template changed")
@@ -305,7 +363,7 @@ def audit_bundle(path, tok=None, *, allow_tiny=False):
     }
     teachers = json.loads((root / "teacher_reads.json").read_bytes())
     items, report, inventory, groups = _prepare(
-        splits, tok, cfg, teachers, weights, recipe["schedule"]
+        splits, tok, cfg, teachers, weights, recipe["schedule"], architecture
     )
     if (
         canonical(report) + b"\n" != (root / "preparation.json").read_bytes()
