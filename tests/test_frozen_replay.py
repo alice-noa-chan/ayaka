@@ -144,13 +144,10 @@ def test_replay_cannot_leak_into_legacy_training():
     assert trainer.step_i == 0 and not trainer.opt.state
 
 
-def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuous_run(
-    tmp_path, monkeypatch
-):
+def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuous_run(tmp_path):
     from ayaka.data.direct_natural import NaturalGoldRegistry
     from ayaka.data.natural_training_v2 import SOURCES, partition_sources
     from ayaka.training import run_direct
-    from ayaka.training.direct_audit import audit_snapshot
     from ayaka.training.direct_bundle import prepare_bundle
 
     repo, revision, filename, _ = SOURCES["commonsense_qa"]
@@ -192,17 +189,13 @@ def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuou
         allow_tiny=True,
         natural_registry=registry,
     )
-    monkeypatch.setattr(
-        run_direct,
-        "audit_snapshot",
-        lambda *args, **kwargs: audit_snapshot(*args, **kwargs, natural_registry=registry),
-    )
     full = run_direct.run_pipeline(
         tmp_path / "bundle",
         tmp_path / "full",
         action="train",
         mechanics_only=True,
         checkpoint_every=1,
+        natural_registry=registry,
     )
     assert full["reload_probability_parity"]
     saved = json.loads((tmp_path / "full/frozen_base_reads.json").read_bytes())
@@ -214,6 +207,7 @@ def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuou
         checkpoint_every=1,
         resume=tmp_path / "full/state-00000001",
         saved_base_reads=saved,
+        natural_registry=registry,
     )
     assert resumed["complete_schedule"]
     from safetensors.torch import load_file
@@ -229,5 +223,6 @@ def test_pipeline_replay_resume_uses_original_native_reads_and_matches_continuou
             action="train",
             mechanics_only=True,
             resume=tmp_path / "full/state-00000001",
+            natural_registry=registry,
         )
     assert not (tmp_path / "absent").exists()
