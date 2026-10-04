@@ -1,0 +1,262 @@
+{
+  "date": "2026-10-04",
+  "scope": "conditional exploratory observations on old Ayaka base/pilot dev reads",
+  "implementation_commit": "2de3006",
+  "execution": {
+    "model_forwards": 0,
+    "fitting_steps": 0,
+    "new_gpu_seconds": 0
+  },
+  "test_opened": false,
+  "selected_policy": null,
+  "models": {
+    "parent": {
+      "checkpoint_sha256": "26109de64d2e6417c64a7e0942ac2d18b43208f7d870ffabf7c8fb814ad606d2",
+      "dev_n": 2672,
+      "dev_independent_cases": 495,
+      "source_input_sha256": {
+        "raw": "812238b807f690d3905ab45c342175b66b6fd8bf0bfa87b1e409c4c4c0d0349b",
+        "calibrated": "487911125da90628f8fb032c051ae9d100e31d74e7691745db53fb491eec71a9",
+        "calibration": "af9cbd15c892692a7eca43ad2265c650ec9eee75dc5f4466f4770596fa53cfda"
+      },
+      "receipt": "runs/saved-policy-probe-20261004/parent-bands.json",
+      "receipt_sha256": "02767039a438ccafbba5a462c09ff78dbbce647dcbcfecce785d1a61ffd295b3",
+      "commit_bands": {
+        "raw": {
+          "groups": {
+            "no": {
+              "n": 326,
+              "independent_cases": 124,
+              "hard_target_n": 326,
+              "soft_target_n": 0,
+              "mean_target_credit": 0.4447852760736196,
+              "mean_target_credit_95ci": [
+                0.35482660079434275,
+                0.5335575457317072
+              ],
+              "mean_raw_selected_confidence": 0.716096064430073,
+              "mean_emitted_selected_confidence": 0.8009999999999944,
+              "emitted_confidence_minus_target_credit": 0.35621472392637477,
+              "mean_nll_delta": 0.14248735959836353,
+              "mean_nll_delta_95ci": [
+                0.09783718047278364,
+                0.18904564697308177
+              ],
+              "interval_status": "case_bootstrap"
+            },
+            "yes": {
+              "n": 41,
+              "independent_cases": 39,
+              "hard_target_n": 21,
+              "soft_target_n": 20,
+              "mean_target_credit": 0.36585365853658536,
+              "mean_target_credit_95ci": [
+                0.26744186046511625,
+                0.47435897435897434
+              ],
+              "mean_raw_selected_confidence": 0.6539223470338961,
+              "mean_emitted_selected_confidence": 0.8009999999999994,
+              "emitted_confidence_minus_target_credit": 0.435146341463414,
+              "mean_nll_delta": 0.25640131387048554,
+              "mean_nll_delta_95ci": [
+                0.1709873195155667,
+                0.34115370160226194
+              ],
+              "interval_status": "case_bootstrap"
+            }
+          },
+          "bootstrap_unit": "underlying_case",
+          "bootstrap_replicates": 2000,
+          "bootstrap_seed": 15,
+          "scope": "conditional dev diagnostics; soft target credit is not hard-label accuracy"
+        },
+        "calibrated": {
+          "groups": {
+            "no": {
+              "n": 515,
+              "independent_cases": 179,
+              "hard_target_n": 455,
+              "soft_target_n": 60,
+              "mean_target_credit": 0.49514563106796117,
+              "mean_target_credit_95ci": [
+                0.42494760256761693,
+                0.5636034273020574
+              ],
+              "mean_raw_selected_confidence": 0.6003487409426636,
+              "mean_emitted_selected_confidence": 0.8009999999999919,
+              "emitted_confidence_minus_target_credit": 0.3058543689320308,
+              "mean_nll_delta": 0.2192915877812669,
+              "mean_nll_delta_95ci": [
+                0.1481628383848865,
+                0.29438923454443083
+              ],
+              "interval_status": "case_bootstrap"
+            },
+            "yes": {
+              "n": 145,
+              "independent_cases": 61,
+              "hard_target_n": 85,
+              "soft_target_n": 60,
+              "mean_target_credit": 0.5379310344827586,
+              "mean_target_credit_95ci": [
+                0.4361612277170788,
+                0.6322743977133523
+              ],
+              "mean_raw_selected_confidence": 0.6808945783613061,
+              "mean_emitted_selected_confidence": 0.8010000000000012,
+              "emitted_confidence_minus_target_credit": 0.26306896551724257,
+              "mean_nll_delta": 0.16399275319630507,
+              "mean_nll_delta_95ci": [
+                0.09354982150023879,
+                0.24457765625620637
+              ],
+              "interval_status": "case_bootstrap"
+            }
+          },
+          "bootstrap_unit": "underlying_case",
+          "bootstrap_replicates": 2000,
+          "bootstrap_seed": 15,
+          "scope": "conditional dev diagnostics; soft target credit is not hard-label accuracy"
+        }
+      }
+    },
+    "pilot": {
+      "checkpoint_sha256": "09ae3c010c2d8ca49acac3e013f95f9f667f59547e155b578826e0b7a33b383d",
+      "dev_n": 2672,
+      "dev_independent_cases": 495,
+      "source_input_sha256": {
+        "raw": "398496d9000123eba7459d6f80c7952b2904dbdc205b87550b3dc9f9907e1154",
+        "calibrated": "c46776c1643154f6bb66dc8a7d70278d19a0c9a5af4282197a0730a7ab4b1063",
+        "calibration": "d539d80c1c94f9d3607bed98f50c5f7daa579a9869c1b0dd777d060f50a014ae"
+      },
+      "receipt": "runs/saved-policy-probe-20261004/pilot-bands.json",
+      "receipt_sha256": "2c19cb02a4365a062eabab096b872ae88b4f3a69ad7f62e929cb5962cedb962f",
+      "commit_bands": {
+        "raw": {
+          "groups": {
+            "no": {
+              "n": 409,
+              "independent_cases": 162,
+              "hard_target_n": 369,
+              "soft_target_n": 40,
+              "mean_target_credit": 0.5036674816625917,
+              "mean_target_credit_95ci": [
+                0.42750947917614585,
+                0.5833333333333334
+              ],
+              "mean_raw_selected_confidence": 0.5868363938588094,
+              "mean_emitted_selected_confidence": 0.800999999999993,
+              "emitted_confidence_minus_target_credit": 0.2973325183374014,
+              "mean_nll_delta": 0.20811858874211692,
+              "mean_nll_delta_95ci": [
+                0.11995127225571339,
+                0.29551700299242345
+              ],
+              "interval_status": "case_bootstrap"
+            },
+            "yes": {
+              "n": 88,
+              "independent_cases": 58,
+              "hard_target_n": 68,
+              "soft_target_n": 20,
+              "mean_target_credit": 0.5681818181818182,
+              "mean_target_credit_95ci": [
+                0.4302294323580895,
+                0.6881720430107527
+              ],
+              "mean_raw_selected_confidence": 0.6067796180194075,
+              "mean_emitted_selected_confidence": 0.8010000000000006,
+              "emitted_confidence_minus_target_credit": 0.23281818181818237,
+              "mean_nll_delta": 0.08450879725656914,
+              "mean_nll_delta_95ci": [
+                -0.05521777147804764,
+                0.24418531126525184
+              ],
+              "interval_status": "case_bootstrap"
+            }
+          },
+          "bootstrap_unit": "underlying_case",
+          "bootstrap_replicates": 2000,
+          "bootstrap_seed": 15,
+          "scope": "conditional dev diagnostics; soft target credit is not hard-label accuracy"
+        },
+        "calibrated": {
+          "groups": {
+            "no": {
+              "n": 419,
+              "independent_cases": 166,
+              "hard_target_n": 379,
+              "soft_target_n": 40,
+              "mean_target_credit": 0.5059665871121718,
+              "mean_target_credit_95ci": [
+                0.43028279376675405,
+                0.5857908686730506
+              ],
+              "mean_raw_selected_confidence": 0.5637244591153061,
+              "mean_emitted_selected_confidence": 0.8009999999999928,
+              "emitted_confidence_minus_target_credit": 0.29503341288782103,
+              "mean_nll_delta": 0.2133283640182658,
+              "mean_nll_delta_95ci": [
+                0.11539875450628372,
+                0.3031168600827964
+              ],
+              "interval_status": "case_bootstrap"
+            },
+            "yes": {
+              "n": 103,
+              "independent_cases": 65,
+              "hard_target_n": 83,
+              "soft_target_n": 20,
+              "mean_target_credit": 0.5339805825242718,
+              "mean_target_credit_95ci": [
+                0.4056379155435759,
+                0.6523809523809524
+              ],
+              "mean_raw_selected_confidence": 0.6022307239604336,
+              "mean_emitted_selected_confidence": 0.8010000000000008,
+              "emitted_confidence_minus_target_credit": 0.267019417475729,
+              "mean_nll_delta": 0.10759345991392302,
+              "mean_nll_delta_95ci": [
+                -0.017448119097391055,
+                0.2466246109301077
+              ],
+              "interval_status": "case_bootstrap"
+            }
+          },
+          "bootstrap_unit": "underlying_case",
+          "bootstrap_replicates": 2000,
+          "bootstrap_seed": 15,
+          "scope": "conditional dev diagnostics; soft target credit is not hard-label accuracy"
+        }
+      }
+    }
+  },
+  "validation": {
+    "related_tests": {
+      "passed": 35,
+      "duration_seconds": 3.13
+    },
+    "lint_format": "passed",
+    "integration": {
+      "passed": 663,
+      "failed": 3,
+      "skipped": 1,
+      "duration_seconds": 189.18,
+      "concurrent_foreign_edits": true,
+      "failed_tests": [
+        "test_swift_fit.py::test_recovers_known_temperature_for_each_primitive",
+        "test_swift_fit.py::test_public_refusal_override_and_provenance",
+        "test_swift_gpu_runner.py::test_shell_entrypoint_dry_run_and_syntax"
+      ]
+    },
+    "peer_review": "requested; no response observed"
+  },
+  "limitations": [
+    "soft target credit is not hard-label accuracy",
+    "subgroup intervals are conditional and not adjusted for multiple comparisons",
+    "pilot Yes NLL-delta intervals include zero in both raw and calibrated groups",
+    "not a measurement of the proposed frozen 12B reader or published ayaka-large",
+    "historical calibration tags are not cryptographic fitting provenance",
+    "not independent test confirmation or an official sealed-inclusive score"
+  ]
+}
