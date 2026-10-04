@@ -229,6 +229,11 @@ class Trainer:
         return out, tensors
 
     def _decision_forward(self, kind, mb, apply_temperature=False, *, auxiliary=True):
+        from .swift_direct import validate_direct_input_items
+
+        validate_direct_input_items(mb)
+        if any(it.direct_input_binding is not None for it in mb) and self.model.cfg.readout != "lm":
+            raise ValueError("Swift direct rows require the native LM-only readout")
         if any(it.native_inputs is not None for it in mb):
             if self.image_backend is None or kind != "image":
                 raise ValueError(
@@ -292,6 +297,9 @@ class Trainer:
         return out, t
 
     def _backward(self, items: list[TrainItem]):
+        from .swift_direct import validate_direct_input_items
+
+        validate_direct_input_items(items)
         if any(it.base_probs is not None and not it.direct_distillation for it in items):
             raise ValueError("frozen-base replay requires explicitly direct-distillation items")
         direct = [it for it in items if it.direct_distillation]
@@ -429,6 +437,9 @@ class Trainer:
         self, items: list[TrainItem], apply_temperature: bool = True, return_logits: bool = False
     ):
         """Per-question probability vectors (input candidate order)."""
+        from .swift_direct import validate_direct_input_items
+
+        validate_direct_input_items(items)
         self.model.eval()
         probs: list[list[float] | None] = [None] * len(items)
         logits: list[list[float] | None] = [None] * len(items)

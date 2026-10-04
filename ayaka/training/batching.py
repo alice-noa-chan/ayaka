@@ -44,6 +44,7 @@ class TrainItem:
     base_probs: list[float] | None = (
         None  # frozen native probabilities; separate from reasoned teacher
     )
+    direct_input_binding: dict | None = None  # opt-in exact Swift serving-input/gold contract
 
     @property
     def length(self) -> int:
