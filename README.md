@@ -526,6 +526,13 @@ native training schedule from a prepared zstd archive. The
 [2026-10-02 preparation report](docs/experiments/V2_RUNPOD_READY_2026-10-02.md)
 records the actual archive, pinned runtime and offline verification; it does not
 claim a completed Runpod training or quality evaluation.
+
+**Swift readout (experimental, unmeasured).** `ayaka.swift` is a one-token readout over frozen
+`gemma-4-12B-it` that fits a decision policy aimed at JevBench v1.5. Every optional lever stays off
+unless a predeclared adoption gate admits it on non-public dev reads. See the
+[Swift plan](docs/experiments/AYAKA_V3_SWIFT.md), the
+[v1.5 board notes](docs/experiments/JEVBENCH_V15_BOARD_2026-10-04.md) and the evaluator package in
+[`deploy/swift/`](deploy/swift/README.md). There are no GPU measurements yet.
 The [2026-10-01 exploration findings](docs/experiments/V2_FINDINGS_2026-10-01.md)
 include measured improvements, multilingual regressions and the closed GPU-time audit.
 Native image inputs and opt-in text Choice generation/Other expansion are described
