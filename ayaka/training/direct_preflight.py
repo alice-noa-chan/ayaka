@@ -9,9 +9,10 @@ import torch
 from ..backbone import detach_text_backbone, tiny_text_config
 from ..checkpoint import apply_lora
 from ..model.electra import ElectraDecisionModel
+from .optimization import OptimizationConfig, optimization_plan
 
 
-def inspect_direct_model(cfg, *, official_weight_elements=None):
+def inspect_direct_model(cfg, *, official_weight_elements=None, optimizations=None):
     """Load cached configuration only; instantiate every parameter on meta.
 
     The official full-checkpoint element count is used conservatively, even
@@ -52,6 +53,7 @@ def inspect_direct_model(cfg, *, official_weight_elements=None):
         model = ElectraDecisionModel(cfg, backbone, text_config)
         model.backbone.requires_grad_(False)
         apply_lora(model)
+        kernel_plan = optimization_plan(model, optimizations or OptimizationConfig())
     parameters = list(model.parameters())
     if not parameters or any(not p.is_meta for p in parameters):
         raise ValueError("native architecture inspection unexpectedly materialized parameters")
@@ -94,6 +96,7 @@ def inspect_direct_model(cfg, *, official_weight_elements=None):
         "parameter_storage": "meta",
         "materialized_parameter_bytes": 0,
         "weights_loaded": False,
+        "kernel_plan": kernel_plan,
         "forward_calls": 0,
         "backward_calls": 0,
         "optimizer_steps": 0,

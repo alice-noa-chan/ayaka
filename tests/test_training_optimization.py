@@ -18,6 +18,7 @@ from ayaka.training.optimization import (
     apply_optimizations,
     causal_padding_mask,
     hybrid_attention,
+    optimization_plan,
     optimize_and_verify,
 )
 from ayaka.training.trainer import TrainConfig, Trainer
@@ -140,6 +141,22 @@ def test_unified_flash_hybrid_through_real_model_collation_and_backward():
     assert trainer.model.text_config._attn_implementation == ATTENTION_NAME
     application.rollback()
     assert trainer.model.text_config._attn_implementation != ATTENTION_NAME
+
+
+def test_kernel_plan_uses_actual_module_topology_without_loading_external_kernels(monkeypatch):
+    from ayaka.training import optimization
+
+    trainer, _ = fixture(unified=True)
+    monkeypatch.setattr(optimization, "_liger_functions", lambda: pytest.fail("kernel import"))
+    monkeypatch.setattr(optimization, "_flash_function", lambda: pytest.fail("kernel import"))
+    before = list(trainer.model.state_dict())
+    plan = optimization_plan(
+        trainer.model, OptimizationConfig(attention="flash_attention_2", liger=True)
+    )
+    assert plan["execution_verified"] is False
+    assert len(plan["attention_layers"]) == 3
+    assert len(plan["liger_modules"]["geglu"]) == 3
+    assert before == list(trainer.model.state_dict())
 
 
 @pytest.mark.parametrize("head_dim", [16, 512])

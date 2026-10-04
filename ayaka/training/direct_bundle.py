@@ -25,10 +25,11 @@ from ..tokenization import HFTokenizer, ToyTokenizer
 from .batching import _noul_canonical, question_view
 from .direct_distillation import prepare_direct_distillation
 from .direct_preflight import inspect_direct_model
+from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .workload import describe_rows, finite_workload, scheduled_batches
 
-VERSION = "ayaka-direct-bundle-1"
+VERSION = "ayaka-direct-bundle-2"
 STATUS = "cpu_prepared_no_model_or_optimizer_execution"
 FILES = {f"{split}.jsonl" for split in SPLITS} | {
     "teacher_reads.json",
@@ -237,6 +238,7 @@ def prepare_bundle(
     seed=20261004,
     weights=None,
     allow_tiny=False,
+    optimizations=None,
 ):
     """Validate all data/tokens/settings before creating a fresh output directory."""
     root = Path(out)
@@ -253,8 +255,11 @@ def prepare_bundle(
     schedule = {"steps": steps, "rows_per_step": rows_per_step, "seed": seed}
     _validate_schedule(schedule)
     tokenizer_sha256 = _tokenizer_identity(tok, cfg)
+    optimizations = optimizations or OptimizationConfig()
     architecture = inspect_direct_model(
-        cfg, official_weight_elements=policy.get("backbone_weight_elements")
+        cfg,
+        official_weight_elements=policy.get("backbone_weight_elements"),
+        optimizations=optimizations,
     )
     items, report, _, _ = _prepare(splits, tok, cfg, teacher_reads, weights, schedule, architecture)
     recipe = {
@@ -267,6 +272,7 @@ def prepare_bundle(
         "verifier": VERIFIER_VERSION,
         "model_policy": policy,
         "native_architecture": architecture,
+        "optimizations": asdict(optimizations),
         "inference_mode": "off",
         "reasoning_training_tokens": 0,
         "initialization": "fresh_lora_from_pinned_native_base",
@@ -344,7 +350,9 @@ def audit_bundle(path, tok=None, *, allow_tiny=False):
     if recipe.get("model_policy") != _model_policy(cfg, allow_tiny=allow_tiny):
         raise ValueError("declared model policy changed")
     architecture = inspect_direct_model(
-        cfg, official_weight_elements=recipe["model_policy"].get("backbone_weight_elements")
+        cfg,
+        official_weight_elements=recipe["model_policy"].get("backbone_weight_elements"),
+        optimizations=OptimizationConfig(**recipe["optimizations"]),
     )
     if architecture != recipe.get("native_architecture"):
         raise ValueError("actual native architecture or LoRA placements changed")
@@ -397,6 +405,10 @@ def main(argv=None):
     prepare.add_argument("--seed", default=20261004, type=int)
     prepare.add_argument("--distill-weight", default=0.2, type=float)
     prepare.add_argument("--mechanics-only", action="store_true")
+    prepare.add_argument(
+        "--attention", choices=("native", "sdpa", "flash_attention_2"), default="native"
+    )
+    prepare.add_argument("--liger", action="store_true")
     audit = commands.add_parser("audit")
     audit.add_argument("--bundle", required=True, type=Path)
     audit.add_argument("--mechanics-only", action="store_true")
@@ -427,6 +439,7 @@ def main(argv=None):
                 gold_nll_with_teacher=True, distill=args.distill_weight, pointer_aux=0
             ),
             allow_tiny=args.mechanics_only,
+            optimizations=OptimizationConfig(attention=args.attention, liger=args.liger),
         )
     else:
         manifest, _, _, _, _ = audit_bundle(args.bundle, allow_tiny=args.mechanics_only)

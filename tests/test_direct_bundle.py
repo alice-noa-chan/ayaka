@@ -11,6 +11,7 @@ from ayaka.tokenization import ToyTokenizer
 from ayaka.training import direct_bundle
 from ayaka.training.direct_bundle import audit_bundle, main, prepare_bundle, training_batches
 from ayaka.training.direct_distillation import make_teacher_read
+from ayaka.training.optimization import OptimizationConfig
 from ayaka.training.prepare_v2 import canonical, sha256
 
 
@@ -66,9 +67,54 @@ def test_bundle_roundtrip_finite_schedule_and_deterministic_resume(tmp_path):
     assert report["workload"]["tokens"]["trace_tokens"] == 0
     assert set(report["context_audit"]) == set(SPLITS)
     assert recipe["native_architecture"]["weights_loaded"] is False
+    assert recipe["optimizations"]["attention"] == "native"
     assert recipe["native_architecture"]["conservative_total_parameters"] < 14_000_000_000
     with pytest.raises(ValueError, match="resume step"):
         list(training_batches(recipe, inventory, groups, start_step=3))
+
+
+def test_liger_topology_is_prepared_and_audited_without_importing_external_kernels(
+    tmp_path, monkeypatch
+):
+    from ayaka.training import optimization
+
+    monkeypatch.setattr(optimization, "_liger_functions", lambda: pytest.fail("no kernel import"))
+    prepare_bundle(
+        tmp_path / "liger",
+        dataset(),
+        ToyTokenizer(),
+        tiny_config(readout="lm", max_seq_len=2048),
+        {},
+        steps=2,
+        rows_per_step=16,
+        allow_tiny=True,
+        optimizations=OptimizationConfig(liger=True),
+    )
+    _, recipe, _, _, _ = audit_bundle(tmp_path / "liger", allow_tiny=True)
+    plan = recipe["native_architecture"]["kernel_plan"]
+    assert recipe["optimizations"]["liger"] is True
+    assert len(plan["liger_modules"]["geglu"]) == 6
+    assert plan["execution_verified"] is False
+    recipe["optimizations"]["liger"] = False
+    resign(tmp_path / "liger", "recipe.json", canonical(recipe) + b"\n")
+    with pytest.raises(ValueError, match="actual native architecture"):
+        audit_bundle(tmp_path / "liger", allow_tiny=True)
+
+
+def test_unsupported_flash_architecture_fails_before_creating_bundle(tmp_path):
+    with pytest.raises(ValueError, match="unified causal text"):
+        prepare_bundle(
+            tmp_path / "unsupported",
+            dataset(),
+            ToyTokenizer(),
+            tiny_config(readout="lm"),
+            {},
+            steps=2,
+            rows_per_step=16,
+            allow_tiny=True,
+            optimizations=OptimizationConfig(attention="flash_attention_2"),
+        )
+    assert not (tmp_path / "unsupported").exists()
 
 
 def test_accepted_teacher_tokens_and_soft_target_alignment_survive_full_regeneration(tmp_path):

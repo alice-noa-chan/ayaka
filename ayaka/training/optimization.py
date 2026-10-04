@@ -161,8 +161,7 @@ def _flash_function():
     return _flash_attention_forward
 
 
-def _patch_liger(text, application, functions):
-    rms, geglu = functions
+def _liger_topology(text):
     norms, mlps, unscaled = [], [], []
     for name, module in text.named_modules():
         kind = type(module).__name__
@@ -182,6 +181,54 @@ def _patch_liger(text, application, functions):
             mlps.append((name, module))
     if not norms or not mlps:
         raise ValueError("no supported native RMSNorm/GeGLU modules found")
+    return norms, mlps, unscaled
+
+
+def optimization_plan(model, options):
+    """Inspect actual module topology without importing or executing CUDA kernels."""
+    text = model.text_model()
+    external = options.liger or options.attention == "flash_attention_2"
+    if external and text.config.model_type not in GEMMA_TYPES:
+        raise ValueError("external kernel adapter supports verified Gemma text architectures only")
+    if external and getattr(text.config, "enable_moe_block", False):
+        raise ValueError("external dense kernel adapter does not support MoE blocks")
+    if options.attention == "flash_attention_2":
+        if text.config.model_type != "gemma4_unified_text":
+            raise ValueError(
+                "hybrid FA2 requires unified causal text; E4B pruned masks need native SDPA"
+            )
+        if getattr(text.config, "use_bidirectional_attention", None) == "all":
+            raise ValueError("hybrid FA2 cannot replace bidirectional attention")
+    layers = {}
+    for name, module in text.named_modules():
+        if hasattr(module, "head_dim") and hasattr(module, "is_causal"):
+            if options.attention == "flash_attention_2":
+                if not module.is_causal:
+                    raise ValueError("hybrid FA2 requires every text layer to be causal")
+                layers[name] = "flash_attention_2" if module.head_dim <= 256 else "sdpa_wide_head"
+            else:
+                layers[name] = options.attention
+    if options.attention == "flash_attention_2" and "flash_attention_2" not in layers.values():
+        raise ValueError("no FA2-compatible native attention layers found")
+    topology = {}
+    if options.liger:
+        norms, mlps, unscaled = _liger_topology(text)
+        topology = {
+            "scaled_rms_norm": [name for name, _, _ in norms],
+            "geglu": [name for name, _ in mlps],
+            "unscaled_norm_kept_native": unscaled,
+        }
+    return {
+        "requested": asdict(options),
+        "attention_layers": layers,
+        "liger_modules": topology,
+        "execution_verified": False,
+    }
+
+
+def _patch_liger(text, application, functions):
+    rms, geglu = functions
+    norms, mlps, unscaled = _liger_topology(text)
     # Validate the entire topology before mutating any module. Reuse existing
     # projections so PEFT wrapping and optimizer/checkpoint names stay intact.
     for _, norm, eps in norms:
@@ -212,6 +259,7 @@ def apply_optimizations(model, options, *, liger_functions=None, flash_function=
     device = next(model.parameters()).device
     if external and not injected and device.type != "cuda":
         raise ValueError("requested external training kernels require CUDA")
+    plan = optimization_plan(model, options)
     if external and text.config.model_type not in GEMMA_TYPES:
         raise ValueError("external kernel adapter supports verified Gemma text architectures only")
     if options.attention == "flash_attention_2" and text.config.model_type != "gemma4_unified_text":
@@ -238,6 +286,7 @@ def apply_optimizations(model, options, *, liger_functions=None, flash_function=
             "cross_entropy_replaced": False,
             "rope_replaced": False,
             "parity_verified": False,
+            "plan": plan,
         }
     )
     try:
