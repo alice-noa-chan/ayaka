@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from .policy import normalize
 from .prompt import InvalidQuestion, Question, render_options
-from .readers import LetterReader
+from .readers import READOUT, LetterReader
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class QuestionRead:
     input_tokens: int
     output_tokens: int
     latency_s: float
-    readout: str = "canonical_letter"
+    readout: str = READOUT
     passes: int = 1
     candidate_log_masses: dict[str, float] | None = None
     pass_inputs: list[dict] = field(default_factory=list)
@@ -65,7 +65,14 @@ def read_question(
         )
         result = reader.read(messages, list(mapping))
         pass_inputs.append(
-            {"messages": messages, "labels": list(mapping.values()), "letters": list(mapping)}
+            {
+                "messages": messages,
+                "labels": list(mapping.values()),
+                "letters": list(mapping),
+                "input_token_ids": result.input_token_ids,
+                "canonical_token_ids": result.canonical_token_ids,
+                "token_logits": {str(k): v for k, v in result.token_logits.items()},
+            }
         )
         probs = normalize({letter: result.letter_probs[letter] for letter in mapping})
         input_tokens += result.input_tokens
@@ -100,7 +107,7 @@ def read_question(
         input_tokens,
         output_tokens,
         latency_s,
-        "grouped_approx" if n > 26 else getattr(reader, "readout", "canonical_letter"),
+        "grouped_approx" if n > 26 else getattr(reader, "readout", "undeclared"),
         passes,
         masses if n <= 26 else None,
         pass_inputs,

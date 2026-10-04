@@ -70,6 +70,7 @@ def _is_public(record: dict, source: str) -> bool:
 
 
 def adapt_jevbench(record: dict, source: str = "inline") -> DatasetItem:
+    _recorded_split(record)
     question = dict(record["question"])
     kind = question["type"]
     original_labels = [str(label) for label in record["labels"]]
@@ -126,7 +127,7 @@ def adapt_jevbench(record: dict, source: str = "inline") -> DatasetItem:
         identity,
         record.get("split", (record.get("metadata") or {}).get("split")),
         identity,
-        (),
+        tuple(record.get("lineage_ids") or (record.get("metadata") or {}).get("lineage_ids") or ()),
         "cygnet" if cygnet else "jevbench",
     )
 
@@ -147,6 +148,7 @@ def _validate_gold(
 def adapt_canonical(
     record: dict, source: str = "inline", line_number: int = 1
 ) -> list[DatasetItem]:
+    _recorded_split(record)
     metadata = record.get("metadata", {})
     base_id = str(
         record.get("id") or metadata.get("source_example_id") or f"{source}:{line_number}"
@@ -229,6 +231,12 @@ def adapt_canonical(
     return items
 
 
+def _recorded_split(record):
+    metadata = record.get("metadata") or {}
+    if "split" in record and "split" in metadata and record["split"] != metadata["split"]:
+        raise ValueError("row and metadata split conflict")
+
+
 def iter_dataset(paths: list[str | Path]) -> Iterator[DatasetItem]:
     for requested in paths:
         path = Path(requested)
@@ -274,6 +282,8 @@ def collect(
     model = model or getattr(reader, "model", getattr(reader, "model_id_or_path", "fake"))
     output = Path(output)
     revision = revision or getattr(reader, "revision", None)
+    if revision is None and getattr(reader, "backend", None) == "fixture":
+        revision = "fixture-model-v1"
     if getattr(reader, "backend", None) in ("hf", "vllm") and (
         not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision)
     ):
@@ -344,6 +354,9 @@ def collect(
                 "id": item.id,
                 "model": model,
                 "revision": revision,
+                "tokenizer_revision": binding["tokenizer_revision"],
+                "binding_sha256": binding["binding_sha256"],
+                "rendered_input_sha256": binding["rendered_input_sha256"],
                 "prompt_variant": prompt_variant,
                 "source": item.source,
                 "tier": item.tier,

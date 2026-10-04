@@ -8,6 +8,8 @@ from ayaka.swift.readers import (
     HFReader,
     VLLMChatReader,
     aggregate_letter_logits,
+    cached_tokenizer,
+    gather_token_logits,
     letter_token_ids,
     top_letter_probs,
 )
@@ -27,21 +29,23 @@ def test_canonical_letters_reject_aliases_and_missing_mass():
 @pytest.mark.parametrize("kwargs", [None, {"thinking": False}, {}])
 def test_vllm_request_and_usage(monkeypatch, kwargs):
     payload = {
+        "prompt_token_ids": [7, 8],
         "choices": [
             {
                 "logprobs": {
                     "content": [
                         {
+                            "token": "token_id:65",
                             "top_logprobs": [
-                                {"token": "A", "logprob": math.log(0.6)},
-                                {"token": "B", "logprob": math.log(0.4)},
-                            ]
+                                {"token": "token_id:65", "logprob": math.log(0.6)},
+                                {"token": "token_id:66", "logprob": math.log(0.4)},
+                            ],
                         }
                     ]
                 }
             }
         ],
-        "usage": {"prompt_tokens": 17, "completion_tokens": 1},
+        "usage": {"prompt_tokens": 2, "completion_tokens": 1},
     }
     seen = {}
 
@@ -61,7 +65,12 @@ def test_vllm_request_and_usage(monkeypatch, kwargs):
 
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
     result = VLLMChatReader(
-        "http://localhost:9999/v1", "tiny", 5, chat_template_kwargs=kwargs
+        "http://localhost:9999/v1",
+        "tiny",
+        5,
+        chat_template_kwargs=kwargs,
+        revision="a" * 40,
+        tokenizer=StubTokenizer(),
     ).read([{"role": "user", "content": "Q"}], ["A", "B"])
     assert seen["url"] == "http://localhost:9999/v1/chat/completions"
     assert seen["timeout"] == 5
@@ -70,13 +79,14 @@ def test_vllm_request_and_usage(monkeypatch, kwargs):
         "messages": [{"role": "user", "content": "Q"}],
         "max_tokens": 1,
         "logprobs": True,
-        "top_logprobs": 2,
+        "logprob_token_ids": [65, 66],
+        "return_tokens_as_token_ids": True,
+        "return_token_ids": True,
         "temperature": 0,
         "chat_template_kwargs": {"enable_thinking": False} if kwargs is None else kwargs,
-        "structured_outputs": {"choice": ["A", "B"]},
     }
     assert result.letter_probs == pytest.approx({"A": 0.6, "B": 0.4})
-    assert (result.input_tokens, result.output_tokens) == (17, 1)
+    assert (result.input_tokens, result.output_tokens) == (2, 1)
     assert result.latency_s >= 0
 
 
@@ -148,29 +158,118 @@ def test_hf_tiny_model_constructed_offline(tmp_path):
     assert diagnostic._letter_ids["A"] == [1]
 
 
-def test_vllm_records_and_rejects_aliases(monkeypatch):
+def test_vllm_rejects_decoded_strings(monkeypatch):
     import io
 
-    payload = {
-        "choices": [
-            {
-                "logprobs": {
-                    "content": [
-                        {
-                            "top_logprobs": [
-                                {"token": " A", "logprob": 0},
-                                {"token": "B", "logprob": 0},
-                            ]
-                        }
-                    ]
-                }
-            }
-        ]
-    }
+    payload = {"choices": [{"logprobs": {"content": [{"token": " A", "top_logprobs": []}]}}]}
     monkeypatch.setattr(
-        "urllib.request.urlopen", lambda *args, **kwargs: io.BytesIO(json.dumps(payload).encode())
+        "urllib.request.urlopen", lambda *a, **kw: io.BytesIO(json.dumps(payload).encode())
     )
-    reader = VLLMChatReader("http://fixture", "fixture")
-    with pytest.raises(ValueError, match="rejected noncanonical"):
+    reader = VLLMChatReader("http://fixture", "fixture", tokenizer=StubTokenizer())
+    with pytest.raises(ValueError, match="token_id:N"):
         reader.read([], ["A", "B"])
-    assert reader.rejected_aliases == [" A"]
+
+
+class StubTokenizer:
+    def apply_chat_template(self, messages, tokenize, **kwargs):
+        return [7, 8] if tokenize else "assistant:"
+
+    def encode(self, text, add_special_tokens):
+        return [7, 8] + ([] if text == "assistant:" else [ord(text[-1])])
+
+
+@pytest.mark.parametrize(
+    "entries,error",
+    [
+        ([{"token": "token_id:65", "logprob": 0}], "missing"),
+        ([{"token": "token_id:65", "logprob": 0}] * 2, "duplicate"),
+        ([{"token": "token_id:65", "logprob": -9999}], "clipped"),
+        ([{"token": "token_id:65", "logprob": -10000}], "clipped"),
+        ([{"token": "token_id:65", "logprob": float("nan")}], "finite"),
+        ([{"token": "token_id:65", "logprob": float("inf")}], "finite"),
+        ([{"token": "token_id:99", "logprob": 0}], "unexpected"),
+    ],
+)
+def test_exact_gather_rejects_loss(entries, error):
+    with pytest.raises(ValueError, match=error):
+        gather_token_logits(entries, [65, 66], "token_id:0")
+
+
+def test_exact_gather_ignores_only_extra_sampled_token():
+    entries = [
+        {"token": f"token_id:{i}", "logprob": v} for i, v in [(0, 1000), (65, 100), (66, 98)]
+    ]
+    assert gather_token_logits(entries, [65, 66], "token_id:0") == {65: 100, 66: 98}
+    assert gather_token_logits(entries[1:], [65, 66], "token_id:65") == {65: 100, 66: 98}
+
+
+def test_vllm_26_letters_one_exact_request(monkeypatch):
+    import io
+
+    calls = []
+
+    def urlopen(request, timeout):
+        body = json.loads(request.data)
+        calls.append(body)
+        ids = body["logprob_token_ids"]
+        payload = {
+            "prompt_token_ids": [7, 8],
+            "choices": [
+                {
+                    "logprobs": {
+                        "content": [
+                            {
+                                "token": "token_id:0",
+                                "top_logprobs": [
+                                    {
+                                        "token": f"token_id:{i}",
+                                        "logprob": 100.0 if i == 65 else 98.0,
+                                    }
+                                    for i in [0, *ids]
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        }
+        return io.BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    result = VLLMChatReader("http://fixture", "fixture", tokenizer=StubTokenizer()).read(
+        [], list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    )
+    assert len(calls) == 1 and len(calls[0]["logprob_token_ids"]) == 26
+    assert "top_logprobs" not in calls[0] and "structured_outputs" not in calls[0]
+    assert result.letter_probs["A"] / result.letter_probs["Z"] == pytest.approx(math.exp(2))
+    assert result.letter_log_masses["A"] == 100
+    assert result.input_token_ids == [7, 8]
+
+
+def test_tokenizer_only_lazy_cache_per_pinned_revision(monkeypatch):
+    import sys
+
+    from ayaka.swift import readers
+
+    calls = []
+    readers._TOKENIZERS.clear()
+
+    def load(model, **kwargs):
+        calls.append((model, kwargs))
+        return StubTokenizer()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(AutoTokenizer=SimpleNamespace(from_pretrained=load)),
+    )
+    reader = VLLMChatReader("http://fixture", "fixture", revision="a" * 40)
+    assert not calls
+    reader.describe([], ["A", "B"])
+    assert cached_tokenizer("fixture", "a" * 40) is reader.tokenizer
+    cached_tokenizer("fixture", "b" * 40)
+    assert len(calls) == 2 and all(kw["local_files_only"] for _, kw in calls)
+    with pytest.raises(ValueError, match="pinned"):
+        cached_tokenizer("fixture", "main")
+    readers._TOKENIZERS.clear()

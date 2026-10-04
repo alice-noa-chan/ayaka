@@ -5,17 +5,57 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from threading import Lock
 from typing import Any, Protocol
+
+from ayaka.eval.read_artifact import fingerprint
 
 from .policy import normalize
 from .prompt import PROMPT_VARIANTS
 
 Messages = list[dict[str, str]]
+READOUT = "canonical_letter_raw"
+_TOKENIZERS: dict[tuple[str, str], Any] = {}
+_TOKENIZER_LOCK = Lock()
+
+
+def cached_tokenizer(model: str, revision: str):
+    if not revision or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision):
+        raise ValueError("tokenizer requires a pinned immutable revision")
+    with _TOKENIZER_LOCK:
+        key = (model, revision)
+        if key not in _TOKENIZERS:
+            from transformers import AutoTokenizer
+
+            _TOKENIZERS[key] = AutoTokenizer.from_pretrained(
+                model, revision=revision, local_files_only=True
+            )
+        return _TOKENIZERS[key]
+
+
+def token_input(tokenizer, messages, letters, kwargs):
+    prompt = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True, **kwargs
+    )
+    prefix = tokenizer.encode(prompt, add_special_tokens=False)
+    actual = tokenizer.apply_chat_template(
+        messages, tokenize=True, add_generation_prompt=True, **kwargs
+    )
+    if actual != prefix or not prefix:
+        raise ValueError("chat-template token ids differ from the canonical answer prefix")
+    ids = canonical_letter_ids(tokenizer, prompt, letters)
+    return {
+        "input_token_ids": prefix,
+        "input_token_ids_sha256": fingerprint(prefix),
+        "canonical_token_ids": ids,
+        "canonical_token_ids_sha256": fingerprint(ids),
+    }
 
 
 @dataclass(frozen=True)
@@ -25,6 +65,9 @@ class ReadResult:
     output_tokens: int
     latency_s: float
     letter_log_masses: dict[str, float] | None = None
+    input_token_ids: list[int] = field(default_factory=list)
+    canonical_token_ids: dict[str, list[int]] = field(default_factory=dict)
+    token_logits: dict[int, float] = field(default_factory=dict)
 
 
 class LetterReader(Protocol):
@@ -56,6 +99,10 @@ def canonical_logprobs(top_logprobs: list[dict], letters: list[str]) -> dict[str
 
 
 def logmass_probs(masses: dict[str, float]) -> dict[str, float]:
+    if not masses or any(
+        type(v) not in (int, float) or not math.isfinite(v) for v in masses.values()
+    ):
+        raise ValueError("complete finite raw log masses required")
     peak = max(masses.values())
     return normalize({letter: math.exp(value - peak) for letter, value in masses.items()})
 
@@ -73,6 +120,8 @@ class VLLMChatReader:
         *,
         chat_template_kwargs: dict | None = None,
         revision: str | None = None,
+        tokenizer_revision: str | None = None,
+        tokenizer: Any = None,
     ):
         root = url.rstrip("/")
         self.url = (
@@ -86,9 +135,12 @@ class VLLMChatReader:
         )
         self.model = model
         self.revision = revision
+        self.tokenizer_revision = tokenizer_revision or revision
+        self.tokenizer = tokenizer
         self.backend = "vllm"
-        self.readout = "canonical_letter"
-        self.logprobs_mode = "processed_logprobs"
+        self.readout = READOUT
+        self.logprobs_mode = "raw_logits"
+        self.dtype = "bfloat16"
         self.rejected_aliases: list[str] = []
         self.timeout = timeout
         self.chat_template_kwargs = (
@@ -97,17 +149,26 @@ class VLLMChatReader:
             else chat_template_kwargs.copy()
         )
 
+    def describe(self, messages, letters):
+        if self.tokenizer is None:
+            self.tokenizer = cached_tokenizer(self.model, self.tokenizer_revision)
+        return token_input(self.tokenizer, messages, letters, self.chat_template_kwargs)
+
     def read(self, messages: Messages, letters: list[str]) -> ReadResult:
         start = time.perf_counter()
+        description = self.describe(messages, letters)
+        ids = description["canonical_token_ids"]
+        requested = [ids[letter][0] for letter in letters]
         body = {
             "model": self.model,
             "messages": messages,
             "max_tokens": 1,
             "logprobs": True,
-            "top_logprobs": min(20, len(letters)),
+            "logprob_token_ids": requested,
+            "return_tokens_as_token_ids": True,
+            "return_token_ids": True,
             "temperature": 0,
             "chat_template_kwargs": self.chat_template_kwargs,
-            "structured_outputs": {"choice": letters},
         }
         request = urllib.request.Request(
             self.url,
@@ -115,24 +176,74 @@ class VLLMChatReader:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            result = json.load(response)
-        entries = result["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
-        self.rejected_aliases.extend(
-            entry["token"]
-            for entry in entries
-            if entry["token"] not in letters and entry["token"].strip() in letters
-        )
-        masses = canonical_logprobs(entries, letters)
+        # Names/"token_id:N" wire strings verified at v0.30.0 commit ced6857,
+        # source receipt .dev/codex-vllm-source-audit-20261004-r2.json.
+        # Kernel parity remains unverified until the runner's fixed-cohort gate.
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                result = json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise ValueError(
+                "vLLM exact token gather rejected; require 0.30.0 logprob_token_ids, "
+                "return_tokens_as_token_ids and server --logprobs-mode raw_logits"
+            ) from exc
+        content = result["choices"][0]["logprobs"]["content"]
+        if len(content) != 1:
+            raise ValueError("exact read requires one assistant position")
+        position = content[0]
+        selected = gather_token_logits(position["top_logprobs"], requested, position["token"])
+        masses = {letter: selected[ids[letter][0]] for letter in letters}
         probs = logmass_probs(masses)
         usage = result["usage"]
+        if result.get("prompt_token_ids") != description["input_token_ids"]:
+            raise ValueError("server prompt token ids differ from the client-bound input")
+        if (
+            usage["prompt_tokens"] != len(description["input_token_ids"])
+            or usage["completion_tokens"] != 1
+        ):
+            raise ValueError("server token usage differs from the bound one-position input")
         return ReadResult(
             probs,
             int(usage["prompt_tokens"]),
             int(usage["completion_tokens"]),
             time.perf_counter() - start,
             masses,
+            description["input_token_ids"],
+            ids,
+            selected,
         )
+
+
+def wire_token_id(token):
+    if not isinstance(token, str) or not re.fullmatch(r"token_id:\d+", token):
+        raise ValueError("expected vLLM return_tokens_as_token_ids token_id:N")
+    return int(token.split(":", 1)[1])
+
+
+def gather_token_logits(entries, requested, sampled_token):
+    """Wire 'logprob' means raw logit; reject losses rather than invent mass."""
+    if not requested or len(set(requested)) != len(requested):
+        raise ValueError("requested canonical token ids must be distinct")
+    sampled = wire_token_id(sampled_token)
+    selected, seen = {}, set()
+    for entry in entries:
+        token_id = wire_token_id(entry["token"])
+        if token_id in seen:
+            raise ValueError(f"duplicate gathered token id: {token_id}")
+        seen.add(token_id)
+        if token_id not in requested:
+            if token_id != sampled:
+                raise ValueError("unexpected token id; only extra sampled token may be ignored")
+            continue
+        value = entry["logprob"]
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("gathered raw logits must be finite")
+        if value <= -9999:
+            raise ValueError("clipped raw logit at vLLM wire floor -9999")
+        selected[token_id] = value
+    if set(selected) != set(requested):
+        raise ValueError("missing requested canonical token ids")
+    return selected
 
 
 def letter_token_ids(tokenizer: Any) -> dict[str, list[int]]:
@@ -147,6 +258,8 @@ def letter_token_ids(tokenizer: Any) -> dict[str, list[int]]:
 
 def canonical_letter_ids(tokenizer: Any, prompt: str, letters: list[str]) -> dict[str, list[int]]:
     """Find the one appended token at the actual assistant answer position."""
+    if not letters or len(letters) > 26 or len(set(letters)) != len(letters):
+        raise ValueError("canonical read needs 1..26 distinct letters")
     prefix = tokenizer.encode(prompt, add_special_tokens=False)
     ids = {}
     for letter in letters:
@@ -181,16 +294,17 @@ class HFReader:
         device: str = "cpu",
         dtype: str = "float32",
         *,
-        readout: str = "canonical_letter",
+        readout: str = READOUT,
         revision: str | None = None,
         chat_template_kwargs: dict | None = None,
     ):
-        if readout not in ("canonical_letter", "alias_sum"):
-            raise ValueError("HF readout must be canonical_letter or diagnostic alias_sum")
+        if readout not in (READOUT, "alias_sum"):
+            raise ValueError("HF readout must be canonical_letter_raw or diagnostic alias_sum")
         self.model_id_or_path = model_id_or_path
         self.backend = "hf"
         self.readout = readout
         self.revision = revision
+        self.tokenizer_revision = revision
         self.logprobs_mode = "raw_logits"
         self.chat_template_kwargs = (
             {"enable_thinking": False}
@@ -208,9 +322,10 @@ class HFReader:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_id_or_path, revision=self.revision, local_files_only=True
-        )
+        if self.tokenizer is None:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_id_or_path, revision=self.revision, local_files_only=True
+            )
         self.model = (
             AutoModelForCausalLM.from_pretrained(
                 self.model_id_or_path,
@@ -221,6 +336,11 @@ class HFReader:
             .to(self.device)
             .eval()
         )
+
+    def describe(self, messages, letters):
+        if self.tokenizer is None:
+            self.tokenizer = cached_tokenizer(self.model_id_or_path, self.tokenizer_revision)
+        return token_input(self.tokenizer, messages, letters, self.chat_template_kwargs)
 
     def read(self, messages: Messages, letters: list[str]) -> ReadResult:
         import torch
@@ -236,7 +356,7 @@ class HFReader:
             )
             ids = (
                 canonical_letter_ids(self.tokenizer, prompt, letters)
-                if self.readout == "canonical_letter"
+                if self.readout == READOUT
                 else self._letter_ids
             )
             encoded = self.tokenizer.apply_chat_template(
@@ -267,7 +387,14 @@ class HFReader:
                 )
             probs = logmass_probs(masses)
             return ReadResult(
-                probs, int(encoded["input_ids"].shape[-1]), 1, time.perf_counter() - start, masses
+                probs,
+                int(encoded["input_ids"].shape[-1]),
+                1,
+                time.perf_counter() - start,
+                masses,
+                encoded["input_ids"][0].tolist(),
+                ids,
+                selected,
             )
 
 
@@ -275,8 +402,19 @@ class FakeReader:
     """Thread-safe scripted probabilities, or a per-call fixture function."""
 
     backend = "fixture"
-    readout = "canonical_letter"
+    readout = READOUT
     logprobs_mode = "fixture_probabilities"
+    tokenizer_revision = "fixture-tokenizer-v1"
+
+    def describe(self, messages, letters):
+        prefix = [int(fingerprint(messages)[:8], 16)]
+        ids = {letter: [ord(letter)] for letter in letters}
+        return {
+            "input_token_ids": prefix,
+            "input_token_ids_sha256": fingerprint(prefix),
+            "canonical_token_ids": ids,
+            "canonical_token_ids_sha256": fingerprint(ids),
+        }
 
     def __init__(
         self,
@@ -298,10 +436,20 @@ class FakeReader:
                 result = dict.fromkeys(letters, 1.0)
             else:
                 result = self.results[index]
-        if isinstance(result, ReadResult):
-            return result
-        return ReadResult(
-            normalize({letter: result.get(letter, 0.0) for letter in letters}), 10, 1, 0.01
+        if not isinstance(result, ReadResult):
+            result = ReadResult(
+                normalize({letter: result.get(letter, 0.0) for letter in letters}), 10, 1, 0.01
+            )
+        description = self.describe(messages, letters)
+        masses = result.letter_log_masses or {
+            letter: math.log(p) if p > 0 else -1e6 for letter, p in result.letter_probs.items()
+        }
+        return replace(
+            result,
+            letter_log_masses=masses,
+            input_token_ids=result.input_token_ids or description["input_token_ids"],
+            canonical_token_ids=result.canonical_token_ids or description["canonical_token_ids"],
+            token_logits=result.token_logits or {ord(k): v for k, v in masses.items()},
         )
 
 
@@ -323,9 +471,7 @@ def add_reader_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chat-template-kwargs", type=template_kwargs)
     parser.add_argument("--hf-model")
     parser.add_argument("--revision", help="resolved model/tokenizer commit")
-    parser.add_argument(
-        "--readout", choices=["canonical_letter", "alias_sum"], default="canonical_letter"
-    )
+    parser.add_argument("--readout", choices=[READOUT, "alias_sum"], default=READOUT)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--dtype", default="float32")
     parser.add_argument("--group-size", type=int, default=20)
@@ -345,7 +491,7 @@ def reader_from_args(args: argparse.Namespace) -> LetterReader:
             revision=args.revision,
             chat_template_kwargs=args.chat_template_kwargs,
         )
-    if args.readout != "canonical_letter":
+    if args.readout != READOUT:
         raise ValueError("alias_sum is an HF-only diagnostic")
     return VLLMChatReader(
         args.vllm_url,
