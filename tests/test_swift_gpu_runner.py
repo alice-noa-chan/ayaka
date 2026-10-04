@@ -174,8 +174,8 @@ def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatc
     assert gpu_runner.main(["--dry-run", "--manifest", str(DEFAULT_MANIFEST)]) == 0
     output = capsys.readouterr().out
     assert "vllm==0.30.0" in output
-    assert "24720 bulk decisions, 29328 bulk model reads + 400 serial HTTP requests" in output
-    assert "Prompt variants: min,cygnet,rules" in output
+    assert "32960 bulk decisions, 39104 bulk model reads + 400 serial HTTP requests" in output
+    assert "Prompt variants: min,cygnet,rules,labeled" in output
     assert "Qwen/Qwen3.5-4B" not in output
     assert "<set revision via env/--model>" in output
     assert "75 minutes" in output
@@ -564,7 +564,7 @@ def runner_fixture(
                     prompt_variant=variant,
                     diagnostic="--diagnostic" in command,
                 )
-                if cap_after_p1 and Path(source).stem == "jevbench_public" and variant == "rules":
+                if cap_after_p1 and Path(source).stem == "jevbench_public" and variant == "labeled":
                     now[0] = self.work_deadline
             elif "_select" in command:
                 events.append(("select",))
@@ -657,7 +657,7 @@ def test_runner_reference_exit_before_vllm_and_parity_aborts_bulk(tmp_path, monk
     assert {e[1] for e in events if e[0] == "probe"} == set(progress["best_two_variants"])
     for model in ("first", "second"):
         collected = [e for e in events if e[0] == "collect" and e[1] == model]
-        assert len(collected) == 12
+        assert len(collected) == 16
         assert all(e[2] == "jevbench_public" for e in collected[-3:])
         assert events.index(("parity", model)) < events.index(collected[0])
         timings = json.loads((args.output / model / "load_times.json").read_text())
@@ -682,7 +682,7 @@ def test_runner_last_command_at_deadline_is_incomplete_and_later_priorities_skip
         "skipped",
         "skipped",
     ]
-    assert len([e for e in events if e[0] == "collect"]) == 12
+    assert len([e for e in events if e[0] == "collect"]) == 16
     assert not any(e[0] == "probe" for e in events)
     assert args.archive.is_file()
 
@@ -692,7 +692,7 @@ def test_optional_lora_arm_only_runs_with_flag_and_records_adapter_hash(tmp_path
     assert code == 0
     state = json.loads((args.output / "progress.json").read_text())
     assert state["priorities"][4]["status"] == "complete"
-    assert len([e for e in events if e[0] == "collect" and e[1] == "ayaka-large-swift"]) == 12
+    assert len([e for e in events if e[0] == "collect" and e[1] == "ayaka-large-swift"]) == 16
     arm = state["models"]["ayaka_large_lora"]
     assert len(arm["adapter_sha256"]) == 64
     assert arm["revision"] == "a" * 40 and arm["adapter_revision"] == "b" * 40

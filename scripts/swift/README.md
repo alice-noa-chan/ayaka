@@ -29,7 +29,7 @@ bash scripts/swift/collect_gpu.sh --max-minutes 75 --allow-partial
 | Priority | Work minutes | Load minutes | Work |
 | --- | ---: | ---: | --- |
 | P0 | 10 | 5 | 12B HF GPU bf16 reference; exit/free GPU memory; vLLM load and exact-ID parity |
-| P1 | 35 | 0 | gemma-4-12B-it x min,cygnet,rules: calibration, dev, Cygnet; select on dev; public diagnostic last |
+| P1 | 35 | 0 | gemma-4-12B-it x min,cygnet,rules,labeled: calibration, dev, Cygnet; select on dev; public diagnostic last |
 | P2 | 5 | 0 | 200 serial HTTP requests for each of P1's best two variants |
 | P3 | 20 | 5 | E4B x the same variants/datasets, with its own sequential HF/vLLM parity |
 | P4 | 15 | 5 | Optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer |
@@ -60,7 +60,7 @@ admitted prefixes and timeouts produce `status: partial`.
 
 The primary pin is `google/gemma-4-12B-it` at
 `707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`; E4B needs an explicit revision.
-The variant set is fixed to `min,cygnet,rules`. Models run alone in bf16 with
+The variant set is fixed to `min,cygnet,rules,labeled`. Models run alone in bf16 with
 context 16384, GPU utilization 0.90 and prefix caching. Extra server arguments
 cannot override the pinned tokenizer, revisions, dtype, context, logits mode,
 server name or address. Chat kwargs default to `{"enable_thinking": false}`.
@@ -163,9 +163,9 @@ arm runs after the policy/variant selection is frozen.
 ## Outputs and counts
 
 The manifest currently gives 4120 decisions / 4888 model reads per model/variant,
-including grouped reads. Both models and three variants total 24720 bulk
-decisions / 29328 model reads. P2 adds 400 serial requests; parity adds 84
-forwards (7 items x 3 variants x HF/vLLM x 2 models). Optional P4 adds its own
+including grouped reads. Both models and four variants total 32960 bulk
+decisions / 39104 model reads. P2 adds 400 serial requests; parity adds 112
+forwards (7 items x 4 variants x HF/vLLM x 2 models). Optional P4 adds its own
 bulk/parity work. Dry-run output recomputes the inventory and prints priorities.
 
 The latency probe shuffles the public items deterministically, requests one

@@ -38,6 +38,7 @@ def make_swift_binding(
                 [item.question.descriptions[i] for i in indices],
                 state_format=state_format,
                 prompt_variant=prompt_variant,
+                question_type=item.question.type,
             )
             messages.append(
                 {"messages": rendered, "labels": list(mapping.values()), "letters": list(mapping)}

@@ -62,6 +62,7 @@ def read_question(
             [question.descriptions[i] for i in indices],
             state_format=state_format,
             prompt_variant=prompt_variant,
+            question_type=question.type,
         )
         result = reader.read(messages, list(mapping))
         pass_inputs.append(

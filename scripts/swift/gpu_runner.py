@@ -47,7 +47,7 @@ VLLM_LOAD_MINUTES = 3
 # Stop work 120s before the absolute cap to stop process groups and pack partials.
 # This reserve is inside max_minutes; cleanup can never extend the cap.
 CLEANUP_RESERVE_SECONDS = 120
-FIXED_VARIANTS = ("min", "cygnet", "rules")
+FIXED_VARIANTS = ("min", "cygnet", "rules", "labeled")
 FIXED_MODELS = ("google/gemma-4-12B-it", "google/gemma-4-E4B-it")
 DATASET_ORDER = ("v2_calibration", "v2_dev", "cygnet_calibration", "jevbench_public")
 
@@ -59,7 +59,9 @@ def prompt_variants(value: str) -> list[str]:
         or len(set(variants)) != len(variants)
         or any(variant not in PROMPT_VARIANTS for variant in variants)
     ):
-        raise argparse.ArgumentTypeError("use distinct comma-separated variants: min,cygnet,rules")
+        raise argparse.ArgumentTypeError(
+            "use distinct comma-separated variants: min,cygnet,rules,labeled"
+        )
     return variants
 
 
@@ -180,7 +182,7 @@ def priority_plan(models, *, with_lora_arm=False):
             "id": "P1",
             "minutes": PRIORITY_MINUTES["P1"],
             "enabled": True,
-            "work": f"{primary} x min,cygnet,rules: calibration, dev, Cygnet; public last (diagnostic); select on dev only",
+            "work": f"{primary} x min,cygnet,rules,labeled: calibration, dev, Cygnet; public last (diagnostic); select on dev only",
         },
         {
             "id": "P2",
@@ -192,7 +194,7 @@ def priority_plan(models, *, with_lora_arm=False):
             "id": "P3",
             "minutes": PRIORITY_MINUTES["P3"],
             "enabled": len(models) > 1,
-            "work": f"{secondary} x min,cygnet,rules: reference/parity, then same collection",
+            "work": f"{secondary} x min,cygnet,rules,labeled: reference/parity, then same collection",
         },
         {
             "id": "P4",
@@ -1052,7 +1054,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--prompt-variants",
         type=prompt_variants,
-        default="min,cygnet,rules",
+        default="min,cygnet,rules,labeled",
         help="comma-separated variants measured on the same vLLM server",
     )
     parser.add_argument(
@@ -1095,7 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.swift_port == args.vllm_port:
             raise ValueError("Swift and vLLM ports must differ")
         if tuple(args.prompt_variants) != FIXED_VARIANTS:
-            raise ValueError("the minimal plan fixes prompt variants to min,cygnet,rules")
+            raise ValueError("the minimal plan fixes prompt variants to min,cygnet,rules,labeled")
         if (
             args.with_lora_arm
             and not args.dry_run

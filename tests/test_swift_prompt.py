@@ -152,3 +152,20 @@ def test_rules_budget_and_fake_reader_rendering():
     assert reader.calls == [(rules, ["A", "B"])]
     with pytest.raises(ValueError, match="prompt_variant"):
         render_question("state", question, prompt_variant="unknown")
+
+
+@pytest.mark.parametrize(
+    "question,options",
+    [
+        ({"type": "choice", "criteria": {"x": "description", "y": "y"}}, "A. x: description\nB. y"),
+        ({"type": "choice", "criteria": {"x": {"한": 2}, "y": None}}, 'A. x: {"한":2}\nB. y'),
+        ({"type": "noul"}, "A. false: no\nB. true: yes"),
+        ({"type": "score", "criteria": {"8": "high", "2": "low"}}, "A. low\nB. high"),
+    ],
+)
+def test_labeled_layout_preserves_mapping_and_min_system(question, options):
+    messages, mapping = render_question("state", question, prompt_variant="labeled")
+    minimum, original_mapping = render_question("state", question)
+    assert mapping == original_mapping
+    assert messages[0] == minimum[0]
+    assert messages[1]["content"] == f"state\n\n\n{options}"
