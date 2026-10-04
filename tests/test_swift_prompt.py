@@ -22,7 +22,7 @@ def test_choice_request_order_and_descriptions():
     messages, mapping = render_question("literal\nstate", question)
     assert list(mapping.values()) == ["z", "a", "x", "y"]
     assert messages[1]["content"].startswith("literal\nstate\n")
-    assert messages[1]["content"].endswith('A. z\nB. a\nC. x: {"한":2}\nD. desc')
+    assert messages[1]["content"].endswith('A. z\nB. a\nC. {"한":2}\nD. desc')
 
 
 @pytest.mark.parametrize("state", [{"한": [1, 2]}, ["한", {"x": 1}]])
@@ -55,7 +55,7 @@ def test_score_list_and_numeric_key_order():
         {"type": "choice", "criteria": ["a", "a"]},
         {"type": "score", "criteria": {"x": "a", "y": "b"}},
         {"type": "score", "criteria": {"1": "a", "01": "b"}},
-        {"type": "noul", "instructions": ["bad"]},
+        {"type": "noul", "instructions": 7},
     ],
 )
 def test_invalid_questions(question):

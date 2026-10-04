@@ -10,11 +10,14 @@ from __future__ import annotations
 import json
 import math
 import unicodedata
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
 from ayaka.eval.read_artifact import fingerprint
+from ayaka.http_transport import BackendOverloaded
+from ayaka.jev_api import choice_confidence
 
 from .prompt import InvalidQuestion, parse_question
 from .readers import VLLMChatReader
@@ -317,6 +320,12 @@ def evaluate_candidates(state, question, policy, score, generator):
             raise ValueError("invalid proposal generation result")
         diagnostics["validation_outcome"] = "rejected"
         rows = validate_proposals(trace.text, policy, original)
+    except BackendOverloaded:
+        raise
+    except urllib.error.HTTPError as exc:
+        if exc.code in (429, 503, 529):
+            raise BackendOverloaded("vLLM queue overloaded") from exc
+        raise
     except (
         ValueError,
         RuntimeError,
@@ -371,8 +380,7 @@ def evaluate_candidates(state, question, policy, score, generator):
                 "probabilities": probabilities,
                 "choice": max(probabilities, key=probabilities.__getitem__),
             }
-            if "confidence" in answer:
-                answer["confidence"] = probabilities[answer["choice"]]
+            answer["confidence"] = choice_confidence(probabilities)
         frozen = {**{k: v for k, v in original.items() if k != residual}, **criteria}
         status = "completed"
     items = [{"id": k, "description": v} for k, v in frozen.items()]

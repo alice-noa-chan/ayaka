@@ -15,6 +15,7 @@ from threading import Lock
 from typing import Any, Protocol
 
 from ayaka.eval.read_artifact import fingerprint
+from ayaka.http_transport import BackendOverloaded
 
 from .policy import normalize
 from .prompt import PROMPT_VARIANTS
@@ -186,6 +187,8 @@ class VLLMChatReader:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as exc:
+            if exc.code in (429, 503, 529):
+                raise BackendOverloaded("vLLM queue overloaded") from exc
             raise ValueError(
                 "vLLM exact token gather rejected; require 0.30.0 logprob_token_ids, "
                 "return_tokens_as_token_ids and server --logprobs-mode raw_logits"
@@ -198,12 +201,12 @@ class VLLMChatReader:
         masses = {letter: selected[ids[letter][0]] for letter in letters}
         probs = logmass_probs(masses)
         usage = result["usage"]
-        if result.get("prompt_token_ids") != description["input_token_ids"]:
+        image = any(isinstance(m.get("content"), list) for m in messages)
+        if not image and result.get("prompt_token_ids") != description["input_token_ids"]:
             raise ValueError("server prompt token ids differ from the client-bound input")
-        if (
-            usage["prompt_tokens"] != len(description["input_token_ids"])
-            or usage["completion_tokens"] != 1
-        ):
+        if (not image and usage["prompt_tokens"] != len(description["input_token_ids"])) or usage[
+            "completion_tokens"
+        ] != 1:
             raise ValueError("server token usage differs from the bound one-position input")
         return ReadResult(
             probs,
@@ -211,7 +214,7 @@ class VLLMChatReader:
             int(usage["completion_tokens"]),
             time.perf_counter() - start,
             masses,
-            description["input_token_ids"],
+            result.get("prompt_token_ids", []) if image else description["input_token_ids"],
             ids,
             selected,
         )

@@ -24,76 +24,91 @@ and are evaluated in one batched forward, isolated from each other.
 from __future__ import annotations
 
 import json
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from threading import Lock
 
-from .http_transport import CacheFull, RequestCache, RequestConflict, server_for
+from .http_transport import (
+    RequestCache,
+    ServiceConfig,
+    add_service_arguments,
+    config_from_args,
+    make_api_handler,
+    server_for,
+)
+from .jev_api import (
+    ModelCatalog,
+    ValidationError,
+    build_answer,
+    complete_answers,
+    normalize_request,
+)
+from .jev_api import parse_question as parse_jev_question
 from .primitives import Decision, QuestionSpec
 from .reasoning import resolve_settings
 
 
-class BadRequest(ValueError):
+class BadRequest(ValidationError):
     pass
 
 
 def parse_question(q: dict) -> tuple[QuestionSpec, list[str]]:
-    """TypeSafe question -> (QuestionSpec, exact answer labels)."""
-    if not isinstance(q, dict):
-        raise BadRequest("question must be an object")
-    qtype = q.get("type")
-    instruction = q.get("instructions") or q.get("instruction") or ""
-    crit = q.get("criteria")
-    if qtype == "noul":
-        crit = crit if isinstance(crit, dict) else {}
-        return QuestionSpec(
-            "noul", instruction, [str(crit.get("false", "false")), str(crit.get("true", "true"))]
-        ), ["false", "true"]
-    if qtype == "choice":
-        if isinstance(crit, dict) and len(crit) >= 2:
-            labels = [str(k) for k in crit]
-            descs = [str(v) if v not in (None, "") else str(k) for k, v in crit.items()]
-        elif isinstance(crit, list) and len(crit) >= 2:
-            labels = descs = [str(x) for x in crit]
-        else:
-            raise BadRequest("choice needs criteria with at least two options")
-        if len(set(labels)) != len(labels):
-            raise BadRequest("choice option labels must be unique")
-        return QuestionSpec("choice", instruction, descs), labels
-    if qtype == "score":
-        if isinstance(crit, list) and len(crit) >= 2:
-            labels = [str(i) for i in range(len(crit))]
-            return QuestionSpec(
-                "score", instruction, [str(c) for c in crit], ordinals=list(range(len(crit)))
-            ), labels
-        if isinstance(crit, dict) and len(crit) >= 2:
-            keys = list(crit)
-            ords = [int(k) if str(k).lstrip("-").isdigit() else i for i, k in enumerate(keys)]
-            return QuestionSpec(
-                "score", instruction, [str(crit[k]) for k in keys], ordinals=ords
-            ), [str(k) for k in keys]
-        raise BadRequest("score needs criteria with at least two levels")
-    raise BadRequest(f"unknown question type: {qtype!r}")
+    try:
+        parsed = parse_jev_question(q)
+    except ValidationError as exc:
+        raise BadRequest(str(exc), exc.field) from exc
+    ordinals = None
+    if parsed.type == "score":
+        ordinals = [int(k) if k.lstrip("-").isdigit() else i for i, k in enumerate(parsed.labels)]
+    return QuestionSpec(
+        parsed.type, parsed.instruction, parsed.descriptions, ordinals=ordinals
+    ), parsed.labels
 
 
 def answer(spec: QuestionSpec, labels: list[str], probs: list[float]) -> dict:
-    if spec.type == "noul":
-        return {"type": "noul", "noul": float(probs[1])}
-    dist = {lb: float(p) for lb, p in zip(labels, probs, strict=True)}
-    if spec.type == "choice":
-        return {"type": "choice", "choice": max(dist, key=dist.get), "probabilities": dist}
-    expected = sum(o * p for o, p in zip(spec.ordinals, probs, strict=True))
-    return {"type": "score", "score": float(expected), "probabilities": dist}
+    return build_answer(
+        spec.type,
+        dict(zip(labels, probs, strict=True)),
+        legend=dict(zip(labels, spec.candidates, strict=True)),
+        ordinals=spec.ordinals,
+    )
 
 
 class DecisionService:
-    def __init__(self, decision: Decision, model_name: str, reasoning_defaults=None):
+    def __init__(
+        self,
+        decision: Decision,
+        model_name: str,
+        reasoning_defaults=None,
+        *,
+        model_id=None,
+        model_description=ModelCatalog.description,
+        model_release_date=ModelCatalog.release_date,
+    ):
+        self.catalog = ModelCatalog(model_name, model_id, model_description, model_release_date)
         self.decision = decision
         self.model_name = model_name
         self.reasoning_defaults = reasoning_defaults
         self.lock = Lock()  # one forward at a time: predictable latency, no VRAM spikes
 
     def handle(self, body: dict, *, candidate_partition=False) -> dict:
+        try:
+            body = normalize_request(body, max_questions=None)
+            self.catalog.resolve(body.get("model"))
+        except ValidationError as exc:
+            raise BadRequest(str(exc), exc.field) from exc
+        response = self._handle(body, candidate_partition=candidate_partition)
+        response["model"] = self.catalog.actual_id
+        calibration = "unfitted"
+        if (
+            getattr(self.decision, "calibration", None) is not None
+            or getattr(getattr(self.decision, "model", None), "calibration", None) is not None
+        ):
+            calibration = "fitted"
+        if candidate_partition:
+            calibration = "unvalidated_generated_partition"
+        return complete_answers(response, body, calibration=calibration, include_diagnostics=False)
+
+    def _handle(self, body: dict, *, candidate_partition=False) -> dict:
         if not isinstance(body, dict) or "questions" not in body:
             raise BadRequest("body needs 'state' and 'questions'")
         qs = body["questions"]
@@ -144,11 +159,14 @@ class DecisionService:
             decision = getattr(decision, "text", decision).for_unvalidated_partition()
         if "media" in body:
             if not getattr(self.decision, "supports_images", False):
-                raise BadRequest("this server has no image backend; start with --images and --ckpt")
+                raise BadRequest(
+                    "this server has no image backend; start with --images and --ckpt",
+                    "ayaka.media",
+                )
             try:
                 state = self.decision.prepare_media(state, body["media"])
             except ValueError as exc:
-                raise BadRequest(str(exc)) from exc
+                raise BadRequest(str(exc), "ayaka.media") from exc
         with self.lock:
             if getattr(self.decision, "supports_reasoning", False):
                 try:
@@ -197,90 +215,27 @@ class DecisionService:
         return len(prefix) + sum(len(it.rendered.suffix_ids) for it in items)
 
 
-def make_handler(service: DecisionService):
-    cache = RequestCache()
-
-    class Handler(BaseHTTPRequestHandler):
-        def _send(self, code: int, obj: dict) -> None:
-            data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-            self._send_bytes(code, data)
-
-        def _send_bytes(self, code, data):
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def do_GET(self):  # noqa: N802
-            if self.path.rstrip("/") in ("/health", "/v1/health"):
-                self._send(200, {"status": "ok", "model": service.model_name})
-            elif self.path.rstrip("/") == "/v1/models":
-                self._send(200, {"data": [{"id": service.model_name}]})
-            else:
-                self._send(404, {"error": "not found"})
-
-        def do_POST(self):  # noqa: N802
-            if self.path.rstrip("/") != "/v1/systemone":
-                self._send(404, {"error": "not found"})
-                return
-            try:
-                from .multimodal import MAX_HTTP_BYTES
-
-                try:
-                    n = int(self.headers.get("Content-Length", "0"))
-                except ValueError as exc:
-                    raise BadRequest("invalid Content-Length") from exc
-                if not 0 <= n <= MAX_HTTP_BYTES:
-                    raise BadRequest("request exceeds the 24 MiB body limit")
-                raw = self.rfile.read(n)
-                if len(raw) != n:
-                    raise BadRequest("incomplete request body")
-                body = json.loads(raw or b"{}")
-
-                def compute():
-                    t0 = time.perf_counter()
-                    try:
-                        out = service.handle(body)
-                        out["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-                        code = 200
-                    except BadRequest as exc:
-                        code, out = 400, {"error": str(exc)}
-                    except Exception as exc:
-                        code, out = 500, {"error": f"internal error: {type(exc).__name__}"}
-                    data = json.dumps(out, ensure_ascii=False).encode("utf-8")
-                    if key is not None and len(data) > cache.max_response_bytes:
-                        code = 503
-                        data = json.dumps(
-                            {
-                                "error": "response exceeds idempotency cache limit",
-                                "usage": out.get("usage", {}),
-                            }
-                        ).encode()
-                    return code, data
-
-                key = self.headers.get("Idempotency-Key")
-                code, data = cache.execute(key, raw, compute) if key is not None else compute()
-                self._send_bytes(code, data)
-            except RequestConflict as exc:
-                self._send(409, {"error": str(exc)})
-            except CacheFull as exc:
-                self._send(503, {"error": str(exc)})
-            except (BadRequest, json.JSONDecodeError, UnicodeDecodeError) as e:
-                self._send(400, {"error": str(e)})
-            except Exception as e:  # never leak a traceback to the caller
-                self._send(500, {"error": f"internal error: {type(e).__name__}"})
-
-        def log_message(self, *args):  # keep stdout for our own logs
-            pass
-
-    return Handler
+def make_handler(service: DecisionService, *, config: ServiceConfig | None = None):
+    return make_api_handler(
+        service, config=config, cache=RequestCache(), validation_errors=(BadRequest,)
+    )
 
 
 def serve(
-    decision: Decision, model_name: str, host: str = "0.0.0.0", port: int = 8000
+    decision: Decision,
+    model_name: str,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    *,
+    config: ServiceConfig | None = None,
+    **service_options,
 ) -> ThreadingHTTPServer:
-    return server_for((host, port), make_handler(DecisionService(decision, model_name)))
+    config = config or ServiceConfig()
+    config.validate_bind(host)
+    return server_for(
+        (host, port),
+        make_handler(DecisionService(decision, model_name, **service_options), config=config),
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -343,7 +298,13 @@ def main(argv: list[str] | None = None) -> None:
         default=0,
         help="prompt token budget per question (default: the config's serve_max_seq_len)",
     )
+    add_service_arguments(ap)
     args = ap.parse_args(argv)
+    try:
+        config = config_from_args(args)
+        config.validate_bind(args.host)
+    except ValueError as exc:
+        ap.error(str(exc))
     overrides = {
         k: v
         for k, v in {
@@ -443,14 +404,24 @@ def main(argv: list[str] | None = None) -> None:
     else:
         decision = Decision(model, tok, max_seq_len=args.max_seq_len or None)
     decision.decide("warm-up", [QuestionSpec("noul", "Is this a warm-up?", ["no", "yes"])])
-    service = DecisionService(decision, name, overrides or None)
-    httpd = server_for((args.host, args.port), make_handler(service))
+    service = DecisionService(
+        decision,
+        name,
+        overrides or None,
+        model_id=args.model_id,
+        model_description=args.model_description,
+        model_release_date=args.model_release_date,
+    )
+    httpd = server_for((args.host, args.port), make_handler(service, config=config))
     display_host = f"[{args.host}]" if ":" in args.host else args.host
     print(
         f"[serve] {name} on {args.device} at http://{display_host}:{args.port}/v1/systemone",
         flush=True,
     )
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    finally:
+        httpd.server_close()
 
 
 if __name__ == "__main__":

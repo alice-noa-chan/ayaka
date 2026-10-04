@@ -60,24 +60,34 @@ def test_http_roundtrip_and_gets(running_server):
     assert response == {
         "model": "fake",
         "answers": {
-            "n": {"type": "noul", "noul": pytest.approx(0.75)},
+            "n": {
+                "type": "noul",
+                "noul": pytest.approx(0.75),
+                "ayaka": {"route": "direct", "calibration": "unfitted"},
+            },
             "c": {
                 "type": "choice",
                 "choice": "b",
                 "probabilities": pytest.approx({"a": 0.25, "b": 0.75}),
+                "confidence": pytest.approx(0.5),
+                "ayaka": {"route": "direct", "calibration": "unfitted"},
             },
             "s": {
                 "type": "score",
                 "score": pytest.approx(0.75),
                 "probabilities": pytest.approx({"0": 0.25, "1": 0.75}),
+                "confidence": pytest.approx(0.5),
+                "legend": {"0": "low", "1": "high"},
+                "ayaka": {"route": "direct", "calibration": "unfitted"},
             },
         },
         "usage": {"input_tokens": 30, "output_tokens": 3},
+        "ayaka": {},
     }
     assert len(reader.calls) == 3
     for route, expected in [
         ("/health", {"status": "ok", "model": "fake", "prompt_variant": "min"}),
-        ("/v1/models", {"data": [{"id": "fake"}]}),
+        ("/v1/models", running_server[2].catalog.listing()),
     ]:
         with urllib.request.urlopen(base + route, timeout=5) as result:
             assert json.load(result) == expected
@@ -192,8 +202,8 @@ def test_policy_variant_mismatch_refused_and_force_renders_requested_variant(tmp
 @pytest.mark.parametrize(
     "body,status",
     [
-        (b"{", 400),
-        (b"", 400),
+        (b"{", 422),
+        (b"", 422),
         ([], 422),
         ({}, 422),
         ({"questions": {}}, 422),
@@ -234,7 +244,7 @@ def test_200_sequential_raw_socket_error_responses(running_server):
     address = urlsplit(base)
     valid = json.dumps({"questions": {"x": {"type": "noul"}}}).encode()
     cases = [
-        ("/v1/systemone", b"{", "1", 400),
+        ("/v1/systemone", b"{", "1", 422),
         ("/v1/systemone", b"{}", "2", 422),
         ("/v1/systemone", valid, str(len(valid)), 502),
         ("/missing", b"unread body" * 1000, "11000", 404),

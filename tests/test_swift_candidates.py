@@ -111,7 +111,7 @@ def test_open_freezes_list_scores_original_state_and_accounts_usage(services, na
     before = copy.deepcopy(body)
     result = service.handle(body)
     answer = result["answers"]["q"]
-    assert set(answer) == {"type", "choice", "probabilities", "ayaka"}
+    assert set(answer) == {"type", "choice", "probabilities", "confidence", "ayaka"}
     assert answer["choice"] == "child-0"
     assert answer["probabilities"] == pytest.approx(
         {"child-0": 0.7, "child-1": 0.2, "__other__": 0.1}
@@ -248,7 +248,9 @@ def test_invalid_expand_proposals_return_original_distribution(services, text):
     baseline = baseline_service.handle({"questions": body["questions"]})["answers"]["q"]
     result = service.handle(body)
     answer = result["answers"]["q"]
-    assert {k: v for k, v in answer.items() if k != "ayaka"} == baseline
+    assert {k: v for k, v in answer.items() if k != "ayaka"} == {
+        k: v for k, v in baseline.items() if k != "ayaka"
+    }
     assert answer["ayaka"]["candidates"]["status"] == "expansion_failed"
     assert len(reader.calls) == len(generator.calls) == 1
     assert result["usage"] == {"input_tokens": 27, "output_tokens": 24}
@@ -271,7 +273,9 @@ def test_replacing_original_expansion_falls_back_explicitly(services, proposal):
     baseline = service.handle({"state": body["state"], "questions": body["questions"]})
     result = service.handle(body)
     answer = result["answers"]["q"]
-    assert {k: v for k, v in answer.items() if k != "ayaka"} == baseline["answers"]["q"]
+    assert {k: v for k, v in answer.items() if k != "ayaka"} == {
+        k: v for k, v in baseline["answers"]["q"].items() if k != "ayaka"
+    }
     assert answer["ayaka"]["candidates"]["status"] == "expansion_failed"
     assert answer["ayaka"]["candidates"]["items"] == [
         {"id": k, "description": v} for k, v in body["questions"]["q"]["criteria"].items()
@@ -528,7 +532,11 @@ def test_mixed_fixed_and_generated_questions_usage_and_namespaces(services):
     body = request()
     body["questions"]["n"] = {"type": "noul"}
     result = service.handle(body)
-    assert result["answers"]["n"] == {"type": "noul", "noul": 0.5}
+    assert result["answers"]["n"] == {
+        "type": "noul",
+        "noul": 0.5,
+        "ayaka": {"route": "direct", "calibration": "unfitted"},
+    }
     assert "ayaka" in result["answers"]["q"]
     assert len(reader.calls) == 2 and len(generator.calls) == 1
     assert result["usage"] == {"input_tokens": 37, "output_tokens": 25}
@@ -697,19 +705,13 @@ def test_length_capped_proposal_has_one_attempt_and_actual_usage(services, valid
     assert result["ayaka"]["usage"]["proposal_output_tokens"] == 384
 
 
-def test_expand_retains_jev_confidence_when_decision_shape_adds_it(services, monkeypatch):
-    decide = Policy.decide
-
-    def with_confidence(self, *args, **kwargs):
-        answer = decide(self, *args, **kwargs)
-        return {**answer, "confidence": answer["probabilities"][answer["choice"]]}
-
-    monkeypatch.setattr(Policy, "decide", with_confidence)
-    service, _, _ = services(FakeReader([{"A": 0.4, "B": 0.6}, {"A": 0.5, "B": 0.3, "C": 0.2}]))
+def test_expand_confidence_uses_final_joint_distribution(services):
+    service, _, _ = services(
+        FakeReader([{"A": 0.5, "B": 0.5}, {"A": 0.6, "B": 0.4}]), FakeGenerator(json.dumps(rows(1)))
+    )
     answer = service.handle(request("expand"))["answers"]["q"]
-    assert answer["choice"] == "refund"
-    assert answer["confidence"] == answer["probabilities"]["refund"]
-    assert answer["confidence"] == pytest.approx(0.4)
+    assert answer["probabilities"] == pytest.approx({"refund": 0.5, "child-0": 0.3, "other": 0.2})
+    assert answer["confidence"] == pytest.approx(0.25)
     assert "confidence" not in answer["ayaka"]
 
 

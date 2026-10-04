@@ -7,6 +7,8 @@ import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from ayaka.jev_api import build_answer
+
 from .prompt import validate_prompt_variant
 
 COMMIT_LO = 0.199
@@ -187,16 +189,11 @@ class Policy:
         candidate_log_masses: dict[str, float] | None = None,
     ) -> dict:
         probs = self.apply(question_type, label_probs, candidate_log_masses=candidate_log_masses)
-        if question_type == "noul":
-            return {"type": "noul", "noul": probs[noul_labels(probs)[1]]}
-        if question_type == "choice":
-            return {
-                "type": "choice",
-                "choice": max(probs, key=probs.__getitem__),
-                "probabilities": probs,
-            }
-        expected = sum(int(label) * p for label, p in probs.items())
-        return {"type": "score", "score": expected, "probabilities": probs}
+        return build_answer(
+            question_type,
+            probs,
+            true_label=noul_labels(probs)[1] if question_type == "noul" else "true",
+        )
 
     def save(self, path: str | Path = "policy.json") -> None:
         values = asdict(self)

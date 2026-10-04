@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import json
-import socket
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ayaka.http_transport import (
+    ServiceConfig,
+    add_service_arguments,
+    config_from_args,
+    make_api_handler,
+    server_for,
+)
+from ayaka.jev_api import ModelCatalog, ValidationError, complete_answers, normalize_request
 from ayaka.reasoning import resolve_settings
 
 from .candidates import (
@@ -27,8 +31,7 @@ from .prompt import InvalidQuestion, parse_question, validate_prompt_variant
 from .readers import LetterReader, VLLMChatReader, add_reader_arguments, reader_from_args
 from .reasoning import system_read
 
-MAX_HTTP_BYTES = 8 * 1024 * 1024
-CLOSE_DRAIN_SECONDS = 0.10
+MAX_HTTP_BYTES = 24 * 1024 * 1024
 
 
 class DecisionService:
@@ -46,6 +49,9 @@ class DecisionService:
         force_variant: bool = False,
         diagnostic: bool = False,
         candidate_generator: CandidateGenerator | None = None,
+        model_id: str | None = None,
+        model_description: str = ModelCatalog.description,
+        model_release_date: str = ModelCatalog.release_date,
     ):
         if max_parallel < 1 or max_questions < 1:
             raise ValueError("parallelism and question limits must be positive")
@@ -75,6 +81,7 @@ class DecisionService:
                 and getattr(reader, "revision", None) != policy.adoption["revision"]
             ):
                 raise ValueError("adopted policy revision differs from serving reader")
+        self.catalog = ModelCatalog(model_name, model_id, model_description, model_release_date)
         self.reader = reader
         self.model_name = model_name
         self.policy = policy
@@ -90,7 +97,40 @@ class DecisionService:
     def close(self) -> None:
         self._pool.shutdown(wait=True)
 
+    def _answer(self, question, read, policy):
+        answer = policy.decide(
+            question.type, read.raw_probs, candidate_log_masses=read.candidate_log_masses
+        )
+        answer["ayaka"] = {
+            "route": "grouped"
+            if read.readout == "grouped_approx"
+            else "reasoned"
+            if read.passes > 1
+            else "direct"
+        }
+        return answer
+
     def handle(self, body: object) -> dict:
+        try:
+            body = normalize_request(body, max_questions=self.max_questions)
+            self.catalog.resolve(body.get("model"))
+        except ValidationError as exc:
+            raise InvalidQuestion(str(exc), exc.field) from exc
+        response = self._handle(body)
+        response["model"] = self.catalog.actual_id
+        calibration = "unfitted" if self.policy.fitted_on == "unfitted" else "fitted"
+        response = complete_answers(response, body, calibration=calibration)
+        for answer in response["answers"].values():
+            if "media" in body:
+                answer["ayaka"]["route"] = "image"
+            elif "candidates" in answer["ayaka"]:
+                answer["ayaka"]["route"] = "generated"
+            elif len(answer.get("probabilities", {})) > 26:
+                answer["ayaka"]["route"] = "grouped"
+        return response
+
+    def _handle(self, body: object) -> dict:
+        reader, policy = self.reader, self.policy
         if not isinstance(body, dict) or "questions" not in body:
             raise InvalidQuestion("body needs questions")
         questions = body["questions"]
@@ -99,6 +139,19 @@ class DecisionService:
         if len(questions) > self.max_questions:
             raise InvalidQuestion(f"maximum {self.max_questions} questions per request")
         policies = request_policies(body)
+        if "media" in body:
+            from .media import ImageReader, image_parts
+
+            reader = ImageReader(reader, image_parts(body["media"]))
+            policy = replace(
+                policy,
+                t_choice=1,
+                t_noul=1,
+                t_score=1,
+                letter_bias=None,
+                reasoning_route=None,
+                commit_margin=None,
+            )
         parsed = [
             parse_question(question) if policies[name]["mode"] != "open" else None
             for name, question in questions.items()
@@ -139,10 +192,10 @@ class DecisionService:
         futures = [
             self._pool.submit(
                 system_read,
-                self.reader,
+                reader,
                 body.get("state", ""),
                 question,
-                policy=self.policy,
+                policy=policy,
                 group_size=self.group_size,
                 state_format=self.state_format,
                 prompt_variant=self.prompt_variant,
@@ -158,11 +211,7 @@ class DecisionService:
         return {
             "model": body.get("model") or self.model_name,
             "answers": {
-                name: self.policy.decide(
-                    question.type,
-                    result.raw_probs,
-                    candidate_log_masses=result.candidate_log_masses,
-                )
+                name: self._answer(question, result, policy)
                 for name, question, result in zip(questions, parsed, reads, strict=True)
             },
             "usage": {
@@ -186,9 +235,7 @@ class DecisionService:
                 state_format=self.state_format,
                 prompt_variant=self.prompt_variant,
             )
-            return policy.decide(
-                question.type, read.raw_probs, candidate_log_masses=read.candidate_log_masses
-            ), read
+            return self._answer(question, read, policy), read
 
         def evaluate(name, question):
             if policies[name]["mode"] != "fixed":
@@ -246,101 +293,30 @@ class DecisionService:
         }
 
 
-def make_handler(service: DecisionService) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def finish(self) -> None:
-            # TCPServer.shutdown_request() half-closes then immediately closes.
-            # On Windows, unread/in-flight input can turn that close into a RST
-            # which discards the response, even when wfile.write() succeeded.
-            # Drain *before* StreamRequestHandler closes rfile: it can already
-            # hold body bytes read ahead while parsing the HTTP headers.
-            # Drain before SHUT_WR too: Windows loopback filtering can report
-            # receive EOF immediately after that half-close, hiding late input.
-            try:
-                self.wfile.flush()
-                deadline = time.monotonic() + CLOSE_DRAIN_SECONDS
-                while (remaining := deadline - time.monotonic()) > 0:
-                    self.connection.settimeout(remaining)
-                    if not self.rfile.read1(64 * 1024):
-                        break
-            except OSError:
-                pass  # Client disconnected, or the bounded drain timed out.
-            finally:
-                with contextlib.suppress(OSError):
-                    self.connection.shutdown(socket.SHUT_WR)
-                super().finish()
-
-        def _send(self, status: int, body: dict) -> None:
-            data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.wfile.write(data)
-
-        def do_GET(self) -> None:  # noqa: N802
-            path = self.path.rstrip("/")
-            if path == "/health":
-                self._send(
-                    200,
-                    {
-                        "status": "ok",
-                        "model": service.model_name,
-                        "prompt_variant": service.prompt_variant,
-                    },
-                )
-            elif path == "/v1/models":
-                self._send(200, {"data": [{"id": service.model_name}]})
-            else:
-                self._send(404, {"error": "not found"})
-
-        def do_POST(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") != "/v1/systemone":
-                self._send(404, {"error": "not found"})
-                return
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError:
-                self._send(400, {"error": "invalid Content-Length"})
-                return
-            if not 0 <= length <= MAX_HTTP_BYTES:
-                self._send(422, {"error": "request exceeds the 8 MiB limit"})
-                return
-            try:
-                raw = self.rfile.read(length)
-                if len(raw) != length:
-                    raise ValueError("incomplete request body")
-                body = json.loads(raw)
-            except (ValueError, UnicodeDecodeError) as exc:
-                self._send(400, {"error": str(exc)})
-                return
-            try:
-                response = service.handle(body)
-            except InvalidQuestion as exc:
-                self._send(422, getattr(exc, "response", {"error": str(exc)}))
-            except Exception as exc:
-                self._send(502, {"error": f"backend failure: {type(exc).__name__}"})
-            else:
-                self._send(200, response)
-
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    return Handler
+def make_handler(
+    service: DecisionService, *, config: ServiceConfig | None = None
+) -> type[BaseHTTPRequestHandler]:
+    return make_api_handler(
+        service, config=config, max_http_bytes=MAX_HTTP_BYTES, validation_errors=(InvalidQuestion,)
+    )
 
 
 def serve(
-    service: DecisionService, host: str = "127.0.0.1", port: int = 8009
+    service: DecisionService,
+    host: str = "127.0.0.1",
+    port: int = 8009,
+    *,
+    config: ServiceConfig | None = None,
 ) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(service))
+    config = config or ServiceConfig()
+    config.validate_bind(host)
+    return server_for((host, port), make_handler(service, config=config))
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_reader_arguments(parser)
+    add_service_arguments(parser)
     parser.add_argument("--policy", help="policy.json; default uses T=1 without commitment")
     parser.add_argument(
         "--force-variant",
@@ -356,6 +332,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-questions", type=int, default=128)
     args = parser.parse_args(argv)
     try:
+        config = config_from_args(args)
+        config.validate_bind(args.host)
         service = DecisionService(
             reader_from_args(args),
             args.hf_model if args.backend == "hf" else args.model,
@@ -367,10 +345,13 @@ def main(argv: list[str] | None = None) -> None:
             prompt_variant=args.prompt_variant,
             force_variant=args.force_variant,
             diagnostic=args.diagnostic,
+            model_id=args.model_id,
+            model_description=args.model_description,
+            model_release_date=args.model_release_date,
         )
     except ValueError as exc:
         parser.error(str(exc))
-    server = serve(service, args.host, args.port)
+    server = serve(service, args.host, args.port, config=config)
     print(f"Swift listening on http://{args.host}:{server.server_port}", flush=True)
     try:
         server.serve_forever()

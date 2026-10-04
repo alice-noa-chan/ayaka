@@ -6,6 +6,9 @@ import json
 from dataclasses import dataclass
 from string import ascii_uppercase
 
+from ayaka.jev_api import ValidationError, render_content
+from ayaka.jev_api import parse_question as parse_jev_question
+
 PROMPT_VARIANTS = ("min", "cygnet", "rules", "labeled")
 MIN_SYSTEM = "Answer with only the option letter."
 # MIT, blockbrain-ai/cygnet-recipe, shim/cygnet_shim.py (SYSTEM/build_prompt).
@@ -33,7 +36,7 @@ def validate_prompt_variant(prompt_variant: str) -> None:
         raise ValueError(f"unknown prompt_variant: {prompt_variant!r}")
 
 
-class InvalidQuestion(ValueError):
+class InvalidQuestion(ValidationError):
     """An invalid or unsupported TypeSafe question."""
 
 
@@ -46,56 +49,17 @@ class Question:
 
 
 def describe(label: str, description: object) -> str:
-    if description is None or description == "":
-        return label
-    if isinstance(description, dict):
-        return f"{label}: {json.dumps(description, ensure_ascii=False, separators=(',', ':'))}"
-    return str(description)
+    return label if description in (None, "") else render_content(description, "criteria")
 
 
 def parse_question(question: object) -> Question:
-    """Validate independently of ayaka.serve's torch-based model API."""
-    if not isinstance(question, dict):
-        raise InvalidQuestion("question must be an object")
-    kind = question.get("type")
-    instruction = question.get("instructions") or question.get("instruction") or ""
-    if not isinstance(instruction, str):
-        raise InvalidQuestion("instructions must be a string")
-    criteria = question.get("criteria")
-    if kind == "noul":
-        criteria = criteria if isinstance(criteria, dict) else {}
-        labels = ["false", "true"]
-        descriptions = [
-            describe(label, criteria.get(label, default))
-            for label, default in zip(labels, ["no", "yes"], strict=True)
-        ]
-    elif kind in ("choice", "score"):
-        if not isinstance(criteria, (dict, list)) or len(criteria) < 2:
-            raise InvalidQuestion(f"{kind} needs criteria with at least two options")
-        if isinstance(criteria, dict):
-            keys = list(criteria)
-            if kind == "score":
-                try:
-                    keys.sort(key=lambda key: int(str(key)))
-                except ValueError as exc:
-                    raise InvalidQuestion("score keys must be integer-like") from exc
-                if len({int(str(key)) for key in keys}) != len(keys):
-                    raise InvalidQuestion("score ordinals must be unique")
-            labels = [str(key) for key in keys]
-            descriptions = [describe(str(key), criteria[key]) for key in keys]
-        elif kind == "choice":
-            labels = [str(value) for value in criteria]
-            descriptions = labels.copy()
-        else:
-            labels = [str(i) for i in range(len(criteria))]
-            descriptions = [
-                describe(label, value) for label, value in zip(labels, criteria, strict=True)
-            ]
-        if len(set(labels)) != len(labels):
-            raise InvalidQuestion("option labels must be unique")
-    else:
-        raise InvalidQuestion(f"unknown question type: {kind!r}")
-    return Question(kind, instruction, labels, descriptions)
+    try:
+        parsed = parse_jev_question(
+            question, noul_defaults=("no", "yes"), sort_score=True, enforce_limits=False
+        )
+    except ValidationError as exc:
+        raise InvalidQuestion(str(exc), exc.field) from exc
+    return Question(parsed.type, parsed.instruction, parsed.labels, parsed.descriptions)
 
 
 def render_options(

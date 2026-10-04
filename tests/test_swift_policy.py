@@ -75,7 +75,13 @@ def test_commit_after_temperature_and_custom_boundaries():
 
 def test_score_response_uses_numeric_levels():
     answer = Policy().decide("score", {"2": 0.25, "4": 0.75})
-    assert answer == {"type": "score", "score": 3.5, "probabilities": {"2": 0.25, "4": 0.75}}
+    assert answer == {
+        "type": "score",
+        "score": 3.5,
+        "probabilities": {"2": 0.25, "4": 0.75},
+        "legend": {"2": "2", "4": "4"},
+        "confidence": 0.5,
+    }
 
 
 def test_policy_roundtrip(tmp_path):
