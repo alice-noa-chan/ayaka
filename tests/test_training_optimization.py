@@ -159,17 +159,14 @@ def test_kernel_plan_uses_actual_module_topology_without_loading_external_kernel
     assert before == list(trainer.model.state_dict())
 
 
-@pytest.mark.parametrize("head_dim", [16, 512])
-@pytest.mark.parametrize("q_len", [1, 3, 8])
-@pytest.mark.parametrize("window", [None, 4])
-def test_hybrid_bottom_right_padding_gqa_and_gradients_match_explicit_sdpa(head_dim, q_len, window):
+def _hybrid_reference_case(head_dim, q_len, window, dtype):
     torch.manual_seed(5)
     tensors = [
-        torch.randn(2, 4, q_len, head_dim, requires_grad=True),
-        torch.randn(2, 2, 8, head_dim, requires_grad=True),
-        torch.randn(2, 2, 8, head_dim, requires_grad=True),
+        torch.randn(2, 4, q_len, head_dim, dtype=dtype, requires_grad=True),
+        torch.randn(2, 2, 8, head_dim, dtype=dtype, requires_grad=True),
+        torch.randn(2, 2, 8, head_dim, dtype=dtype, requires_grad=True),
     ]
-    reference = [x.detach().clone().requires_grad_(True) for x in tensors]
+    reference = [x.detach().double().clone().requires_grad_(True) for x in tensors]
     padding = torch.tensor([[1] * 8, [1] * 6 + [0] * 2])
     calls = {"flash_attention_2": 0, "sdpa_wide_head": 0}
     module = SimpleNamespace(
@@ -179,14 +176,64 @@ def test_hybrid_bottom_right_padding_gqa_and_gradients_match_explicit_sdpa(head_
         _ayaka_flash_function=reference_flash,
     )
     actual, _ = hybrid_attention(module, *tensors, padding, scaling=0.125, sliding_window=window)
-    mask = causal_padding_mask(reference[0], reference[1], padding, sliding_window=window)
-    expected = F.scaled_dot_product_attention(*reference, mask, scale=0.125, enable_gqa=True)
-    torch.testing.assert_close(actual, expected.transpose(1, 2), atol=1e-6, rtol=1e-5)
+    # Independent explicit FP64 reference, rather than another SDPA dispatch
+    # or the mask helper under test. Grouped keys/values repeat by head group.
+    mask = torch.tensor(
+        [
+            [
+                [
+                    bool(padding[b, k])
+                    and k <= 8 - q_len + i
+                    and (window is None or 8 - q_len + i - k < window)
+                    for k in range(8)
+                ]
+                for i in range(q_len)
+            ]
+            for b in range(2)
+        ]
+    )[:, None]
+    query, key, value = reference
+    key, value = key.repeat_interleave(2, 1), value.repeat_interleave(2, 1)
+    scores = (query @ key.transpose(-1, -2)) * 0.125
+    expected = (scores.masked_fill(~mask, -torch.inf).softmax(-1) @ value).transpose(1, 2)
     actual.square().sum().backward()
     expected.square().sum().backward()
-    for a, b in zip(tensors, reference, strict=True):
-        torch.testing.assert_close(a.grad, b.grad, atol=2e-5, rtol=1e-4)
     assert calls["flash_attention_2" if head_dim == 16 else "sdpa_wide_head"] == 1
+    return actual, expected, tensors, reference
+
+
+@pytest.mark.parametrize("head_dim", [16, 512])
+@pytest.mark.parametrize("q_len", [1, 3, 8])
+@pytest.mark.parametrize("window", [None, 4])
+def test_hybrid_bottom_right_padding_gqa_and_gradients_match_explicit_sdpa(head_dim, q_len, window):
+    actual, expected, tensors, reference = _hybrid_reference_case(
+        head_dim, q_len, window, torch.float64
+    )
+    torch.testing.assert_close(actual, expected, atol=1e-10, rtol=1e-9)
+    for a, b in zip(tensors, reference, strict=True):
+        torch.testing.assert_close(a.grad, b.grad, atol=1e-9, rtol=1e-8)
+
+
+@pytest.mark.parametrize("head_dim", [16, 512])
+@pytest.mark.parametrize("q_len", [1, 3, 8])
+@pytest.mark.parametrize("window", [None, 4])
+def test_default_fp32_cpu_attention_roundoff_is_bounded_against_fp64(head_dim, q_len, window):
+    actual, expected, tensors, reference = _hybrid_reference_case(
+        head_dim, q_len, window, torch.float32
+    )
+    # CPU fused SDPA and GQA/math take different FP32 reduction paths between
+    # Torch releases. Keep a separate explicit precision bound; CUDA typed
+    # probability/loss/gradient admission tolerances remain unchanged.
+    limit = 64 * torch.finfo(torch.float32).eps
+
+    def check(value, ref):
+        assert torch.isfinite(value).all()
+        scaled = (value.double() - ref).abs().max() / ref.abs().max().clamp_min(1.0)
+        assert scaled < limit, f"FP32/FP64 scaled residual {float(scaled)} exceeds {limit}"
+
+    check(actual, expected)
+    for a, b in zip(tensors, reference, strict=True):
+        check(a.grad, b.grad)
 
 
 def test_bad_liger_arithmetic_rolls_back_and_restores_rng_dropout_and_gradients():
