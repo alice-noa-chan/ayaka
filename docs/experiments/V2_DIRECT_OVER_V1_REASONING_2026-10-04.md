@@ -463,3 +463,109 @@ calibration도 읽지 않는다. raw-reader 일치와 calibrated-serving 일치�
 actual local tiny Granite + nonzero LoRA + nonunit temperature로 Service의 입력/token/
 확률 및 실제 HFReader 로드를 검사하고, 연결 전에는 silent legacy fallback을 거부해야 한다.
 이 작업은 `.dev`로 공유했다. 준비 전체 완료나 새 모델의 성능 향상을 아직 주장하지 않는다.
+
+## 실제 체크포인트 서빙·추론 연결 완료
+
+위의 serving blocker는 `8b552b6`에서 수정했다. loader가 체크포인트의
+`input_encoding/input_recipe/input_recipe_sha256`을 검증하고 실제 Decision에 전달한다.
+Swift 직접 학습과 같은 renderer·chat template·canonical letter readout을 사용하며,
+서버의 원래 Choice label, Noul false/true, 정수 Score의 원래 ID/ordinal 순서를 유지한다.
+typed/length temperature도 학습 체크포인트에서 읽는다. Swift에서는 legacy prefix
+header와 pointer shortlist를 쓰지 않으며, 실제 입력 토큰으로 usage를 계산한다.
+
+부분 metadata·변경된 tokenizer/template·hash 불일치를 거부하고, 저장한 checkpoint에는
+`input_contract_required`를 기록한다. 전체 metadata를 삭제해도 legacy 입력으로 조용히
+복귀할 수 없다. 이전에 이 계약이 없던 공개 v1/legacy checkpoint 동작은 유지한다.
+native Swift Score에서는 +2/+4 같은 정수 표현을 보존하며 fractional/중복 숫자 alias는
+HTTP422로 거부한다. 입력 문맥 초과도422이고 tokenizer 계약 손상은 backend502다.
+
+Swift recipe는 **`ayaka-swift-direct-inputs-2`**로 올렸다. 기존 backend/template SHA에
+`tokenizer_config_sha256`을 추가해 BOS/EOS·special tokens·decode 설정까지 묶는다.
+이전 Swift recipe1의 bundle/checkpoint metadata는 명시적으로 재준비해야 한다.
+schema/version 문자열만 고쳐 통과시키지 않는다.
+
+`ayaka/swift_continuation.py`는 같은 adapter로 풀이를 생성한 뒤 native 3-turn
+template의 최종 판정을 같은 cache에서 이어간다. `on + high`는 직접 판정·auto
+라우터를 호출하지 않고 시작하며 단순/높은 확신도/숫자 없는 질문에도 1,024 예산을
+유지한다. EOS로 정상 종료하면 길이를 채우지 않는다. EOS는 생성량에 포함하되 final
+template 이전에는 cache에 넣지 않아 Gemma sliding cache의 불필요한 rollback을 피한다.
+빈 풀이·문맥 부족·decode 실패는 fallback 사유와 실제 생성량을 남긴다. 조용히 effort를
+낮추지 않는다. `off`와 명시적0예산은 생성0회다.
+
+실제 CPU random Granite/Gemma와 저장한 native LM·fast tokenizer·nonzero LoRA·nonunit
+temperature로 Service의 입력 IDs와 보정 확률을 Trainer와 비교했다. 질문별/요청별
+격리와 warmed cache, 실제 1,024토큰 강제 생성, Gemma sliding cache의 trace-final
+logits/full-row 일치, EOS/실패 usage를 검사했다. 이 단위의 관련240tests가 통과했다.
+현재 Swift 단일 판독은 질문당2–26후보다. 26개 초과는 명시적으로 거부하며 Claude의
+grouping arm을 자동으로 사용하지 않는다. native template가 지원하지 않는 cache
+rollback을 요구하면 명시적 fallback이다. 모든 모델 계열의 cache 지원을 주장하지 않는다.
+
+## 학습한 LoRA의 native full-LM export 완료
+
+`ee47993`의 `ayaka.adapter_export`는 detached text adapter를 full causal LM에 맞는
+경로로 변환한다. cached pinned native config로 **meta architecture**만 구성해 실제
+text stack과 PEFT target을 확인하며, 필요한 모든 A/B key·shape·유한성을 검증한다.
+일부 layer의 A/B 쌍 전체가 빠진 경우도 거부한다. full native class의 `auto_mapping`을
+기록해 explicit HFReader와 PEFT 자동 loader 모두 실제 adapter를 읽도록 한다.
+source config/head/meta/adapter의 변경을 검사하고 새 디렉터리에만 내보낸다.
+
+```bash
+python -m ayaka.adapter_export \
+  --checkpoint /path/to/recipe-bound-ayaka-checkpoint \
+  --out /path/to/new-native-hf-adapter
+```
+
+이 artifact는 **raw canonical-letter readout**이다. 원본 type/length temperature는
+sidecar에 기록하지만 적용하지 않으며 `calibration_applied=false`다. 보정된 서비스는
+원래 Ayaka checkpoint로 실행한다. native reader의 raw 확률을 보정된 확률이라고
+보고하지 않는다. 변환 자체는 native weights를 로드하거나 다운로드하지 않는다.
+
+실제 local random Granite/Gemma에 `HFReader._load`와
+`AutoPeftModelForCausalLM.from_pretrained`를 사용해 **모든 저장 A/B tensor가 정확히
+로드됐고 missing-adapter 경고가 없으며 raw logits/확률이 일치함**을 확인했다.
+loader를 mock한 자기 재로딩 검사가 아니다. full Gemma audio 포함 config의 meta
+구성, deterministic export, source 변경/누락/NaN 거부, 실제 offline CLI도 검사했다.
+export와 serving 두 모듈의 최종 관련40tests가 통과했다.
+
+고정 Gemma12B revision `707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`의 meta 조사에서는
+text stack이 `model.language_model`이며 rank32 adapter는 **656 A/B tensor,
+131,137,536 parameters**였다. 7개의 target pattern이 328개 module에 적용되는
+구성이며 native weights/VRAM/품질 실측은 아니다.
+`.dev/codex-native-adapter-layout-20261004.json` 참조.
+
+## 최신 고정 통합 검사와 남은 학습 조건
+
+`ee47993` Git archive에서 상대 세션의 matched public 2×2 진단 코드까지 포함한 전체
+CPU 검사는 **1852 passed, 2 skipped / 461.69초**, source 변경0,
+stable_pass=True다. Ruff lint/format289files도 통과했다.
+`.dev/codex-native-serving-full-ee47993-20261004.json`에 실행/log hash를 기록했다.
+archive SHA는 `0c27ab8ca2ba769bbbce88c5574b24aece79c54508e4bdc10aba9910a46e2c99`다.
+두 skip에는 이 venv에 없는 optional `typesafe_sdk` 통합 모듈이 포함된다. 상대 세션의
+SDK 설치 환경 검사와 구분한다. ignored calibration/dev fixture 두 파일만 SHA 확인 후
+연결했고 private test/artifacts/deploy는 복사하지 않았다. GPU/유료API/다운로드0이다.
+
+같은 고정 소스와 실제 cached Gemma tokenizer로 recipe2 development bundle을 다시
+준비하고 전체 regeneration audit을 통과했다. authored480문항 중 train96행은 세 유형
+각32개이며26source lineages, 3fixed batches, 각행1회, 10715입력토큰이다. test 원문은
+별도 holdout에 있다. 이전 `55787c0`의 train96행과 비교하면 변경한
+`direct_input_binding`을 제외한 **모든 필드가 동일**하다. 파일 전체 bytes가 같다는
+주장은 아니다. `.dev/codex-native-input-migration-equivalence-ee47993-20261004.json`
+및 `.dev/direct-native-swift-input-ee47993-cpu-20261004/receipt.json` 참조.
+
+```text
+bundle manifest: 956ad9c67bc7a4720d0888ee3be6d0b40c804b46730da5d5cf8546072a8bba1d
+holdout manifest: 2d6dc429084dfd08ac08560dee1d0e2b4c77c6bb3715ac00b624ee3a60425c6c
+```
+
+이 control의 teacher/optimizer 실행은0이고 FA2/Liger는 **meta topology** 검사다.
+native weights는 `native shard inventory differs from the declared weight index`로
+ready=False다. 실제 pretrained 품질 향상이나 GPU 학습 시간을 측정하지 않았다.
+CPU 준비 최적화의 과거 속도 관측을 이번 동시 실행 시간과 비교하지 않는다.
+
+다음은 실제 native weights 준비, 자연 정책·다단계 품질 corpus와 실제 teacher 관측,
+matched dev pilot 및 고정한 checkpoint/policy bytes의 독립 최종 평가, CUDA 성능과
+잔액·가격에 묶인 전체 완주/회수/정리 경로다. evidence head의 feature-store/training
+runner도 별도 절제군 준비 항목이다. Swift 공통 `token_input`의 BatchEncoding 경계와
+`SwiftReadIndex`의 canonical dict 순서 문제는 Claude 담당자에게 수정 요청을 남겼다.
+이번 bridge/converter의 방어를 공유 Swift 코드의 해결로 부르지 않는다.
+**전체 학습 직전 준비 완료나 v2 off의 v1 reasoning 대비 향상은 아직 증명하지 못했다.**
