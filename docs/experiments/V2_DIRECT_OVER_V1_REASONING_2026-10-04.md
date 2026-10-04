@@ -1169,3 +1169,88 @@ Warning은 중복 ZIP member 공격 fixture의 예상 경고다.
 full receipt: .dev/codex-native-upload-full-94f6005-fixtures-20261005.json
 full log SHA: 5c5ee1291800b05cb8e6c887bdedf13d61cb29472aa2f494b2d0d1bdd9db671c
 ```
+
+## 2026-10-05 고정 Linux runtime과 실제 CPU 실행 경계
+
+`5c55f8d`는 FA2/Liger를 포함한 Linux x86_64 / Python 3.11.14 wheel-only
+runtime을 추가했다. 60개 distribution의 version과 SHA를 고정하며 actual CPU
+receipt의 transformers 5.18.0 / tokenizers 0.23.2 / peft 0.21.2를 유지한다.
+Torch 2.8.0+cu128, 공식 FA2 2.8.3.post1 / CXX11 TRUE wheel과 Liger 0.8.4를
+새 prefix에 설치했다. Extension import와 실제 wrapper/function의 인자,
+prefix 안의 module origin을 검사하며 CUDA를 초기화하지 않는다.
+
+실제 실행에서 case-insensitive Windows mount 복사 실패와 누락된 Pillow import를
+발견해 각각 사전 파일 시스템 검사와 Pillow 11.3.0 pin으로 해결했다. 기존 실패
+receipt를 보존하고 깨끗한 Linux prefix를 다시 만들었다. 원래 prefix 경로를
+없앤 뒤 import 성공을 확인했다. Target GPU host에서의 호환성은 별개다.
+
+`0bb3500`은 header 검사에서 전체 24GB의 writable TorchStorage를 만들던
+`safe_open(framework="pt")`를 NumPy backend로 바꿨다. 7.5GiB RAM / 2GiB swap의
+동일 Linux host에서 실제 full native header와 text layout 검사가 통과했다.
+Pretrained value를 읽거나 실제 model loader를 바꾸지 않았다. 새 backend도
+Windows OS error 1455를 해결했다는 주장은 하지 않는다. 동시 전체 검사 중
+Windows package build가 이 오류로 실패해 Linux packaging으로 진행했다.
+
+`9fe2434`는 Torch 2.8 CPU의 FP32 GQA/반복 KV dispatch rounding 차이를
+독립 FP64 matmul·mask·softmax reference와 별도 FP32 12개 case로 검사한다.
+Production kernel 변경 없이 Windows kernel 35개, Linux native/head/objective/
+resume 관련 96개가 통과했다. 이는 CUDA numerical parity나 품질 결과가 아니다.
+
+Source-bound bundle은 전체 gold/render/schedule CPU audit를 다시 수행했다.
+Prepared payload와 opaque test commitment는 이전과 byte 단위로 동일하다.
+2,368개 row / 74 × 32의 완전한 한 번 방문 schedule을 유지했다. 새 source에서
+selection을 다시 수행한 것은 아니며 기존 private holdout의 development manifest
+연결은 별도 metadata migration과 외부 anchor가 필요하다. 원본 test는 열지 않았다.
+
+```text
+bundle SHA: 0ceeb878f60ed6877c7d15ba5eda9455f24e8289ebe39f7ec7e6948bea8f17dc
+CPU receipt SHA: eb693eb47c62a52a8d8ce34d4f04841c042dd48848ed6bc22456b1a2f3900836
+Linux layout SHA: 5f6770f540336bd57a1eb58629e31792b9bc7182d9ba1f45708aa38c2ba5ae2f
+runtime lock SHA: a7537375091f574f6a703f6a540e1859e5b600eb2ac80a5521aebd43c1de8ba9
+runtime archive SHA: c1667a4fe1e18c4159b3b914b4fa60fe6686493a4746c91e301377b0458b72c3
+```
+
+실제 runtime prefix를 zstd level 3으로 7.98GB에서 3.56GB로 압축했다.
+전체 stream과 24,827개 file / 1,048개 내부 symbolic link를 확인해 새 경로에
+복원하고 그 interpreter의 CPU import 성공을 확인했다. Local Ubuntu 26.04 /
+glibc 2.43의 결과이며 target host나 CUDA 실행 결과로 확대하지 않는다.
+상세 재현 절차와 실패 기록은
+[DIRECT_UPLOAD_PREPARATION.md](DIRECT_UPLOAD_PREPARATION.md)에 기록했다.
+
+복원된 runtime의 interpreter에서 새 bundle, 새 고정 source와 실제 24GB native
+파일의 production CPU audit도 통과했다. HF offline·빈 cache이며 native byte
+verification true / model weights loaded false / optimizer step 0이다. 248.72초는
+local DrvFS 파일 감사 시간으로, GPU throughput 예측에 사용하지 않는다.
+복원·import·audit receipt SHA는
+`8ee1cdd932677b687209119925e64711d4ff5dee6c6d81f02c6af2e0b4e4da89`다.
+
+새 `9fe2434` source / 새 receipt의 모델·데이터 묶음은 Linux에서 생성 후 전체
+stream, member hashes, inventory, anchors와 CPU 명령 연결이 검증됐다.
+169개 파일 / 18,736,893,392 bytes / zstd level 3이다. Archive SHA는
+`107527d4159269032b3bf9442beeaa80abc9db993ab78aca2b82e0716d1e4f8f`다.
+새 archive의 full native restore를 다시 수행한 결과로 확대하지 않는다.
+이 단계의 증거는 새 source/bundle/native CPU audit와 압축 stream의 완전한
+byte 검증이다. 이전 `61f3c6b` archive와 실패한 runtime 기록은 보존했다.
+
+최종 고정 `9fe2434` 전체 CPU 검사: **2182 passed, 2 skipped, 1 warning /
+935.74초**, exit 0 / source·개발 fixture 변경 0 / `stable_pass=true`다.
+Child OMP/MKL/OpenBLAS thread를 각각 1로 기록하고 wrapper 출력을 UTF-8로
+고정했다. 처음에는 Windows checkpoint directory rename의 `WinError 5`로
+1개 실패했다. 관련 27개와 전체 재검사가 source 수정 없이 통과했으며 원인은
+특정하지 않았다. 첫 wrapper의 cp949 출력 오류와 실패 receipt도 보존했다.
+Production checkpoint 동작을 수정했다는 주장은 하지 않는다.
+Warning은 중복 ZIP member 공격 fixture의 예상 경고다. Ruff lint/format은
+314개 Python file에서 통과했고 문서의 실제 SHA anchor도 확인했다.
+
+```text
+full receipt: .dev/codex-direct-runtime-full-9fe2434-single-thread-20261005.json
+full receipt SHA: 167468c4614bcab4c7bd94fda02eb332ff7918bdc83a262772c1b8f6d9749059
+full log SHA: ea590c6b156089e201da1a5a25e62264a2184118ca89e6b2a6ee947d981467ce
+failed receipt: .dev/codex-direct-runtime-full-9fe2434-20261005.json
+```
+
+GPU 할당, paid API, production optimizer step은 0이다. 작은 random CPU fixture의
+optimizer 검사는 수행했다. Swift/API 소유 파일과 main은 유지했다. Claude incoming은
+section 18까지이며 새 승인이나 성능 판단을 추정하지 않는다. 실제 reasoned-teacher
+paired 이득, 원래 private inventory, CUDA parity/throughput, 전체 credit admission,
+holdout 연결과 독립 v1 reasoning 대비 v2 off의 품질 검사는 계속 필요하다.
