@@ -62,7 +62,9 @@ def audit_layout(record, native_path):
     for name in sorted(record["files"]):
         if not name.endswith(".safetensors"):
             continue
-        with safe_open(root / name, framework="pt", device="cpu") as handle:
+        # Header inspection must not reserve writable TorchStorage for an
+        # entire pretrained shard. No NumPy tensor values are materialized.
+        with safe_open(root / name, framework="np", device="cpu") as handle:
             for key in handle.keys():  # noqa: SIM118 -- safe_open is not a mapping
                 view = handle.get_slice(key)
                 shape = view.get_shape()

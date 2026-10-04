@@ -79,7 +79,11 @@ def inspect_snapshot(repo, revision, *, path=None, require_tokenizer=False):
         raise ValueError("cached native weights are incomplete; prepare downloads before GPU use")
     tensors, elements, dtypes = {}, 0, Counter()
     for name in sorted(shards):
-        with safe_open(root / name, framework="pt", device="cpu") as handle:
+        # Only header shape/dtype is needed. The pt backend creates a writable
+        # TorchStorage mapping even without get_tensor(), reserving commit for
+        # the whole shard on memory-limited Linux hosts. NumPy retains the
+        # read-only mapping; never materialize values (including BF16) here.
+        with safe_open(root / name, framework="np", device="cpu") as handle:
             for key in handle.keys():  # noqa: SIM118 -- safe_open is not a mapping
                 if key in tensors:
                     raise ValueError("native tensor appears in multiple weight shards")

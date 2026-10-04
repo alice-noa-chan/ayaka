@@ -76,6 +76,7 @@ def test_real_native_headers_cover_meta_parameters_without_tensor_or_gpu_loads(
     monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained", forbidden)
     monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", forbidden)
     monkeypatch.setattr(torch.cuda, "init", forbidden)
+    monkeypatch.setattr(torch.UntypedStorage, "from_file", forbidden)
     original_open = native_layout.safe_open
 
     class HeadersOnly:
@@ -93,9 +94,17 @@ def test_real_native_headers_cover_meta_parameters_without_tensor_or_gpu_loads(
             return self.handle.keys()
 
         def get_slice(self, key):
-            return self.handle.get_slice(key)
+            view = self.handle.get_slice(key)
+
+            class HeaderSlice:
+                get_shape = view.get_shape
+                get_dtype = view.get_dtype
+                __getitem__ = forbidden
+
+            return HeaderSlice()
 
         get_tensor = forbidden
+        get_tensors = forbidden
 
     monkeypatch.setattr(native_layout, "safe_open", HeadersOnly)
     before = torch.random.get_rng_state().clone()

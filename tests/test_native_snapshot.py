@@ -46,6 +46,32 @@ def test_local_sharded_snapshot_binds_every_actual_header_and_byte(tmp_path, mon
         verify_snapshot(record, path=root)
 
 
+def test_header_only_snapshot_preserves_identity_without_writable_torch_storage(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "config.json").write_text('{"model_type":"gemma4_unified_text"}')
+    save_file(
+        {
+            "bf16": torch.ones(2, 2, dtype=torch.bfloat16),
+            "empty": torch.empty(0),
+            "scalar": torch.tensor(1.0),
+        },
+        tmp_path / "model.safetensors",
+    )
+    original, _ = inspect_snapshot("publisher/native", REVISION, path=tmp_path)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("header inspection must not map a writable full-shard TorchStorage")
+
+    monkeypatch.setattr(torch.UntypedStorage, "from_file", forbidden)
+    actual, _ = inspect_snapshot("publisher/native", REVISION, path=tmp_path)
+    assert actual == original
+    assert actual["tensor_count"] == 3
+    assert actual["stored_weight_elements"] == 5
+    assert actual["dtype_elements"] == {"BF16": 4, "F32": 1}
+    assert verify_snapshot(original, path=tmp_path) == tmp_path.resolve()
+
+
 @pytest.mark.parametrize("damage", ["missing", "unsafe", "wrong_shard", "missing_entry"])
 def test_incomplete_or_misbound_weight_maps_fail_without_model_allocation(tmp_path, damage):
     native(tmp_path)
