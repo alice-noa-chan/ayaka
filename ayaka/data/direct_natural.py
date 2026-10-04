@@ -15,11 +15,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..eval.read_artifact import fingerprint
+from .contract_nli import SOURCE as CONTRACT_SOURCE
+from .contract_nli import ContractGoldRegistry
 from .natural_training_v2 import SOURCES, digest, evidence, valid_provenance
 from .schema import Candidate, Question, Sample
 from .transforms import HELPSTEER_LEVELS
 
 VERSION = "ayaka-raw-human-direct-gold-1"
+POLICY_VERSION = "ayaka-raw-human-policy-direct-gold-2"
 PINNED_RAW_SHA256 = {
     "helpsteer2": "c0d7e91d738d42e8a08070db26c4c09a9c7631308e1f0fd380ff43d130c9f713",
     "commonsense_qa": "b0449767ed986bfc2ca52b1244a46ef12f732756727f3cb0a4ab69ac8b3d282b",
@@ -84,9 +87,18 @@ def _ordinal_target(value):
     }
 
 
-def verify_raw_binding(binding):
+def verify_raw_binding(binding, *, registry=None):
     """Recheck bound cached files without reparsing the complete human corpus."""
     if binding is None:
+        return
+    if binding.get("version") == POLICY_VERSION:
+        if (
+            not isinstance(registry, NaturalGoldRegistry)
+            or registry.policy_registry is None
+            or binding != registry.binding
+        ):
+            raise ValueError("policy raw binding requires its explicit pinned composite registry")
+        registry.verify_files()
         return
     if binding.get("version") != VERSION or type(binding.get("local_files_verified")) is not bool:
         raise ValueError("unsupported raw human file binding")
@@ -143,8 +155,14 @@ class NaturalGoldRegistry:
     are checked independently of converter output and teacher observations.
     """
 
-    def __init__(self, raw_sources=None):
-        self.local_files_verified = raw_sources is None
+    def __init__(self, raw_sources=None, *, policy_registry=None):
+        if policy_registry is not None and not isinstance(policy_registry, ContractGoldRegistry):
+            raise ValueError("policy gold requires the pinned ContractNLI registry")
+        self.policy_registry = policy_registry
+        self._raw_local_files_verified = raw_sources is None
+        self.local_files_verified = self._raw_local_files_verified and (
+            policy_registry is None or policy_registry.local_files_verified
+        )
         self.raw = local_raw_sources() if raw_sources is None else raw_sources
         if not self.raw or set(self.raw) - set(SOURCES):
             raise ValueError("raw human sources must belong to the pinned source policy")
@@ -158,20 +176,35 @@ class NaturalGoldRegistry:
             ):
                 raise ValueError("raw source provenance must match the immutable file policy")
         self.binding = {
-            "version": VERSION,
+            "version": POLICY_VERSION if policy_registry is not None else VERSION,
             "local_files_verified": self.local_files_verified,
             "sources": {name: data["provenance"] for name, data in self.raw.items()},
             "scope": "cached raw human training labels"
             if self.local_files_verified
             else "injected CPU fixture only",
         }
+        if policy_registry is not None:
+            self.binding["policy_sources"] = {CONTRACT_SOURCE: policy_registry.binding}
+            self.binding["scope"] = (
+                "cached raw human rehearsal and public full-contract training annotations"
+                if self.local_files_verified
+                else "injected CPU fixture only"
+            )
         self._memory_sha256 = self._memory_identity()
+
+    @property
+    def source_names(self):
+        return set(self.raw) | ({CONTRACT_SOURCE} if self.policy_registry is not None else set())
 
     def _memory_identity(self):
         return fingerprint(
             {
                 "local_files_verified": self.local_files_verified,
+                "raw_local_files_verified": self._raw_local_files_verified,
                 "binding": self.binding,
+                "policy": self.policy_registry.binding
+                if self.policy_registry is not None
+                else None,
                 "sources": {
                     source: {key: data[key] for key in ("rows", "features", "provenance")}
                     for source, data in self.raw.items()
@@ -183,7 +216,9 @@ class NaturalGoldRegistry:
         """Recheck actual anchored raw bytes before committing prepared outputs."""
         if self._memory_identity() != self._memory_sha256:
             raise ValueError("parsed human sources or bindings changed after validation")
-        if not self.local_files_verified:
+        if self.policy_registry is not None:
+            self.policy_registry.verify_files()
+        if not self._raw_local_files_verified:
             return
         from ..training.direct_state import file_digest
 
@@ -297,13 +332,20 @@ class NaturalGoldRegistry:
         return Sample(state, questions, metadata)
 
     def sources(self):
-        return {
+        result = {
             source: [self.sample(source, i) for i in range(len(data["rows"]))]
             for source, data in self.raw.items()
         }
+        if self.policy_registry is not None:
+            result.update(self.policy_registry.sources())
+        return result
 
     def __call__(self, sample, q):
         m = sample.metadata
+        if m.get("source") == CONTRACT_SOURCE:
+            if self.policy_registry is None:
+                raise ValueError("contract source requires the explicit pinned policy registry")
+            return self.policy_registry(sample, q)
         if not valid_provenance(m) or m.get("direct_natural_version") != VERSION:
             raise ValueError("unsupported raw human natural provenance")
         source, index = m["source"], m.get("raw_row_index")
@@ -335,3 +377,12 @@ class NaturalGoldRegistry:
             return {c.id: float(c.id == row["answerKey"]) for c in q.candidates}
         positive = int(q.id.split("/")[1]) == row["intent"]
         return {"false": float(not positive), "true": float(positive)}
+
+
+def explicit_policy_registry(train_path):
+    """CLI opt-in; absent paths keep the original four-source default."""
+    return (
+        NaturalGoldRegistry(policy_registry=ContractGoldRegistry(train_path))
+        if train_path is not None
+        else None
+    )

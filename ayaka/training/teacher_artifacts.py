@@ -521,6 +521,7 @@ def main(argv=None):
         help="fingerprint of the ordered JSON read contents",
     )
     parser.add_argument("--mechanics-only", action="store_true")
+    parser.add_argument("--contractnli-train", type=Path)
     parser.add_argument(
         "--native-path", type=Path, help="complete offline native model/tokenizer package"
     )
@@ -573,7 +574,13 @@ def main(argv=None):
         tok = local_tokenizer(
             cfg, allow_tiny=args.mechanics_only, native_path=native_root, expected_metadata=metadata
         )
-    verify, sources = _gold_verifier({"train": samples}, None, allow_tiny=args.mechanics_only)
+    from ..data.direct_natural import explicit_policy_registry
+
+    verify, sources = _gold_verifier(
+        {"train": samples},
+        explicit_policy_registry(args.contractnli_train),
+        allow_tiny=args.mechanics_only,
+    )
 
     def reads(path):
         return [json.loads(line) for line in path.read_bytes().splitlines() if line.strip()]

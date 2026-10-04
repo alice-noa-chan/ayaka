@@ -1,8 +1,8 @@
 """Plan and prepare a whole-epoch direct corpus from cached human annotations.
 
 CPU/offline only. No model weights, generator, optimizer, GPU allocation or
-download is available here. This general rehearsal/authored control is not
-natural policy teacher data or evidence that v2-off beats v1-reasoning.
+download is available here. Optional public ContractNLI train annotations add
+full-document policy supervision; teacher benefit and v2 quality are unproven.
 """
 
 from __future__ import annotations
@@ -16,10 +16,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..config import ElectraConfig
+from ..data.contract_nli import SOURCE as CONTRACT_SOURCE
+from ..data.contract_nli import ContractGoldRegistry
 from ..data.decontam import Decontaminator, jevbench_public_dir
 from ..data.direct_natural import NaturalGoldRegistry
-from ..data.natural_training_v2 import SOURCES, partition_sources
+from ..data.natural_training_v2 import partition_sources
 from ..data.reasoning_v2 import SPLITS, curriculum
+from ..data.reserved_evidence import ReservedEvidenceBlocker
 from ..data.schema import Sample
 from ..data.source_groups import connected_groups
 from ..eval.read_artifact import fingerprint
@@ -29,6 +32,8 @@ from .direct_audit import create_audit_receipt
 from .direct_bundle import _tokenizer_identity, local_tokenizer, prepare_bundle
 from .direct_corpus_plan import (
     MARKER,
+    POLICY_SELECTION,
+    POLICY_VERSION,
     SELECTION,
     VERSION,
     digest,
@@ -174,13 +179,15 @@ def create_plan(settings, cfg, tok, registry, input_encoding, reserved, *, nativ
     encoding = normalize_input_encoding(input_encoding)
     metadata, root = inspect_metadata(cfg.backbone, cfg.backbone_revision, path=native_path)
     registry.verify_files()
-    if set(registry.raw) != set(SOURCES):
+    if registry.source_names != set(settings["natural_sample_quotas"]):
         raise ValueError("corpus plan requires all pinned human source inventories")
     reserved.verify()
     plan = {
-        "version": VERSION,
+        "version": POLICY_VERSION if CONTRACT_SOURCE in registry.source_names else VERSION,
         "settings": copy.deepcopy(settings),
-        "selection_policy": copy.deepcopy(SELECTION),
+        "selection_policy": copy.deepcopy(
+            POLICY_SELECTION if CONTRACT_SOURCE in registry.source_names else SELECTION
+        ),
         "assets": {
             "model_sha256": fingerprint(asdict(cfg)),
             "tokenizer_sha256": _tokenizer_identity(tok, cfg),
@@ -224,6 +231,8 @@ def select_corpus(plan, cfg, tok, registry, input_encoding, reserved):
     """Verify human labels, then select whole samples on final native inputs."""
     validate_plan(plan)
     registry.verify_files()
+    if registry.source_names != set(plan["settings"]["natural_sample_quotas"]):
+        raise ValueError("corpus registry sources differ from the declared input plan")
     sources = registry.sources()
     verified, soft = Counter(), Counter()
     for source, samples in sources.items():
@@ -248,8 +257,13 @@ def select_corpus(plan, cfg, tok, registry, input_encoding, reserved):
     indices, _ = connected_groups(authored + reserved.samples)
     blocked = set(indices[len(authored) :])
     public = Decontaminator.from_jevbench()
+    private = (
+        ReservedEvidenceBlocker(reserved.samples) if plan["version"] == POLICY_VERSION else None
+    )
     if any(
-        index in blocked or public.sample_hit(sample)
+        index in blocked
+        or public.sample_hit(sample)
+        or (private is not None and private.state_hit(sample))
         for sample, index in zip(authored, indices[: len(authored)], strict=True)
     ):
         raise ValueError("authored control overlaps reserved/public evidence; choose a new corpus")
@@ -278,6 +292,7 @@ def select_corpus(plan, cfg, tok, registry, input_encoding, reserved):
             fits=lambda _: True,
             fits_by_split=lambda s, split: fits(permuted_sample(s, plan), split),
             quotas=plan["settings"]["natural_sample_quotas"],
+            reserved_evidence=private,
         )
     for split in SPLITS:
         splits[split].extend(permuted_sample(s, plan) for s in natural[split])
@@ -286,6 +301,22 @@ def select_corpus(plan, cfg, tok, registry, input_encoding, reserved):
         "selection": selection,
         "raw_verified_questions": dict(verified),
         "raw_soft_label_questions": dict(soft),
+        "selected_policy_labels": {
+            split: dict(
+                Counter(
+                    label
+                    for s in rows
+                    if s.metadata["source"] == CONTRACT_SOURCE
+                    for q in s.questions
+                    for label, value in q.target_distribution.items()
+                    if value == 1
+                )
+            )
+            for split, rows in splits.items()
+            if split != "test"
+        }
+        if CONTRACT_SOURCE in registry.source_names
+        else {},
     }
 
 
@@ -387,6 +418,11 @@ def main(argv=None):
         sub.add_argument("--config", required=True, type=Path)
         sub.add_argument("--out", required=True, type=Path)
         sub.add_argument("--native-path", type=Path)
+        sub.add_argument(
+            "--contractnli-train",
+            type=Path,
+            help="pinned original train.json with sibling LICENSE; enables corpus plan2",
+        )
         sub.add_argument("--mechanics-only", action="store_true")
         private = sub.add_mutually_exclusive_group(required=True)
         private.add_argument("--reserved-manifest", type=Path)
@@ -431,7 +467,11 @@ def main(argv=None):
         encoding.update(prompt_variant=args.prompt_variant, state_format=args.state_format)
     encoding = normalize_input_encoding(encoding)
     tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only, native_path=args.native_path)
-    registry = NaturalGoldRegistry()
+    registry = (
+        NaturalGoldRegistry(policy_registry=ContractGoldRegistry(args.contractnli_train))
+        if args.contractnli_train is not None
+        else NaturalGoldRegistry()
+    )
     if args.command == "plan":
         plan = create_plan(
             settings, cfg, tok, registry, encoding, reserved, native_path=args.native_path

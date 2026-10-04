@@ -192,18 +192,22 @@ def run_pipeline(
     saved_base_reads=None,
     audit_receipt=None,
     expected_audit_receipt_sha256=None,
+    natural_registry=None,
 ):
     started = time.monotonic()
     if action not in {"audit", "profile", "train"}:
         raise ValueError("unknown direct pipeline action")
     if (audit_receipt is None) != (expected_audit_receipt_sha256 is None):
         raise ValueError("CPU audit receipt and its external SHA256 must be provided together")
+    if audit_receipt is not None and natural_registry is not None:
+        raise ValueError("portable CPU receipt loading must not receive a raw policy registry")
     if audit_receipt is None:
         audited = audit_snapshot(
             bundle,
             allow_tiny=mechanics_only,
             expected_manifest_sha256=expected_bundle_sha256,
             native_path=snapshot_path,
+            natural_registry=natural_registry,
         )
     else:
         audited = load_audited_bundle(
@@ -471,6 +475,11 @@ def main(argv=None):
     )
     parser.add_argument("--expected-audit-receipt-sha256")
     parser.add_argument(
+        "--contractnli-train",
+        type=Path,
+        help="pinned train/license for full regeneration only; omit with --audit-receipt",
+    )
+    parser.add_argument(
         "--base-reads", type=Path, help="original frozen native reads, required for replay resume"
     )
     parser.add_argument("--resume", type=Path)
@@ -483,6 +492,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.action != "audit" and args.out is None:
         parser.error("profile/train require --out")
+    if args.audit_receipt is not None and args.contractnli_train is not None:
+        parser.error("--contractnli-train is for full regeneration, not portable receipt loading")
+
+    from ..data.direct_natural import explicit_policy_registry
 
     def read(path):
         return json.loads(path.read_bytes()) if path else None
@@ -505,6 +518,7 @@ def main(argv=None):
         saved_base_reads=read(args.base_reads),
         audit_receipt=args.audit_receipt,
         expected_audit_receipt_sha256=args.expected_audit_receipt_sha256,
+        natural_registry=explicit_policy_registry(args.contractnli_train),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

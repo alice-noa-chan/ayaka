@@ -13,13 +13,16 @@ from collections import Counter
 from dataclasses import asdict
 from decimal import Decimal
 
+from ..data.contract_nli import SOURCE as CONTRACT_SOURCE
 from ..data.decontam import POLICY
-from ..data.natural_training_v2 import SOURCES
+from ..data.natural_training_v2 import POLICY_SOURCES, SOURCES
 from ..data.reasoning_v2 import SPLITS
+from ..data.reserved_evidence import POLICY as RESERVED_POLICY
 from ..eval.read_artifact import fingerprint
 from .workload import scheduled_batches
 
 VERSION = "ayaka-direct-corpus-plan-1"
+POLICY_VERSION = "ayaka-direct-corpus-plan-2"
 MARKER = "corpus_plan_sha256"
 AUTHORED = "ayaka-v2-verified"
 TYPES = ("choice", "noul", "score")
@@ -29,6 +32,14 @@ SELECTION = {
     "context": "final-native-input-whole-sample-no-truncation-v1",
     "decontamination": POLICY,
     "membership": "externally-audited-frozen-selection; no selection-replay claim",
+}
+POLICY_SELECTION = {**SELECTION, "reserved_evidence": RESERVED_POLICY}
+SOURCE_WIDTHS = {
+    "helpsteer2": (5, "score"),
+    "commonsense_qa": (1, "choice"),
+    "massive_ko": (2, "noul"),
+    "massive_ja": (2, "noul"),
+    CONTRACT_SOURCE: (17, "choice"),
 }
 SETTINGS = {
     "natural_sample_quotas",
@@ -67,7 +78,10 @@ def _exact(value, keys, name):
 def validate_settings(settings):
     _exact(settings, SETTINGS, "settings")
     quotas = settings["natural_sample_quotas"]
-    _exact(quotas, SOURCES, "natural sources")
+    if not isinstance(quotas, dict) or set(quotas) not in (set(SOURCES), set(POLICY_SOURCES)):
+        raise ValueError(
+            "corpus natural sources require the four-source or policy-source inventory"
+        )
     for limits in quotas.values():
         _exact(limits, SPLITS, "sample quotas")
         if any(type(n) is not int or n < 1 for n in limits.values()):
@@ -87,9 +101,17 @@ def validate_settings(settings):
 
 def validate_plan(plan):
     _exact(plan, {"version", "settings", "assets", "selection_policy"}, "plan")
-    if plan["version"] != VERSION or plan["selection_policy"] != SELECTION:
+    expected_sources, selection = (
+        (SOURCES, SELECTION)
+        if plan["version"] == VERSION
+        else (POLICY_SOURCES, POLICY_SELECTION)
+        if plan["version"] == POLICY_VERSION
+        else (None, None)
+    )
+    if expected_sources is None or plan["selection_policy"] != selection:
         raise ValueError("unsupported corpus plan or selection policy")
     validate_settings(plan["settings"])
+    _exact(plan["settings"]["natural_sample_quotas"], expected_sources, "versioned natural sources")
     assets = plan["assets"]
     _exact(assets, ASSETS, "asset binding")
     for key in ASSETS - {"public_files", "reserved"}:
@@ -146,7 +168,7 @@ def split_summary(samples, expected_plan_sha256):
         if sample.metadata.get(MARKER) != expected_plan_sha256:
             raise ValueError("every corpus sample must retain its exact plan marker")
         source = sample.metadata.get("source")
-        if source not in {*SOURCES, AUTHORED}:
+        if source not in {*POLICY_SOURCES, AUTHORED}:
             raise ValueError("corpus contains an unplanned source")
         row = sources.setdefault(source, {"samples": 0, "questions": 0, "types": Counter()})
         row["samples"] += 1
@@ -163,7 +185,11 @@ def split_summary(samples, expected_plan_sha256):
 def validate_summary(summary):
     _exact(summary, {"sources", "language_questions", "membership_sha256"}, "split summary")
     digest(summary["membership_sha256"], "selected membership")
-    _exact(summary["sources"], {*SOURCES, AUTHORED}, "selected sources")
+    if not isinstance(summary["sources"], dict) or set(summary["sources"]) not in (
+        {*SOURCES, AUTHORED},
+        {*POLICY_SOURCES, AUTHORED},
+    ):
+        raise ValueError("corpus selected sources differ from the approved inventory")
     for row in summary["sources"].values():
         _exact(row, {"samples", "questions", "types"}, "source summary")
         if any(type(row[k]) is not int or row[k] < 1 for k in ("samples", "questions")):
@@ -198,19 +224,19 @@ def _validate_quota(plan, summary, split):
             "questions": settings["natural_sample_quotas"][source][split] * width,
             "types": {kind: settings["natural_sample_quotas"][source][split] * width},
         }
-        for source, width, kind in (
-            ("helpsteer2", 5, "score"),
-            ("commonsense_qa", 1, "choice"),
-            ("massive_ko", 2, "noul"),
-            ("massive_ja", 2, "noul"),
-        )
+        for source in settings["natural_sample_quotas"]
+        for width, kind in [SOURCE_WIDTHS[source]]
     }
     n = settings["authored_per_type"][split]
     expected[AUTHORED] = {"samples": n * 3, "questions": n * 3, "types": dict.fromkeys(TYPES, n)}
     if summary["sources"] != expected:
         raise ValueError(f"corpus whole-sample/source/type quotas differ: {split}")
     langs = {
-        "en": expected["helpsteer2"]["questions"] + expected["commonsense_qa"]["questions"] + 3 * n,
+        "en": sum(
+            expected[source]["questions"]
+            for source in expected
+            if source not in {"massive_ko", "massive_ja"}
+        ),
         "ko": expected["massive_ko"]["questions"],
         "ja": expected["massive_ja"]["questions"],
     }
@@ -321,7 +347,9 @@ def validate_contract(plan, splits, commitment, inventory, groups, schedule):
     source_samples = test["sources"]
     sample_languages = {
         "en": sum(
-            source_samples[key]["samples"] for key in ("helpsteer2", "commonsense_qa", AUTHORED)
+            row["samples"]
+            for key, row in source_samples.items()
+            if key not in {"massive_ko", "massive_ja"}
         ),
         "ko": source_samples["massive_ko"]["samples"],
         "ja": source_samples["massive_ja"]["samples"],

@@ -160,7 +160,7 @@ def audit_snapshot(
     bundles.bound_native_root(cfg, recipe, native_path=native_root)
     if natural_registry is not None:
         natural_registry.verify_files()
-    verify_raw_binding(recipe["gold_sources"])
+    verify_raw_binding(recipe["gold_sources"], registry=natural_registry)
     binding = {
         "version": VERSION,
         "bundle_manifest_sha256": sha256(before[0]),
@@ -222,7 +222,7 @@ def create_audit_receipt(
     raw = canonical(snapshot.binding) + b"\n"
     if natural_registry is not None:
         natural_registry.verify_files()
-    verify_raw_binding(snapshot.recipe["gold_sources"])
+    verify_raw_binding(snapshot.recipe["gold_sources"], registry=natural_registry)
     if publication_guard is not None:
         publication_guard()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -398,13 +398,17 @@ def main(argv=None):
     parser.add_argument("--expected-manifest-sha256", required=True)
     parser.add_argument("--mechanics-only", action="store_true")
     parser.add_argument("--native-path", type=Path)
+    parser.add_argument("--contractnli-train", type=Path)
     args = parser.parse_args(argv)
+    from ..data.direct_natural import explicit_policy_registry
+
     result = create_audit_receipt(
         args.bundle,
         args.out,
         expected_manifest_sha256=args.expected_manifest_sha256,
         allow_tiny=args.mechanics_only,
         native_path=args.native_path,
+        natural_registry=explicit_policy_registry(args.contractnli_train),
     )
     print(json.dumps({k: v for k, v in result.items() if k != "source_sha256"}, indent=2))
 

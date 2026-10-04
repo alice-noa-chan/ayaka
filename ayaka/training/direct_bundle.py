@@ -179,8 +179,13 @@ def _gold_verifier(splits, natural_registry, *, allow_tiny):
         s.metadata.get("data_kind") == "natural" for samples in splits.values() for s in samples
     )
     if natural:
+        from ..data.contract_nli import SOURCE as CONTRACT_SOURCE
         from ..data.direct_natural import NaturalGoldRegistry
 
+        if natural_registry is None and any(
+            s.metadata.get("source") == CONTRACT_SOURCE for rows in splits.values() for s in rows
+        ):
+            raise ValueError("contract gold requires an explicit pinned train/license registry")
         natural_registry = natural_registry or NaturalGoldRegistry()
         if not isinstance(natural_registry, NaturalGoldRegistry):
             raise ValueError("natural gold requires the pinned raw-source registry")
@@ -707,12 +712,17 @@ def main(argv=None):
         "--attention", choices=("native", "sdpa", "flash_attention_2"), default="native"
     )
     prepare.add_argument("--liger", action="store_true")
+    prepare.add_argument("--contractnli-train", type=Path)
     audit = commands.add_parser("audit")
     audit.add_argument("--bundle", required=True, type=Path)
     audit.add_argument("--mechanics-only", action="store_true")
     audit.add_argument("--expected-manifest-sha256")
     audit.add_argument("--native-path", type=Path)
+    audit.add_argument("--contractnli-train", type=Path)
     args = parser.parse_args(argv)
+    from ..data.direct_natural import explicit_policy_registry
+
+    registry = explicit_policy_registry(args.contractnli_train)
     if args.command == "prepare":
         encoding = {"encoder": args.input_encoder}
         for field in ("prompt_variant", "state_format"):
@@ -751,6 +761,7 @@ def main(argv=None):
             holdout_out=args.holdout_out,
             input_encoding=encoding,
             native_path=args.native_path,
+            natural_registry=registry,
         )
     else:
         manifest, _, _, _, _ = audit_bundle(
@@ -758,6 +769,7 @@ def main(argv=None):
             allow_tiny=args.mechanics_only,
             expected_manifest_sha256=args.expected_manifest_sha256,
             native_path=args.native_path,
+            natural_registry=registry,
         )
     print(
         json.dumps(

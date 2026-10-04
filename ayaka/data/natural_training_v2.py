@@ -7,6 +7,8 @@ from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 
+from .contract_nli import SOURCE as CONTRACT_SOURCE
+from .contract_nli import SOURCE_POLICY as CONTRACT_POLICY
 from .decontam import Decontaminator
 from .schema import Candidate, Question, Sample, one_hot
 from .source_groups import connected_groups, evidence
@@ -38,6 +40,7 @@ SOURCES = {
         "ja",
     ),
 }
+POLICY_SOURCES = {**SOURCES, CONTRACT_SOURCE: CONTRACT_POLICY}
 SPLITS = ("train", "router_train", "dev", "calibration", "test")
 
 
@@ -48,7 +51,7 @@ def digest(value):
 
 
 def valid_provenance(metadata):
-    source = SOURCES.get(metadata.get("source"))
+    source = POLICY_SOURCES.get(metadata.get("source"))
     return bool(
         source
         and metadata.get("revision") == source[1]
@@ -168,6 +171,7 @@ def partition_sources(
     heldout_limit=64,
     quotas=None,
     fits_by_split=None,
+    reserved_evidence=None,
 ):
     """Remove public/previous evaluation evidence before assigning any training row."""
     if any(type(n) is not int or n < 1 for n in (train_limit, heldout_limit)):
@@ -194,14 +198,30 @@ def partition_sources(
     blocked.update(
         row_groups[i] for i, (_, sample) in enumerate(rows) if blocker.sample_hit(sample)
     )
+    if reserved_evidence is not None:
+        from .reserved_evidence import ReservedEvidenceBlocker
+
+        if not isinstance(reserved_evidence, ReservedEvidenceBlocker):
+            raise ValueError("reserved evidence requires its declared state-only overlap policy")
+        blocked.update(
+            row_groups[i]
+            for i, (_, sample) in enumerate(rows)
+            if reserved_evidence.state_hit(sample)
+        )
     assignment = {id(sample): groups[row_groups[i]] for i, (_, sample) in enumerate(rows)}
     excluded = {id(sample) for i, (_, sample) in enumerate(rows) if row_groups[i] in blocked}
     result = {split: [] for split in SPLITS}
     counts, removed, seen = Counter(), Counter(), set()
+    removed_by_source = {source: Counter() for source in sources}
+
+    def remove(source, reason):
+        removed[reason] += 1
+        removed_by_source[source][reason] += 1
+
     for source, samples in sources.items():
         for sample in sorted(samples, key=lambda s: digest(s.to_json())):
             if id(sample) in excluded:
-                removed["reserved_or_public_overlap"] += 1
+                remove(source, "reserved_or_public_overlap")
                 continue
             # Prompt groups determine splits; only complete identical annotations
             # are duplicates. Different responses and fractional ratings survive.
@@ -214,7 +234,7 @@ def partition_sources(
                 digest({"state": sample.state, "questions": sorted(questions, key=digest)}),
             )
             if identity in seen:
-                removed["duplicate_evidence"] += 1
+                remove(source, "duplicate_evidence")
                 continue
             seen.add(identity)
             group = assignment[id(sample)]
@@ -236,10 +256,10 @@ def partition_sources(
             if quotas is not None:
                 limit = quotas[source][split]
             if counts[source, split] >= limit:
-                removed["quota_excluded"] += 1
+                remove(source, "quota_excluded")
                 continue
             if not (fits_by_split(sample, split) if fits_by_split is not None else fits(sample)):
-                removed["context_overflow_whole_sample"] += 1
+                remove(source, "context_overflow_whole_sample")
                 continue
             sample = deepcopy(sample)
             sample.metadata.update(
@@ -259,6 +279,17 @@ def partition_sources(
     return result, {
         "counts": {f"{source}/{split}": n for (source, split), n in counts.items()},
         "removed": dict(removed),
+        "removed_by_source": {source: dict(counts) for source, counts in removed_by_source.items()},
+        "source_groups": {
+            source: {
+                "groups": len(group_sizes),
+                "largest_group_samples": max(group_sizes.values(), default=0),
+            }
+            for source in sources
+            for group_sizes in [
+                Counter(row_groups[i] for i, (name, _) in enumerate(rows) if name == source)
+            ]
+        },
         "reserved_samples": len(reserved),
         "split_policy": "source groups with transitive aliases and evidence; formats and ontologies shared across splits",
         "dedup_policy": "identical state, question contracts and gold only; prompt siblings retained",
