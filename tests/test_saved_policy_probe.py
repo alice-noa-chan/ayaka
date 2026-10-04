@@ -1,10 +1,16 @@
 import copy
 import json
+import math
 
 import pytest
 
 from ayaka.eval.continuation_audit import checked_rows
-from ayaka.eval.saved_policy_probe import commit_noul, main, probe_policies
+from ayaka.eval.saved_policy_probe import (
+    commit_band_diagnostics,
+    commit_noul,
+    main,
+    probe_policies,
+)
 
 
 def report(split="dev"):
@@ -55,6 +61,58 @@ def test_emitted_commit_can_improve_competence_while_worsening_proper_losses():
     assert result["execution"] == {"model_forwards": 0, "fitting_steps": 0, "new_gpu_seconds": 0}
     assert result["test_opened"] is False and result["selected_policy"] is None
     assert result["calibration_independent_cases"] == 10 and data == original
+
+
+def test_commit_band_checks_actual_credit_instead_of_assuming_boundary_is_calibrated():
+    rows = checked_rows(report())
+    original = copy.deepcopy(rows)
+    result = commit_band_diagnostics(rows, replicates=20)
+    group = result["groups"]["yes"]
+    assert group["n"] == group["hard_target_n"] == group["independent_cases"] == 10
+    assert group["soft_target_n"] == 0
+    assert group["mean_target_credit"] == pytest.approx(0.6)
+    assert group["mean_raw_selected_confidence"] == pytest.approx(0.6)
+    assert group["mean_emitted_selected_confidence"] == pytest.approx(0.801)
+    assert group["emitted_confidence_minus_target_credit"] == pytest.approx(0.201)
+    expected_delta = -0.6 * math.log(0.801 / 0.6) - 0.4 * math.log(0.199 / 0.4)
+    assert group["mean_nll_delta"] == pytest.approx(expected_delta)
+    assert len(group["mean_target_credit_95ci"]) == 2
+    assert result["groups"]["no"]["mean_target_credit"] is None
+    assert result["groups"]["no"]["interval_status"] == "insufficient_cases"
+    assert rows == original
+
+
+def test_commit_band_keeps_soft_targets_and_declines_one_case_interval():
+    raw = report()
+    for row in raw["rows"]["off"]:
+        row.update(cluster_id="one-case", probs=[0.4, 0.6], target=[0.75, 0.25])
+    result = commit_band_diagnostics(checked_rows(raw), replicates=20)
+    group = result["groups"]["yes"]
+    assert group["hard_target_n"] == 0 and group["soft_target_n"] == 10
+    assert group["mean_target_credit"] == pytest.approx(0.25)
+    assert group["mean_target_credit_95ci"] is None
+    assert group["mean_nll_delta_95ci"] is None
+    assert group["interval_status"] == "insufficient_cases"
+
+
+def test_commit_band_uses_cases_not_correlated_question_count():
+    raw = report()
+    for i, row in enumerate(raw["rows"]["off"]):
+        row["cluster_id"] = "positive" if i < 6 else "negative"
+    group = commit_band_diagnostics(checked_rows(raw), replicates=200)["groups"]["yes"]
+    assert group["independent_cases"] == 2
+    # Sampling complete cases includes both all-positive and all-negative draws.
+    assert group["mean_target_credit_95ci"] == [0, 1]
+
+
+def test_commit_band_half_tie_uses_emitted_yes_decision():
+    raw = report()
+    for row in raw["rows"]["off"]:
+        row.update(probs=[0.5, 0.5], target=[1, 0])
+    result = commit_band_diagnostics(checked_rows(raw), replicates=20)
+    assert result["groups"]["yes"]["mean_target_credit"] == 0
+    assert result["groups"]["yes"]["mean_nll_delta"] > 0
+    assert result["groups"]["no"]["n"] == 0
 
 
 @pytest.mark.parametrize("p", [0.0, 0.2, 0.5, 0.8, 1.0])

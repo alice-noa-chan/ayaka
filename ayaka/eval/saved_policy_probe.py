@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .continuation_audit import changes, checked_rows, match_rows
-from .v2 import paired_report, summarize, typed_row
+from .v2 import clustered_mean_interval, paired_report, summarize, typed_row
 
 
 def commit_noul(rows):
@@ -31,6 +31,62 @@ def commit_noul(rows):
             }
         )
     return emitted
+
+
+def commit_band_diagnostics(rows, *, replicates=2000):
+    """Measure fixed-band confidence against target credit, without fitting."""
+    if type(replicates) is not int or replicates < 1:
+        raise ValueError("bootstrap replicate count must be positive")
+
+    def mean(values):
+        return sum(values) / len(values) if values else None
+
+    def interval(group, cases, values):
+        if cases < 2:
+            return None
+        return clustered_mean_interval(group, values, replicates, seed=15)[0]
+
+    result = {}
+    for decision, index in (("no", 0), ("yes", 1)):
+        group = [
+            row
+            for row in rows
+            if row["type"] == "noul"
+            and 0.2 < row["probs"][1] < 0.8
+            and int(row["probs"][1] >= 0.5) == index
+        ]
+        emitted = commit_noul(group)
+        cases = len({row["cluster_id"] for row in group})
+        credits = [row["target"][index] for row in group]
+        deltas = [b["nll"] - a["nll"] for a, b in zip(group, emitted, strict=True)]
+
+        raw_confidence = mean([row["probs"][index] for row in group])
+        emitted_confidence = mean([row["probs"][index] for row in emitted])
+        credit = mean(credits)
+        hard = sum(value in (0, 1) for value in credits)
+        result[decision] = {
+            "n": len(group),
+            "independent_cases": cases,
+            "hard_target_n": hard,
+            "soft_target_n": len(group) - hard,
+            "mean_target_credit": credit,
+            "mean_target_credit_95ci": interval(group, cases, credits),
+            "mean_raw_selected_confidence": raw_confidence,
+            "mean_emitted_selected_confidence": emitted_confidence,
+            "emitted_confidence_minus_target_credit": (
+                emitted_confidence - credit if credit is not None else None
+            ),
+            "mean_nll_delta": mean(deltas),
+            "mean_nll_delta_95ci": interval(group, cases, deltas),
+            "interval_status": "case_bootstrap" if cases >= 2 else "insufficient_cases",
+        }
+    return {
+        "groups": result,
+        "bootstrap_unit": "underlying_case",
+        "bootstrap_replicates": replicates,
+        "bootstrap_seed": 15,
+        "scope": "conditional dev diagnostics; soft target credit is not hard-label accuracy",
+    }
 
 
 def probe_policies(raw, calibrated, calibration, *, replicates=2000):
@@ -81,6 +137,10 @@ def probe_policies(raw, calibrated, calibration, *, replicates=2000):
         "selected_policy": None,
         "commit_rule": {"lower": 0.199, "upper": 0.801, "tie_at_half": "yes"},
         "arms": {name: summarize(rows) for name, rows in arms.items()},
+        "commit_bands": {
+            name: commit_band_diagnostics(arms[name], replicates=replicates)
+            for name in ("raw", "calibrated")
+        },
         "comparisons": comparisons,
         "limitations": [
             "existing ayaka checkpoint reads do not measure a new frozen letter-reader system",
