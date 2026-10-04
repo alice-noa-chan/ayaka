@@ -83,11 +83,13 @@ def test_zero_update_profile_then_complete_train_calibrate_test_export_and_resum
     )
     assert completed["optimizer_steps"] == 2 and completed["reload_probability_parity"]
     assert completed["promotable"] is False and completed["test_used_for_selection"] is False
-    for split in ("calibration_raw", "dev", "test"):
+    for split in ("calibration_raw", "dev"):
         result = json.loads((tmp_path / "full" / f"{split}.json").read_bytes())
         assert result["summary"]["reasoning_tokens"] == 0
         assert result["summary"]["official_composite"] is None
         assert all(row["route"] == "direct" for row in result["rows"])
+    assert not (tmp_path / "full" / "test.json").exists()
+    assert completed["independent_test_required"] is True
     resumed = run_pipeline(
         root,
         tmp_path / "resumed",

@@ -87,9 +87,14 @@ def cached_weights_ready(cfg):
     return bool(shards) and all((path.parent / shard).is_file() for shard in shards)
 
 
-def audit_splits(splits):
-    if set(splits) != set(SPLITS) or any(not splits[s] for s in SPLITS):
-        raise ValueError("all five nonempty independent splits are required")
+def audit_splits(splits, *, development_only=False):
+    required = tuple(s for s in SPLITS if s != "test") if development_only else SPLITS
+    if (
+        type(development_only) is not bool
+        or set(splits) != set(required)
+        or any(not splits[s] for s in required)
+    ):
+        raise ValueError("all required nonempty independent splits are required")
     seen = {key: {} for key in (*LINEAGE_KEYS, "content")}
     counts = {}
     for split, samples in splits.items():

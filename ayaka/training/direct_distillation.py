@@ -171,8 +171,14 @@ def _teacher_filter(q, teacher, direct, target):
     return reasons
 
 
-def prepare_direct_distillation(splits, tok, cfg, teacher_reads, verify_gold, *, weights=None):
-    """Audit all five splits, then prepare only original-input train items.
+def prepare_direct_distillation(
+    splits, tok, cfg, teacher_reads, verify_gold, *, weights=None, development_only=False
+):
+    """Audit reserved splits, then prepare only original-input train items.
+
+    By default require all five splits for standalone legacy preparation.
+    ``development_only`` explicitly audits four development splits; direct
+    bundle v4 separately validates externally anchored test commitments.
 
     ``verify_gold(sample, question)`` must independently recompute the gold
     distribution from evidence; reading the stored target is not verification.
@@ -191,7 +197,7 @@ def prepare_direct_distillation(splits, tok, cfg, teacher_reads, verify_gold, *,
         raise ValueError("direct distillation must retain positive gold NLL and nonnegative KL")
     if not callable(verify_gold):
         raise ValueError("an independent gold verifier is required")
-    counts = audit_splits(splits)
+    counts = audit_splits(splits, development_only=development_only)
     expected = {}
     for sample in splits["train"]:
         source = sample.metadata.get("source_example_id")

@@ -20,7 +20,6 @@ import torch
 
 from ..checkpoint import apply_lora, load_checkpoint, save_checkpoint
 from ..config import ElectraConfig
-from ..data.reasoning_v2 import SPLITS
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..eval.v2 import summarize, typed_row
@@ -32,6 +31,7 @@ from .calibrate import apply_temperatures, fit_temperatures
 from .direct_budget import STAGES, admit_workflow
 from .direct_budget import VERSION as BUDGET_VERSION
 from .direct_bundle import audit_bundle, local_tokenizer, training_batches
+from .direct_holdout import DEVELOPMENT_SPLITS
 from .direct_state import (
     load_training_state,
     save_training_state,
@@ -86,7 +86,7 @@ def read_splits(root):
             Sample.from_json(json.loads(line))
             for line in (Path(root) / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()
         ]
-        for split in SPLITS
+        for split in DEVELOPMENT_SPLITS
     }
 
 
@@ -340,10 +340,10 @@ def run_pipeline(
         "calibration.json",
         {"temperatures": temperatures, "split": "calibration", "binding": binding},
     )
-    for split in ("dev", "test"):
+    for split in ("dev",):
         _write(root, f"{split}.json", evaluate_direct(trainer, splits[split], split))
-    # No checkpoint/temperature/effort choice consults test. This diagnostic test
-    # is not a release gate or an official sealed-inclusive benchmark result.
+    # Original test is absent from the development bundle. A separate evaluator
+    # opens its holdout only after dev selection has been frozen externally.
     probe_probs = trainer.predict(probes)
     meta = {
         "binding": binding,
@@ -354,6 +354,7 @@ def run_pipeline(
         "mechanics_only": mechanics_only,
         "calibration_split": "calibration",
         "test_used_for_selection": False,
+        "independent_test_required": True,
     }
     save_checkpoint(model, str(root / "checkpoint"), meta)
     trainer, model = None, None

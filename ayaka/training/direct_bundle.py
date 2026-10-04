@@ -25,14 +25,22 @@ from ..prompt import render_prefix, render_question
 from ..tokenization import HFTokenizer, ToyTokenizer
 from .batching import _noul_canonical, question_view
 from .direct_distillation import prepare_direct_distillation
+from .direct_holdout import (
+    DEVELOPMENT_SPLITS,
+    holdout_destination,
+    make_commitment,
+    validate_commitment,
+    write_holdout,
+)
 from .direct_preflight import inspect_direct_model
 from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .workload import describe_rows, finite_workload, scheduled_batches
 
-VERSION = "ayaka-direct-bundle-3"
+VERSION = "ayaka-direct-bundle-4"
 STATUS = "cpu_prepared_no_model_or_optimizer_execution"
-FILES = {f"{split}.jsonl" for split in SPLITS} | {
+FILES = {f"{split}.jsonl" for split in DEVELOPMENT_SPLITS} | {
+    "test_commitment.json",
     "teacher_reads.json",
     "recipe.json",
     "preparation.json",
@@ -169,33 +177,7 @@ def _gold_verifier(splits, natural_registry, *, allow_tiny):
     return verify, natural_registry.binding if natural else None
 
 
-def _prepare(
-    splits,
-    tok,
-    cfg,
-    teacher_reads,
-    weights,
-    schedule,
-    architecture,
-    *,
-    natural_registry=None,
-    allow_tiny=False,
-):
-    # Verify every reserved split too; no holdout answer enters training or teacher selection.
-    if (
-        type(weights.base_replay) not in (int, float)
-        or not math.isfinite(weights.base_replay)
-        or weights.base_replay < 0
-    ):
-        raise ValueError("frozen-base replay weight must be finite and nonnegative")
-    if weights.base_replay and not any(
-        s.metadata.get("data_kind") == "natural" for s in splits["train"]
-    ):
-        raise ValueError("frozen-base replay requires natural train rehearsal")
-    audit_splits(splits)
-    verify_gold, gold_sources = _gold_verifier(
-        splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
-    )
+def _context_audit(splits, tok, cfg, architecture, verify_gold):
     contexts = {}
     vocab_size = architecture["native_output_shape"][0]
     for split, samples in splits.items():
@@ -235,7 +217,7 @@ def _prepare(
                     )
                 rendered_rows.append(
                     {
-                        "id": sample.metadata["source_example_id"] + "/" + q.id,
+                        "id": source + "/" + q.id,
                         "tokens": len(tokens),
                         "input_sha256": fingerprint(tokens),
                     }
@@ -245,9 +227,46 @@ def _prepare(
             "rendered_rows_sha256": fingerprint(rendered_rows),
             "questions": len(rendered_rows),
         }
-    items, report = prepare_direct_distillation(
-        splits, tok, cfg, teacher_reads, verify_gold, weights=weights
+    return contexts
+
+
+def _prepare(
+    splits,
+    tok,
+    cfg,
+    teacher_reads,
+    weights,
+    schedule,
+    architecture,
+    *,
+    natural_registry=None,
+    allow_tiny=False,
+    holdout_commitment,
+):
+    # Verify development gold and opaque test commitments. Original holdout
+    # gold/context was checked during preparation; the trainer cannot open it.
+    if (
+        type(weights.base_replay) not in (int, float)
+        or not math.isfinite(weights.base_replay)
+        or weights.base_replay < 0
+    ):
+        raise ValueError("frozen-base replay weight must be finite and nonnegative")
+    if weights.base_replay and not any(
+        s.metadata.get("data_kind") == "natural" for s in splits["train"]
+    ):
+        raise ValueError("frozen-base replay requires natural train rehearsal")
+    audit_splits(splits, development_only=True)
+    validate_commitment(holdout_commitment, splits)
+    verify_gold, gold_sources = _gold_verifier(
+        splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
     )
+    contexts = _context_audit(splits, tok, cfg, architecture, verify_gold)
+    contexts["test"] = holdout_commitment["context_audit"]
+    items, report = prepare_direct_distillation(
+        splits, tok, cfg, teacher_reads, verify_gold, weights=weights, development_only=True
+    )
+    report["split_counts"]["test"] = holdout_commitment["counts"]
+    report["split_sha256"]["test"] = holdout_commitment["split_sha256"]
     inventory, groups, offset = [], [], 0
     for sample in splits["train"]:
         group = items[offset : offset + len(sample.questions)]
@@ -291,11 +310,13 @@ def prepare_bundle(
     allow_tiny=False,
     optimizations=None,
     natural_registry=None,
+    holdout_out=None,
 ):
     """Validate all data/tokens/settings before creating a fresh output directory."""
     root = Path(out)
     if root.exists():
         raise ValueError("direct bundle output must be a new directory")
+    holdout_root = holdout_destination(root, holdout_out)
     policy = _model_policy(cfg, allow_tiny=allow_tiny)
     if type(allow_tiny) is not bool:
         raise ValueError("mechanics-only mode must be boolean")
@@ -323,8 +344,19 @@ def prepare_bundle(
         official_weight_elements=policy.get("backbone_weight_elements"),
         optimizations=optimizations,
     )
+    counts = audit_splits(splits)
+    verify_test_gold, _ = _gold_verifier(
+        splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
+    )
+    test_context = _context_audit(
+        {"test": splits["test"]}, tok, cfg, architecture, verify_test_gold
+    )["test"]
+    commitment, holdout_raw = make_commitment(
+        splits["test"], context=test_context, counts=counts["test"]
+    )
+    development = {split: splits[split] for split in DEVELOPMENT_SPLITS}
     items, report, _, _ = _prepare(
-        splits,
+        development,
         tok,
         cfg,
         teacher_reads,
@@ -333,6 +365,7 @@ def prepare_bundle(
         architecture,
         natural_registry=natural_registry,
         allow_tiny=allow_tiny,
+        holdout_commitment=commitment,
     )
     recipe = {
         "version": VERSION,
@@ -352,7 +385,7 @@ def prepare_bundle(
     }
     payloads = {
         f"{split}.jsonl": b"\n".join(canonical(s.to_json()) for s in splits[split]) + b"\n"
-        for split in SPLITS
+        for split in DEVELOPMENT_SPLITS
     }
     payloads.update(
         {
@@ -360,6 +393,7 @@ def prepare_bundle(
             "recipe.json": canonical(recipe) + b"\n",
             "preparation.json": canonical(report) + b"\n",
             "train_items.jsonl": _item_bytes(items),
+            "test_commitment.json": canonical(commitment) + b"\n",
         }
     )
     manifest = {
@@ -370,6 +404,7 @@ def prepare_bundle(
         "promotable": False,
         "execution_attested": False,
         "optimizer_steps_executed": 0,
+        "test_storage": "separate_holdout_directory_with_opaque_commitments",
         "data_scope": "authored mechanics plus pinned human rehearsal when supplied; not JevBench quality evidence",
         "pending": [
             "independent review",
@@ -382,7 +417,9 @@ def prepare_bundle(
     root.mkdir(parents=True, exist_ok=False)
     for name, raw in payloads.items():
         (root / name).write_bytes(raw)
-    (root / "manifest.json").write_bytes(canonical(manifest) + b"\n")
+    manifest_raw = canonical(manifest) + b"\n"
+    (root / "manifest.json").write_bytes(manifest_raw)
+    write_holdout(holdout_root, holdout_raw, commitment, sha256(manifest_raw))
     return manifest
 
 
@@ -411,6 +448,8 @@ def audit_bundle(
         raise ValueError("unsupported or falsely promoted direct bundle")
     if not isinstance(manifest.get("files"), dict) or set(manifest["files"]) != FILES:
         raise ValueError("manifest must cover exactly the known direct bundle files")
+    if (root / "test.jsonl").exists():
+        raise ValueError("development bundle must not contain original test inputs")
     for name, digest in manifest["files"].items():
         if sha256((root / name).read_bytes()) != digest:
             raise ValueError(f"direct bundle checksum mismatch: {name}")
@@ -450,7 +489,7 @@ def audit_bundle(
             Sample.from_json(json.loads(line))
             for line in (root / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()
         ]
-        for split in SPLITS
+        for split in DEVELOPMENT_SPLITS
     }
     teachers = json.loads((root / "teacher_reads.json").read_bytes())
     items, report, inventory, groups = _prepare(
@@ -463,6 +502,7 @@ def audit_bundle(
         architecture,
         natural_registry=natural_registry,
         allow_tiny=allow_tiny,
+        holdout_commitment=json.loads((root / "test_commitment.json").read_bytes()),
     )
     if report["gold_sources"] != recipe.get("gold_sources"):
         raise ValueError("raw human source file binding changed; prepare a new bundle")
@@ -493,6 +533,9 @@ def main(argv=None):
     prepare.add_argument("--config", required=True, type=Path)
     prepare.add_argument("--teacher-reads", type=Path)
     prepare.add_argument("--out", required=True, type=Path)
+    prepare.add_argument(
+        "--holdout-out", type=Path, help="separate storage; defaults to sibling OUT-holdout"
+    )
     prepare.add_argument("--steps", required=True, type=int)
     prepare.add_argument("--rows-per-step", required=True, type=int)
     prepare.add_argument("--seed", default=20261004, type=int)
@@ -538,6 +581,7 @@ def main(argv=None):
             ),
             allow_tiny=args.mechanics_only,
             optimizations=OptimizationConfig(attention=args.attention, liger=args.liger),
+            holdout_out=args.holdout_out,
         )
     else:
         manifest, _, _, _, _ = audit_bundle(
