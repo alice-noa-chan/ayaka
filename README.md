@@ -533,6 +533,12 @@ unless a predeclared adoption gate admits it on non-public dev reads. See the
 [Swift plan](docs/experiments/AYAKA_V3_SWIFT.md), the
 [v1.5 board notes](docs/experiments/JEVBENCH_V15_BOARD_2026-10-04.md) and the evaluator package in
 [`deploy/swift/`](deploy/swift/README.md). There are no GPU measurements yet.
+
+**TypeSafe SDK compatibility (in progress).** Both servers are being brought in line with the official
+TypeSafe Jev API and Python SDK: required `confidence` and `legend` fields, the `/v1/models` shape, the
+`jev-latest` alias and 429/529 handling. Ayaka-only features move under a single `"ayaka"` request/response
+namespace, which the SDK can send through `extra_body`. See the
+[compatibility design](docs/experiments/JEV_API_COMPAT_2026-10-04.md).
 The [2026-10-01 exploration findings](docs/experiments/V2_FINDINGS_2026-10-01.md)
 include measured improvements, multilingual regressions and the closed GPU-time audit.
 Native image inputs and opt-in text Choice generation/Other expansion are described
