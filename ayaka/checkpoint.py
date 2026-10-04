@@ -118,11 +118,22 @@ def load_checkpoint(
     dtype: torch.dtype = torch.bfloat16,
     merge: bool = True,
     trainable: bool = False,
+    *,
+    backbone_path: str | None = None,
+    local_files_only: bool = False,
+    strict_loading: bool = False,
 ) -> ElectraDecisionModel:
     """Rebuild a model from a checkpoint dir. ``trainable`` keeps the
     adapter unmerged and trainable (resume / continue training)."""
     cfg = load_config(path)
-    model = ElectraDecisionModel.from_config(cfg, dtype=dtype, device=device)
+    model = ElectraDecisionModel.from_config(
+        cfg,
+        dtype=dtype,
+        device=device,
+        backbone_path=backbone_path,
+        local_files_only=local_files_only,
+        strict_loading=strict_loading,
+    )
     adapter = os.path.join(path, "adapter")
     if os.path.isdir(adapter):
         from peft import PeftModel
