@@ -19,7 +19,7 @@ import torch
 
 from ..losses import LossWeights, decision_loss
 from ..metrics import compute_metrics
-from ..model.electra import ElectraDecisionModel
+from ..model.electra import SCORE, ElectraDecisionModel
 from ..model.ragged import ragged_log_softmax
 from ..tokenization import Tokenizer
 from .batching import TrainItem, budget_batches, collate_items, plan_chunks
@@ -59,6 +59,19 @@ class TrainConfig:
     image_batch_rows: int = 4
     image_feature_cache_bytes: int = 128 * 1024 * 1024
     prune_supervised_positions: bool = True
+
+
+def _subset_counts(items):
+    """Eligible denominators from CPU row descriptors, without CUDA sync."""
+    return {
+        "rps": sum(
+            item.enc.primitive == SCORE and len(item.enc.rendered.option_spans) >= 2
+            for item in items
+        ),
+        "missing": sum(bool(item.flagged) for item in items),
+        "kl": sum(item.teacher is not None for item in items),
+        "base_replay_kl": sum(item.base_probs is not None for item in items),
+    }
 
 
 class Trainer:
@@ -334,11 +347,26 @@ class Trainer:
                 )
         self.model.train()
         n_q = len(items)
+        batch_counts = _subset_counts(items)
         agg: dict[str, torch.Tensor] = {}
         for kind, mb, ckpt in self._plan(items):
             self._chunk_ckpt = ckpt
             self._set_checkpointing(ckpt)
             out, t = self._forward(kind, mb)
+            frac = len(mb) / n_q
+            chunk_counts = _subset_counts(mb)
+            # decision_loss averages RPS and missing over their eligible subset.
+            # Compensate the outer question fraction to preserve a single full
+            # optimizer-batch loss regardless of cache sharing or OOM repartition.
+            subset_scales = {
+                key: chunk_counts[key] / batch_counts[key] / frac if batch_counts[key] else 0.0
+                for key in ("rps", "missing")
+            }
+            weights = replace(
+                self.cfg.loss_weights,
+                rps=self.cfg.loss_weights.rps * subset_scales["rps"],
+                missing=self.cfg.loss_weights.missing * subset_scales["missing"],
+            )
             parts = decision_loss(
                 out,
                 t.targets,
@@ -348,7 +376,7 @@ class Trainer:
                 teacher_mask=t.teacher_mask,
                 base_probs=t.base_probs,
                 base_mask=t.base_mask,
-                weights=self.cfg.loss_weights,
+                weights=weights,
                 missing_tau=self.cfg.missing_tau,
             )
             if hasattr(t, "reasoning_ce"):
@@ -357,10 +385,16 @@ class Trainer:
             if hasattr(t, "proposal_ce"):
                 parts["proposal_ce"] = t.proposal_ce
                 parts["total"] = parts["total"] + self.cfg.proposal_ce_weight * t.proposal_ce
-            frac = len(mb) / n_q
             (parts["total"] * frac).backward()
             for k, v in parts.items():
-                agg[k] = agg.get(k, 0.0) + v.detach() * frac
+                # Teacher/replay KL metrics use subset means, while their actual
+                # objective terms retain the existing all-question denominator.
+                metric_frac = (
+                    (chunk_counts[k] / batch_counts[k] if batch_counts[k] else 0.0)
+                    if k in batch_counts
+                    else frac
+                )
+                agg[k] = agg.get(k, 0.0) + v.detach() * metric_frac
         return agg
 
     def _train_step(self, items: list[TrainItem]) -> dict:
