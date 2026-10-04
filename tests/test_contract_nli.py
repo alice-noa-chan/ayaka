@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -223,6 +224,37 @@ def test_original_train_and_license_are_pinned_before_json_parse_without_test_ac
 def test_duplicate_json_keys_are_rejected_instead_of_silently_losing_original_annotations():
     with pytest.raises(ValueError, match="duplicate key"):
         json.loads('{"nda-1": 1, "nda-1": 2}', object_pairs_hook=module._unique_object)
+
+
+def test_parser_consumes_the_exact_anchored_bytes_even_if_a_later_read_temporarily_changes(
+    tmp_path, monkeypatch
+):
+    raw = contract_fixture(423)
+    train = tmp_path / "train.json"
+    approved = json.dumps(raw).encode()
+    train.write_bytes(approved)
+    license_file = tmp_path / "LICENSE"
+    license_file.write_bytes(b"fixture license")
+    changed = copy.deepcopy(raw)
+    changed["documents"][0]["annotation_sets"][0]["annotations"]["nda-1"]["choice"] = (
+        "Contradiction"
+    )
+    injected = json.dumps(changed).encode()
+    monkeypatch.setattr(module, "TRAIN_SHA256", module._sha(train))
+    monkeypatch.setattr(module, "LICENSE_SHA256", module._sha(license_file))
+    original = Path.read_bytes
+    reads = []
+
+    def swap_second_read(path):
+        if path.resolve() == train.resolve():
+            reads.append(path)
+            if len(reads) == 2:
+                return injected
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", swap_second_read)
+    with pytest.raises(ValueError, match="bytes changed"):
+        module.ContractGoldRegistry(train)
 
 
 def archive_fixture(tmp_path, monkeypatch, *, extra=()):

@@ -86,11 +86,15 @@ class ContractGoldRegistry:
         self.local_files_verified = fixture is None
         self.path = Path(train_path).resolve() if train_path is not None else None
         if self.local_files_verified:
-            if self.path.name != "train.json" or _sha(self.path) != TRAIN_SHA256:
+            train_bytes = self.path.read_bytes()
+            if (
+                self.path.name != "train.json"
+                or hashlib.sha256(train_bytes).hexdigest() != TRAIN_SHA256
+            ):
                 raise ValueError("ContractNLI requires the pinned original train.json bytes")
             if _sha(self.path.with_name("LICENSE")) != LICENSE_SHA256:
                 raise ValueError("ContractNLI requires its pinned CC-BY-4.0 license")
-            self.raw = json.loads(self.path.read_bytes(), object_pairs_hook=_unique_object)
+            self.raw = json.loads(train_bytes, object_pairs_hook=_unique_object)
         else:
             self.raw = fixture
         self._validate()
