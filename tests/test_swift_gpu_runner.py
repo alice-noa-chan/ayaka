@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ayaka.swift.collect import collect, iter_dataset, load_reads
+from ayaka.swift.collect import collect, iter_dataset
 from ayaka.swift.readers import FakeReader
 from ayaka.swift.server import DecisionService, serve
 from scripts.swift import gpu_runner
@@ -174,12 +174,16 @@ def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatc
     assert gpu_runner.main(["--dry-run", "--manifest", str(DEFAULT_MANIFEST)]) == 0
     output = capsys.readouterr().out
     assert "vllm==0.30.0" in output
-    assert output.count("Bulk total: 4120 decisions, 4888 model reads; serial probe: 200") == 6
-    assert "24720 bulk decisions, 29328 bulk model reads + 1200 serial HTTP requests" in output
+    assert "24720 bulk decisions, 29328 bulk model reads + 400 serial HTTP requests" in output
     assert "Prompt variants: min,cygnet,rules" in output
     assert "Qwen/Qwen3.5-4B" not in output
     assert "<set revision via env/--model>" in output
     assert "75 minutes" in output
+    assert "Time budget table" in output
+    assert all(priority in output for priority in ("P0", "P1", "P2", "P3", "P4"))
+    assert "best TWO" in output
+    assert "P4           15  False" in output
+    assert "centered log-mass <= 0.05 nats" in output
 
 
 def git_bash():
@@ -212,25 +216,12 @@ def test_shell_entrypoint_dry_run_and_syntax():
     assert "4888 model reads" in result.stdout
 
 
-def test_dry_run_variant_subset_and_invalid_lists(capsys):
-    assert (
-        gpu_runner.main(
-            [
-                "--dry-run",
-                "--manifest",
-                str(DEFAULT_MANIFEST),
-                "--model",
-                "fixture@pin",
-                "--prompt-variants",
-                "min,rules",
-            ]
-        )
-        == 0
-    )
+def test_dry_run_fixed_variants_and_optional_lora(capsys):
+    assert gpu_runner.main(["--dry-run", "--with-lora-arm"]) == 0
     output = capsys.readouterr().out
-    assert "Prompt variants: min,rules" in output
-    assert "8240 bulk decisions, 9776 bulk model reads + 400 serial HTTP requests" in output
-    for invalid in ("", "min,min", "min,unknown", "min,"):
+    assert "P4           15  True" in output
+    assert "enabled plan total: 90 minutes" in output
+    for invalid in ("", "min,min", "min,unknown", "min,", "min,rules"):
         with pytest.raises(SystemExit):
             gpu_runner.main(["--dry-run", "--prompt-variants", invalid])
 
@@ -271,7 +262,7 @@ def test_per_model_options_and_immutable_serving_settings(tmp_path):
     assert command[command.index("--max-model-len") + 1] == "16384"
     assert command[command.index("--gpu-memory-utilization") + 1] == "0.90"
     assert "--enable-prefix-caching" in command
-    assert command[command.index("--logprobs-mode") + 1] == "processed_logprobs"
+    assert command[command.index("--logprobs-mode") + 1] == "raw_logits"
     assert command[command.index("--max-logprobs") + 1] == "26"
     assert command[-1] == "--enforce-eager"
     options_path.write_text(json.dumps({"fixture": {"vllm_args": ["--revision=main"]}}))
@@ -291,7 +282,8 @@ def test_qwen_thinking_verified_at_resolved_revision_without_downloads(
                 return "assistant\n<think>\n\n</think>\n\n"
             return "assistant\n<think>\n"
 
-    def from_pretrained(model, revision):
+    def from_pretrained(model, revision, local_files_only):
+        assert local_files_only
         calls.append((model, revision))
         return Tokenizer()
 
@@ -431,174 +423,148 @@ def test_supervisor_caps_subprocess_and_kills_entire_group(tmp_path, monkeypatch
     assert not supervisor.processes
 
 
-@pytest.mark.parametrize("failure", ["time_cap", "failure"])
-def test_live_runner_packs_after_interrupted_install_without_launching_gpu(
-    tmp_path, monkeypatch, failure
-):
-    # Exercise the finalizer on Windows with a fake supervisor; no installs/GPU.
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(gpu_runner, "require_free_ports", lambda ports: None)
-    commands = []
-    stops = []
-
-    class Supervisor:
-        def __init__(self, root, deadline, work_deadline):
-            self.work_deadline = work_deadline
-
-        def run(self, command, log):
-            commands.append(command)
-            if command[0] == "nvidia-smi":
-                log.write_text("CPU fixture GPU name, driver, memory\n")
-                return
-            if "_pack" in command:
-                gpu_runner.pack_results(Path(command[-2]), Path(command[-1]))
-                return
-            if failure == "time_cap":
-                raise gpu_runner.DeadlineReached("fake time cap")
-            raise RuntimeError("fake install failure")
-
-        def stop(self):
-            stops.append(True)
-
-    monkeypatch.setattr(gpu_runner, "Supervisor", Supervisor)
-    args = SimpleNamespace(
-        output=tmp_path / "out",
-        archive=tmp_path / "out.tar.zst",
-        max_minutes=1,
-        vllm_port=8000,
-        swift_port=8009,
-        prompt_variants=["min", "cygnet", "rules"],
-    )
-    models = gpu_runner.model_specs(["fixture@pin"], dry_run=False)
-    options = gpu_runner.model_options(None, models)
-    code = gpu_runner.execute(args, models, {"datasets": []}, time.monotonic(), options)
-    assert code == (124 if failure == "time_cap" else 1)
-    progress = json.loads((args.output / "progress.json").read_text())
-    assert progress["status"] == ("time_cap" if failure == "time_cap" else "failed")
-    assert stops and args.archive.is_file()
-    env = json.loads((args.output / "fixture/env.txt").read_text())
-    assert "CPU fixture GPU name" in env["gpu_name_driver_memory"]
-    assert env["requested_revision"] == "pin"
-    assert env["resolved_revision"] is None
-    assert not any(command[:2] == ["vllm", "serve"] for command in commands)
-
-
-@pytest.mark.parametrize("first_failure", [None, "health", "parity"])
-def test_runner_model_lifecycle_collections_serial_probe_and_cleanup(
-    tmp_path, monkeypatch, first_failure
-):
+def runner_fixture(tmp_path, monkeypatch, *, failure=None, cap_after_p1=False, with_lora_arm=False):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(gpu_runner, "require_free_ports", lambda ports: None)
     real_version = gpu_runner.importlib.metadata.version
     monkeypatch.setattr(
         gpu_runner.importlib.metadata,
         "version",
-        lambda package: "0.30.0" if package == "vllm" else real_version(package),
+        lambda name: "0.30.0" if name == "vllm" else real_version(name),
     )
-    dataset = tmp_path / "public.jsonl"
-    dataset.write_text("\n".join(json.dumps(record(index)) for index in range(231)))
-    manifest = {
-        "group_size": 20,
-        "datasets": [
-            {"name": "calibration", "paths": [str(dataset)]},
-            {"name": "jevbench_public", "paths": [str(dataset)]},
-        ],
-    }
-    events = []
-    active = []
-    started_models = []
+    now = [100.0]
+    monkeypatch.setattr(gpu_runner.time, "monotonic", lambda: now[0])
+    datasets = []
+    for name, split in (
+        ("v2_calibration", "calibration"),
+        ("v2_dev", "dev"),
+        ("cygnet_calibration", "calibration"),
+        ("jevbench_public", "public"),
+    ):
+        path = tmp_path / (name + ".jsonl")
+        rows = []
+        for kind, labels in (
+            ("choice", ["a", "b"]),
+            ("noul", ["no", "yes"]),
+            ("score", ["0", "1"]),
+        ):
+            rows.append(
+                {
+                    "id": f"{name}/{kind}",
+                    "source": name,
+                    "case_id": name,
+                    "state": name,
+                    "split": split,
+                    "public": split == "public",
+                    "labels": labels,
+                    "expected": labels[0],
+                    "question": {"type": kind, "criteria": dict.fromkeys(labels, "option")},
+                }
+            )
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        datasets.append({"name": name, "paths": [str(path)]})
+    manifest = {"group_size": 20, "datasets": list(reversed(datasets))}
+    events, active, commands = [], [], []
+    current = [None]
 
     class Supervisor:
         def __init__(self, root, deadline, work_deadline):
+            self.deadline = deadline
             self.work_deadline = work_deadline
 
         def remaining(self):
-            return 60
+            return 600
 
         def run(self, command, log):
+            commands.append(command)
+            assert "pip" not in command
             if command[0] == "nvidia-smi":
-                log.write_text("CPU fixture GPU name, driver, memory")
+                log.write_text("CPU fake GPU receipt")
             elif "_resolve" in command:
                 offset = command.index("_resolve")
+                current[0] = command[offset + 1]
                 Path(command[offset + 3]).write_text(
-                    json.dumps(
-                        {
-                            "model": command[offset + 1],
-                            "revision": "a" * 40,
-                        }
-                    )
-                )
-            elif "ayaka.swift.collect" in command:
-                assert active == ["vllm"]
-                assert command[command.index("--concurrency") + 1] == "3"
-                events.append(("collect", started_models[-1]))
-                variant = command[command.index("--prompt-variant") + 1]
-                events.append(("collect_variant", variant))
-                collect(
-                    iter_dataset([dataset]),
-                    FakeReader(),
-                    command[command.index("--output") + 1],
-                    concurrency=3,
-                    model=command[command.index("--model") + 1],
-                    revision=command[command.index("--revision") + 1],
-                    prompt_variant=variant,
+                    json.dumps({"model": current[0], "revision": "a" * 40})
                 )
             elif any(str(part).endswith("parity.py") for part in command):
+                phase = command[command.index("--phase") + 1]
+                model = command[command.index("--model") + 1]
+                if phase == "reference":
+                    assert not active
+                    assert command[command.index("--hf-device") + 1] == "cuda"
+                    events.append(("hf_reference_exit", model))
+                    result = {"hf_load_s": 0.1, "complete": True}
+                    if failure == "reference":
+                        result.update(complete=False, passed=False, error="CPU load failure")
+                else:
+                    assert active == ["vllm"]
+                    events.append(("parity", model))
+                    passed = failure != "parity"
+                    result = {
+                        "complete": True,
+                        "passed": passed,
+                        "comparison_valid": passed,
+                        "samples": [{"diagnostic": True}],
+                    }
+                Path(command[command.index("--output") + 1]).write_text(json.dumps(result))
+                if failure == "reference" and phase == "reference":
+                    raise RuntimeError("reference command exited 1")
+                if failure == "parity_exit" and phase == "compare":
+                    raise RuntimeError("parity command exited 1")
+            elif "ayaka.swift.collect" in command:
                 assert active == ["vllm"]
-                assert command[command.index("--n") + 1] == "50"
-                assert command[command.index("--max-abs") + 1] == "0.02"
-                assert command[command.index("--min-argmax-agreement") + 1] == "0.98"
-                events.append(("parity", started_models[-1]))
-                Path(command[command.index("--output") + 1]).write_text(
-                    json.dumps(
-                        {
-                            "complete": True,
-                            "passed": not (
-                                first_failure == "parity" and started_models == ["first"]
-                            ),
-                        }
-                    )
+                model = command[command.index("--model") + 1]
+                variant = command[command.index("--prompt-variant") + 1]
+                source = next(
+                    part for part in command if part.endswith(".jsonl") and "reads" not in part
                 )
+                events.append(("collect", model, Path(source).stem, variant))
+                reader = FakeReader()
+                reader.backend = "vllm"
+                reader.logprobs_mode = "raw_logits"
+                collect(
+                    iter_dataset([source]),
+                    reader,
+                    command[command.index("--output") + 1],
+                    model=model,
+                    revision=command[command.index("--revision") + 1],
+                    prompt_variant=variant,
+                    diagnostic="--diagnostic" in command,
+                )
+                if cap_after_p1 and Path(source).stem == "jevbench_public" and variant == "rules":
+                    now[0] = 200.0
             elif any(str(part).endswith("latency_probe.py") for part in command):
                 assert active == ["vllm", "swift"]
-                assert command[command.index("--reads") + 1] == "200"
-                assert command[command.index("--url") + 1].endswith(":8009")
-                events.append(("probe", started_models[-1]))
-                variant = command[command.index("--prompt-variant") + 1]
-                events.append(("probe_variant", variant))
+                events.append(("probe", command[command.index("--prompt-variant") + 1]))
                 Path(command[command.index("--output") + 1]).write_text('{"complete":true}')
             elif "_pack" in command:
                 assert not active
                 gpu_runner.pack_results(Path(command[-2]), Path(command[-1]))
 
         def start(self, command, log):
+            commands.append(command)
             if command[0] == "vllm":
-                assert not active, "previous model's GPU workers must be stopped"
-                started_models.append(command[2])
+                assert not active
+                assert command[command.index("--logprobs-mode") + 1] == "raw_logits"
                 active.append("vllm")
                 events.append(("serve", command[2]))
             else:
                 assert active == ["vllm"]
-                assert command[command.index("--max-parallel") + 1] == "1"
-                assert command[command.index("--prompt-variant") + 1] in args.prompt_variants
+                assert "--revision" in command and "--policy" in command
                 active.append("swift")
             return object()
 
         def health(self, url, process, timeout):
-            if first_failure == "health" and started_models == ["first"]:
-                raise RuntimeError("fake first model health failure")
+            if failure == "health":
+                raise RuntimeError("fake health failure")
 
         def stop(self, processes=None):
             if processes:
-                assert active == ["vllm", "swift"]
                 active.remove("swift")
-                return
-            if active:
-                events.append(("stop", started_models[-1]))
-            active.clear()
+            else:
+                active.clear()
 
     monkeypatch.setattr(gpu_runner, "Supervisor", Supervisor)
-    models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
     args = SimpleNamespace(
         output=tmp_path / "out",
         archive=tmp_path / "out.tar.zst",
@@ -607,43 +573,91 @@ def test_runner_model_lifecycle_collections_serial_probe_and_cleanup(
         swift_port=8009,
         health_timeout=10,
         concurrency=3,
-        prompt_variants=["min", "cygnet", "rules"],
+        prompt_variants=list(gpu_runner.FIXED_VARIANTS),
+        with_lora_arm=with_lora_arm,
+        lora_path=tmp_path / "adapter",
+        lora_revision="b" * 40,
     )
-    code = gpu_runner.execute(
-        args, models, manifest, time.monotonic(), gpu_runner.model_options(None, models)
-    )
-    assert code == (1 if first_failure else 0)
-    if first_failure:
-        assert ("collect", "first") not in events
-        assert ("probe", "first") not in events
-    assert events.index(("stop", "first")) < events.index(("serve", "second"))
-    assert events[-1] == ("stop", "second")
-    assert args.archive.is_file()
-    progress = json.loads((args.output / "progress.json").read_text())
-    assert progress["status"] == ("partial_failure" if first_failure else "complete")
-    assert "second/rules/latency" in progress["finished_steps"]
-    assert "second/servers_stopped" in progress["finished_steps"]
-    for variant in args.prompt_variants:
-        rows = load_reads([args.output / f"second/{variant}/jevbench_public.reads.jsonl"])
-        assert len(rows) == 231
-        assert all(
-            row["model"] == "second"
-            and row["revision"] == "a" * 40
-            and row["prompt_variant"] == variant
-            for row in rows
+    if with_lora_arm:
+        args.lora_path.mkdir()
+        (args.lora_path / "adapter_config.json").write_text(
+            json.dumps({"base_model_name_or_path": "first", "revision": "a" * 40})
         )
-    assert events.count(("serve", "second")) == 1
-    second_events = events[events.index(("serve", "second")) :]
-    assert second_events.index(("parity", "second")) < second_events.index(("collect", "second"))
-    assert [
-        event[1] for event in second_events if event[0] == "probe_variant"
-    ] == args.prompt_variants
-    assert [event[1] for event in second_events if event[0] == "collect_variant"] == [
-        variant for variant in args.prompt_variants for _ in manifest["datasets"]
+        (args.lora_path / "adapter.safetensors").write_bytes(b"CPU fake adapter")
+    models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
+    code = gpu_runner.execute(
+        args, models, manifest, now[0], gpu_runner.model_options(None, models)
+    )
+    return code, args, events, commands
+
+
+@pytest.mark.parametrize("failure", [None, "health", "parity", "parity_exit"])
+def test_runner_reference_exit_before_vllm_and_parity_aborts_bulk(tmp_path, monkeypatch, failure):
+    code, args, events, commands = runner_fixture(tmp_path, monkeypatch, failure=failure)
+    progress = json.loads((args.output / "progress.json").read_text())
+    assert code == (1 if failure else 0)
+    assert args.archive.is_file()
+    assert events.index(("hf_reference_exit", "first")) < events.index(("serve", "first"))
+    if failure:
+        assert not any(event[0] in ("collect", "probe") for event in events)
+        assert progress["comparison_valid"] is False
+        assert progress["priorities"][1]["status"] == "skipped"
+        diagnostic = json.loads((args.output / "first/parity.json").read_text())
+        assert diagnostic["comparison_valid"] is False
+        assert diagnostic["hf_load_s"] == 0.1 and diagnostic["vllm_load_s"] >= 0
+        if failure != "health":
+            assert diagnostic["samples"]
+        return
+    assert progress["status"] == "complete"
+    assert [p["status"] for p in progress["priorities"]] == ["complete"] * 4 + ["skipped"]
+    assert len([e for e in events if e[0] == "probe"]) == 2
+    assert {e[1] for e in events if e[0] == "probe"} == set(progress["best_two_variants"])
+    for model in ("first", "second"):
+        collected = [e for e in events if e[0] == "collect" and e[1] == model]
+        assert len(collected) == 12
+        assert all(e[2] == "jevbench_public" for e in collected[-3:])
+        assert events.index(("parity", model)) < events.index(collected[0])
+        timings = json.loads((args.output / model / "load_times.json").read_text())
+        assert timings["hf_load_s"] == 0.1 and timings["vllm_load_s"] >= 0
+    assert events.index(("hf_reference_exit", "second")) > max(
+        i for i, e in enumerate(events) if e[0] == "probe"
+    )
+
+
+def test_runner_finishes_current_priority_then_skips_later_at_cap(tmp_path, monkeypatch):
+    code, args, events, _ = runner_fixture(tmp_path, monkeypatch, cap_after_p1=True)
+    assert code == 124
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["status"] == "time_cap"
+    assert [p["status"] for p in state["priorities"]] == [
+        "complete",
+        "complete",
+        "skipped",
+        "skipped",
+        "skipped",
     ]
-    assert max(
-        i for i, event in enumerate(second_events) if event[0] == "collect"
-    ) < second_events.index(("probe", "second"))
-    env = json.loads((args.output / "second/env.txt").read_text())
-    assert env["resolved_revision"] == "a" * 40
-    assert env["versions"]["vllm"] == "0.30.0"
+    assert len([e for e in events if e[0] == "collect"]) == 12
+    assert not any(e[0] == "probe" for e in events)
+    assert args.archive.is_file()
+
+
+def test_optional_lora_arm_only_runs_with_flag_and_records_adapter_hash(tmp_path, monkeypatch):
+    code, args, events, commands = runner_fixture(tmp_path, monkeypatch, with_lora_arm=True)
+    assert code == 0
+    state = json.loads((args.output / "progress.json").read_text())
+    assert state["priorities"][4]["status"] == "complete"
+    assert len([e for e in events if e[0] == "collect" and e[1] == "ayaka-large-swift"]) == 12
+    arm = state["models"]["ayaka_large_lora"]
+    assert len(arm["adapter_sha256"]) == 64
+    assert arm["revision"] == "a" * 40 and arm["adapter_revision"] == "b" * 40
+    assert sum("--lora-modules" in command for command in commands) == 1
+
+
+def test_reference_failure_keeps_invalid_artifact_and_never_starts_vllm(tmp_path, monkeypatch):
+    code, args, events, _ = runner_fixture(tmp_path, monkeypatch, failure="reference")
+    assert code == 1 and args.archive.is_file()
+    assert not any(event[0] in ("serve", "collect", "probe") for event in events)
+    diagnostic = json.loads((args.output / "first/parity.json").read_text())
+    assert diagnostic["comparison_valid"] is False
+    assert diagnostic["hf_load_s"] == 0.1 and diagnostic["vllm_load_s"] is None
+    assert "reference command exited 1" in diagnostic["runner_error"]

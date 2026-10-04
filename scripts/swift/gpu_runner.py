@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from ayaka.eval.read_artifact import fingerprint  # noqa: E402
 from ayaka.swift.prompt import PROMPT_VARIANTS  # noqa: E402
 from scripts.swift.inputs import (  # noqa: E402
     DEFAULT_MANIFEST,
@@ -32,10 +33,18 @@ from scripts.swift.inputs import (  # noqa: E402
     sha256,
 )
 from scripts.swift.latency_probe import write_json  # noqa: E402
+from scripts.swift.parity import CENTERED_LOG_MASS_MAX_ABS_NATS, COHORT  # noqa: E402
 
 VLLM_VERSION = "0.30.0"
 GEMMA_12B_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
 DEFAULT_KWARGS = {"enable_thinking": False}
+# Planning estimates, not measured throughput. Stop at priority boundaries;
+# a separate per-priority emergency deadline preserves diagnostic partials.
+PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P2": 5, "P3": 20, "P4": 15}
+SETUP_AND_PACK_MINUTES = 5
+FIXED_VARIANTS = ("min", "cygnet", "rules")
+FIXED_MODELS = ("google/gemma-4-12B-it", "google/gemma-4-E4B-it")
+DATASET_ORDER = ("v2_calibration", "v2_dev", "cygnet_calibration", "jevbench_public")
 
 
 def prompt_variants(value: str) -> list[str]:
@@ -56,7 +65,13 @@ def model_options(path: Path | None, models: list[dict]) -> dict:
     result = {}
     reserved = {
         "--revision",
+        "--tokenizer",
         "--tokenizer-revision",
+        "--chat-template",
+        "--generation-config",
+        "--override-generation-config",
+        "--enable-lora",
+        "--lora-modules",
         "--dtype",
         "--max-model-len",
         "--gpu-memory-utilization",
@@ -133,7 +148,7 @@ def serve_command(model: dict, port: int, options: dict) -> list[str]:
         "0.90",
         "--enable-prefix-caching",
         "--logprobs-mode",
-        "processed_logprobs",
+        "raw_logits",
         "--max-logprobs",
         "26",
         "--host",
@@ -146,59 +161,83 @@ def serve_command(model: dict, port: int, options: dict) -> list[str]:
     ]
 
 
-def plan(
-    models: list[dict],
-    manifest: dict,
-    concurrency: int,
-    minutes: float,
-    options: dict,
-    variants: tuple[str, ...] | list[str] = PROMPT_VARIANTS,
-    *,
-    parity_n: int = 50,
-    parity_max_abs: float = 0.02,
-    parity_min_agreement: float = 0.98,
-    parity_hf_device: str = "cpu",
-) -> str:
-    lines = [
-        f"Install: {sys.executable} -m pip install vllm=={VLLM_VERSION}",
-        f"Install: {sys.executable} -m pip install --no-deps -e . (no extras)",
-        f"Wall-clock cap: {minutes:g} minutes, including install/startup; cleanup/pack reserve <=30s",
-        f"Bulk concurrency: {concurrency}; serial Swift HTTP probe: 200 requests/model/variant",
-        f"Prompt variants: {','.join(variants)}; reuse one vLLM server per model",
-        "Serve each model alone: bf16, context=16384, GPU=0.90, prefix caching enabled",
-        'Chat template kwargs default per model: {"enable_thinking": false}',
-        f"HF/vLLM parity per variant: N={parity_n}, max-abs<={parity_max_abs:g}, argmax>={parity_min_agreement:g}; HF device={parity_hf_device}",
-        f"Parity forwards total: {2 * parity_n * len(models) * len(variants)} (one HF and one vLLM per item)",
+def priority_plan(models, *, with_lora_arm=False):
+    primary = models[0]["model"]
+    secondary = models[1]["model"] if len(models) > 1 else "<E4B omitted>"
+    return [
+        {
+            "id": "P0",
+            "minutes": PRIORITY_MINUTES["P0"],
+            "enabled": True,
+            "work": f"{primary}: HF GPU bf16 reference -> process exit/free memory -> vLLM load -> exact-ID preflight/parity",
+        },
+        {
+            "id": "P1",
+            "minutes": PRIORITY_MINUTES["P1"],
+            "enabled": True,
+            "work": f"{primary} x min,cygnet,rules: calibration, dev, Cygnet; public last (diagnostic); select on dev only",
+        },
+        {
+            "id": "P2",
+            "minutes": PRIORITY_MINUTES["P2"],
+            "enabled": True,
+            "work": "200 serial HTTP latency reads for the best TWO P1 variants only",
+        },
+        {
+            "id": "P3",
+            "minutes": PRIORITY_MINUTES["P3"],
+            "enabled": len(models) > 1,
+            "work": f"{secondary} x min,cygnet,rules: reference/parity, then same collection",
+        },
+        {
+            "id": "P4",
+            "minutes": PRIORITY_MINUTES["P4"],
+            "enabled": with_lora_arm,
+            "work": "optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer (--with-lora-arm)",
+        },
     ]
-    decisions = sum(dataset["items"] for dataset in manifest["datasets"])
-    reads = sum(dataset["reads"] for dataset in manifest["datasets"])
-    for model in models:
-        lines.append(f"\n{model['model']}@{model['requested_revision']} -> out/{model['slug']}/")
-        lines.append(f"  Options: {json.dumps(options[model['model']])}")
-        for variant in variants:
-            lines.append(f"  Variant {variant} -> {variant}/")
-            for dataset in manifest["datasets"]:
-                lines.append(
-                    f"    {dataset['name']}: {dataset['records']} rows, "
-                    f"{dataset['items']} decisions, {dataset['reads']} model reads"
-                )
-            lines.append(
-                f"  Bulk total: {decisions} decisions, {reads} model reads; serial probe: 200"
-            )
+
+
+def plan(
+    models, manifest, concurrency, minutes, options, variants=FIXED_VARIANTS, *, with_lora_arm=False
+):
+    priorities = priority_plan(models, with_lora_arm=with_lora_arm)
+    lines = [
+        f"Prerequisites already installed: vllm=={VLLM_VERSION}; locally cached models/tokenizers (no automatic installs/downloads)",
+        f"Wall-clock cap: {minutes:g} minutes; finish the current priority, then mark later priorities skipped",
+        "Emergency deadline: each priority's fixed budget; cleanup/pack reserve <=30s",
+        "Time budget table (minutes; estimates, no GPU measurements):",
+        "Priority  Budget  Enabled  Work",
+    ]
+    for priority in priorities:
         lines.append(
-            f"  Model total: {len(variants) * decisions} decisions, "
-            f"{len(variants) * reads} model reads; serial probes: {len(variants) * 200}"
+            f"{priority['id']:8s} {priority['minutes']:6d}  {str(priority['enabled']):7s}  {priority['work']}"
         )
-    lines.extend(
-        [
-            f"\nAll models: {len(models) * len(variants) * decisions} bulk decisions, "
-            f"{len(models) * len(variants) * reads} bulk model reads + "
-            f"{len(models) * len(variants) * 200} serial HTTP requests",
-            "Health -> HF/vLLM parity -> bulk every dataset/variant -> Swift serial probe per variant -> stop vLLM",
-            "Output: parity.json, variant/{dataset.reads.jsonl,latency.json,swift.log}, vllm.log, env.txt, progress.json",
-            "Finally: out.tar.zst + out.tar.zst.sha256, including partial results on cap/failure",
-        ]
+    total = sum(p["minutes"] for p in priorities if p["enabled"]) + SETUP_AND_PACK_MINUTES
+    lines += [
+        f"Setup/pack: {SETUP_AND_PACK_MINUTES} minutes; enabled plan total: {total} minutes",
+        f"Bulk concurrency: {concurrency}; Prompt variants: {','.join(variants)}",
+        "Serve one model at a time: bf16, context=16384, GPU=0.90, prefix caching, --logprobs-mode raw_logits",
+        f"Fixed parity cohort: {COHORT.name}; 2/20/26 options, skew, typed item and two permutations",
+        f"Parity: identical prompt/canonical IDs, complete finite gather; P max-abs <=0.02; argmax >=0.98; centered log-mass <= {CENTERED_LOG_MASS_MAX_ABS_NATS:g} nats",
+        "Record HF and vLLM load times; parity failure aborts bulk with comparison_valid=false diagnostic artifact",
+    ]
+    for model in models:
+        lines.append(f"{model['model']}@{model['requested_revision']} -> out/{model['slug']}/")
+        lines.append(f"  Options: {json.dumps(options[model['model']])}")
+        for dataset in sorted(manifest["datasets"], key=lambda d: d["name"] == "jevbench_public"):
+            lines.append(
+                f"  {dataset['name']}: {dataset['items']} decisions, {dataset['reads']} model reads per variant"
+            )
+    decisions = sum(d["items"] for d in manifest["datasets"])
+    reads = sum(d["reads"] for d in manifest["datasets"])
+    lines.append(
+        f"All models: {len(models) * len(variants) * decisions} bulk decisions, {len(models) * len(variants) * reads} bulk model reads + 400 serial HTTP requests"
     )
+    lines.append(
+        "Output: HF references, parity.json, load_times.json, variant reads, top-two latency, selection, env.txt, progress.json; out.tar.zst + SHA256 includes partials"
+    )
+    lines.append(f"Per-model/variant inventory: {decisions} decisions, {reads} model reads")
     return "\n".join(lines)
 
 
@@ -210,7 +249,7 @@ def resolve_model(model: str, requested: str, output: Path, kwargs: dict) -> Non
     revision = HfApi().model_info(model, revision=requested).sha
     if not revision or not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("Hub did not resolve the requested revision to a commit SHA")
-    tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
+    tokenizer = AutoTokenizer.from_pretrained(model, revision=revision, local_files_only=True)
     messages = [
         {"role": "system", "content": "Answer with only the option letter."},
         {"role": "user", "content": "Choose: A. yes B. no"},
@@ -402,259 +441,442 @@ def require_free_ports(ports: tuple[int, ...]) -> None:
                 raise ValueError(f"port {port} is already in use; choose different ports") from exc
 
 
-def execute(
-    args: argparse.Namespace,
-    models: list[dict],
-    manifest: dict,
-    started: float,
-    options: dict,
-) -> int:
+def execute(args, models, manifest, started, options):
     if sys.platform != "linux":
         raise ValueError("live collection requires Linux; --dry-run works on CPU/Windows")
     if args.output.exists() and any(args.output.iterdir()):
         raise ValueError("output directory must be empty; use --output for a fresh run")
     args.output.mkdir(parents=True, exist_ok=True)
-    deadline = started + args.max_minutes * 60
-    reserve = min(30, args.max_minutes * 60 * 0.2)
-    supervisor = Supervisor(REPO, deadline, deadline - reserve)
+    cap = started + args.max_minutes * 60
+    supervisor = Supervisor(REPO, cap + 30, cap)
+    priorities = priority_plan(models, with_lora_arm=getattr(args, "with_lora_arm", False))
     state = {
         "started_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "max_minutes": args.max_minutes,
-        "cleanup_pack_reserve_s": reserve,
         "status": "running",
-        "current_step": "install",
+        "current_step": "preflight_environment",
         "finished_steps": [],
         "models": {},
-        "prompt_variants": args.prompt_variants,
+        "prompt_variants": list(FIXED_VARIANTS),
+        "comparison_valid": False,
+        "priorities": [
+            {
+                **p,
+                "status": "pending" if p["enabled"] else "skipped",
+                "skip_reason": None if p["enabled"] else "disabled",
+            }
+            for p in priorities
+        ],
     }
     marker = args.output / "progress.json"
-    gpu = "unavailable (install/startup interrupted)"
+    gpu = "unavailable (preflight/startup interrupted)"
+    backend_url = f"http://127.0.0.1:{args.vllm_port}"
+    active_model = None
 
-    def checkpoint(step: str | None = None) -> None:
+    def checkpoint(step=None):
         if step:
             state["finished_steps"].append(step)
         write_json(marker, state)
 
-    def begin(step: str) -> None:
+    def begin(step):
         supervisor.remaining()
         state["current_step"] = step
         checkpoint()
 
-    def interrupted(signum: int, frame: object) -> None:
+    def run(command, log, step):
+        begin(step)
+        supervisor.run(command, log)
+        checkpoint(step)
+
+    def reader_flags(model):
+        return [
+            "--backend",
+            "vllm",
+            "--vllm-url",
+            backend_url,
+            "--model",
+            model.get("served_model", model["model"]),
+            "--revision",
+            model.get("adapter_revision", model["revision"]),
+            "--tokenizer-model",
+            model["model"],
+            "--tokenizer-revision",
+            model["revision"],
+            "--chat-template-kwargs",
+            json.dumps(options[model["model"]]["chat_template_kwargs"]),
+            *(["--adapter-sha256", model["adapter_sha256"]] if model.get("adapter_sha256") else []),
+        ]
+
+    def start_model(model):
+        directory = args.output / model["slug"]
+        directory.mkdir(exist_ok=True)
+        path = directory / "parity.json"
+        write_json(
+            path,
+            {
+                "model": model["model"],
+                "complete": False,
+                "passed": False,
+                "comparison_valid": False,
+                "hf_load_s": None,
+                "vllm_load_s": None,
+                "sequence": "hf_reference_exit_then_vllm",
+            },
+        )
+        try:
+            prepare_model(model)
+        except BaseException as exc:
+            diagnostic = json.loads(path.read_text())
+            reference_path = directory / "hf_reference.json"
+            if reference_path.exists():
+                reference = json.loads(reference_path.read_text())
+                diagnostic["hf_load_s"] = reference.get("hf_load_s")
+            diagnostic.update(
+                passed=False,
+                comparison_valid=False,
+                runner_error=f"{type(exc).__name__}: {exc}",
+            )
+            write_json(path, diagnostic)
+            raise
+
+    def prepare_model(model):
+        nonlocal active_model
+        supervisor.stop()
+        active_model = None
+        directory = args.output / model["slug"]
+        directory.mkdir(exist_ok=True)
+        opts = options[model["model"]]
+        if "revision" not in model:
+            run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "_resolve",
+                    model["model"],
+                    model["requested_revision"],
+                    str(directory / "revision.json"),
+                    json.dumps(opts["chat_template_kwargs"]),
+                ],
+                directory / "resolve.log",
+                model["slug"] + "/resolve",
+            )
+            model["revision"] = json.loads((directory / "revision.json").read_text())["revision"]
+        state["models"][model["slug"]] = model.copy()
+        (directory / "env.txt").write_text(environment(model, opts, gpu), encoding="utf-8")
+        common = [
+            sys.executable,
+            str(REPO / "scripts/swift/parity.py"),
+            str(COHORT),
+            "--model",
+            model["model"],
+            "--revision",
+            model["revision"],
+            "--chat-template-kwargs",
+            json.dumps(opts["chat_template_kwargs"]),
+            "--prompt-variants",
+            *FIXED_VARIANTS,
+        ]
+        if model.get("lora_path"):
+            common += ["--lora-path", model["lora_path"], "--served-model", model["served_model"]]
+        # Blocking subprocess exit releases the HF model, allocator and CUDA
+        # context before vLLM is started; there is no concurrent GPU allocation.
+        run(
+            [
+                *common,
+                "--phase",
+                "reference",
+                "--hf-device",
+                "cuda",
+                "--dtype",
+                "bfloat16",
+                "--output",
+                str(directory / "hf_reference.json"),
+            ],
+            directory / "hf_reference.log",
+            model["slug"] + "/hf_reference",
+        )
+        reference = json.loads((directory / "hf_reference.json").read_text())
+        timings = {
+            "hf_load_s": reference["hf_load_s"],
+            "vllm_load_s": None,
+            "sequence": "hf_reference_exit_then_vllm",
+            "dtype": "bfloat16",
+            "device": "cuda",
+        }
+        write_json(directory / "load_times.json", timings)
+        begin(model["slug"] + "/vllm_health")
+        loaded = time.monotonic()
+        command = serve_command(model, args.vllm_port, opts)
+        if model.get("lora_path"):
+            command += [
+                "--enable-lora",
+                "--lora-modules",
+                model["served_model"] + "=" + model["lora_path"],
+            ]
+        try:
+            backend = supervisor.start(command, directory / "vllm.log")
+            supervisor.health(backend_url + "/health", backend, args.health_timeout)
+            timings["vllm_healthy"] = True
+        finally:
+            vllm_load_s = time.monotonic() - loaded
+            timings["vllm_load_s"] = vllm_load_s
+            write_json(directory / "load_times.json", timings)
+            path = directory / "parity.json"
+            diagnostic = json.loads(path.read_text())
+            diagnostic.update(hf_load_s=reference["hf_load_s"], vllm_load_s=vllm_load_s)
+            write_json(path, diagnostic)
+        checkpoint(state["current_step"])
+        path = directory / "parity.json"
+        try:
+            run(
+                [
+                    *common,
+                    "--phase",
+                    "compare",
+                    "--reference",
+                    str(directory / "hf_reference.json"),
+                    "--vllm-url",
+                    backend_url,
+                    "--output",
+                    str(path),
+                ],
+                directory / "parity.log",
+                model["slug"] + "/parity",
+            )
+        finally:
+            diagnostic = (
+                json.loads(path.read_text())
+                if path.exists()
+                else {"complete": False, "passed": False, "comparison_valid": False}
+            )
+            diagnostic.update(hf_load_s=reference["hf_load_s"], vllm_load_s=vllm_load_s)
+            diagnostic["comparison_valid"] = (
+                diagnostic.get("complete") is True
+                and diagnostic.get("passed") is True
+                and diagnostic.get("comparison_valid") is True
+            )
+            write_json(path, diagnostic)
+        if not diagnostic["comparison_valid"]:
+            raise RuntimeError(
+                "exact token-ID HF/vLLM preflight/parity failed; bulk collection aborted"
+            )
+        state["comparison_valid"] = True
+        active_model = model
+
+    def select_model(model):
+        from ayaka.swift.collect import load_reads
+        from ayaka.swift.policy import Policy
+        from scripts.swift.select_variant import assert_roles_isolated, select_variants
+
+        directory = args.output / model["slug"]
+        calibration, dev = [], []
+        for variant in FIXED_VARIANTS:
+            for target, name in ((calibration, "v2_calibration"), (dev, "v2_dev")):
+                target.extend(load_reads([directory / variant / (name + ".reads.jsonl")]))
+        begin(model["slug"] + "/select")
+        # Check all roles before excluding grouped diagnostics. Cygnet keeps
+        # its original split and never enters fitting or dev selection.
+        assert_roles_isolated(calibration, dev)
+        calibration = [r for r in calibration if r["readout"] != "grouped_approx"]
+        dev = [r for r in dev if r["readout"] != "grouped_approx"]
+        selection = select_variants(calibration, dev)
+        write_json(directory / "variant_selection.json", selection)
+        for variant, policy in selection["policies"].items():
+            Policy(**policy).save(directory / variant / "policy.json")
+        state["best_two_variants"] = sorted(
+            selection["variants"], key=lambda v: (-selection["variants"][v]["composite_A"], v)
+        )[:2]
+        checkpoint(state["current_step"])
+
+    def collect_model(model, *, select=False):
+        if active_model is not model:
+            start_model(model)
+        directory = args.output / model["slug"]
+        # Finish every eligible non-public read before opening the public arm.
+        datasets = sorted(manifest["datasets"], key=lambda d: DATASET_ORDER.index(d["name"]))
+        for dataset in datasets:
+            if select and dataset["name"] == "jevbench_public":
+                select_model(model)
+            for variant in FIXED_VARIANTS:
+                variant_directory = directory / variant
+                variant_directory.mkdir(exist_ok=True)
+                run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "ayaka.swift.collect",
+                        *dataset["paths"],
+                        "--output",
+                        str(variant_directory / (dataset["name"] + ".reads.jsonl")),
+                        "--prompt-variant",
+                        variant,
+                        *reader_flags(model),
+                        "--concurrency",
+                        str(args.concurrency),
+                        "--group-size",
+                        str(manifest["group_size"]),
+                        *(
+                            ["--diagnostic"]
+                            if dataset["name"] in ("jevbench_public", "cygnet_calibration")
+                            else []
+                        ),
+                    ],
+                    variant_directory / "collect.log",
+                    model["slug"] + "/" + variant + "/" + dataset["name"],
+                )
+                if dataset["name"] in ("jevbench_public", "cygnet_calibration"):
+                    write_json(
+                        variant_directory / (dataset["name"] + ".diagnostic.json"),
+                        {
+                            "role": "diagnostic",
+                            "used_for_fit_or_selection": False,
+                            "public": dataset["name"] == "jevbench_public",
+                        },
+                    )
+
+    def probe_best_two(model):
+        if active_model is not model or len(state.get("best_two_variants", [])) != 2:
+            raise RuntimeError("P2 requires P1's predeclared best-two selection")
+        public = next(d for d in manifest["datasets"] if d["name"] == "jevbench_public")
+        for variant in state["best_two_variants"]:
+            directory = args.output / model["slug"] / variant
+            begin(model["slug"] + "/" + variant + "/swift_health")
+            swift = supervisor.start(
+                [
+                    sys.executable,
+                    "-m",
+                    "ayaka.swift.server",
+                    "--prompt-variant",
+                    variant,
+                    *reader_flags(model),
+                    "--policy",
+                    str(directory / "policy.json"),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(args.swift_port),
+                    "--max-parallel",
+                    "1",
+                    "--group-size",
+                    str(manifest["group_size"]),
+                ],
+                directory / "swift.log",
+            )
+            try:
+                swift_url = f"http://127.0.0.1:{args.swift_port}"
+                supervisor.health(swift_url + "/health", swift, args.health_timeout)
+                checkpoint(state["current_step"])
+                run(
+                    [
+                        sys.executable,
+                        str(REPO / "scripts/swift/latency_probe.py"),
+                        *public["paths"],
+                        "--url",
+                        swift_url,
+                        "--output",
+                        str(directory / "latency.json"),
+                        "--model",
+                        model["model"],
+                        "--revision",
+                        model["revision"],
+                        "--prompt-variant",
+                        variant,
+                        "--reads",
+                        "200",
+                    ],
+                    directory / "latency.log",
+                    model["slug"] + "/" + variant + "/latency",
+                )
+            finally:
+                supervisor.stop([swift])
+
+    def interrupted(signum, frame):
         raise KeyboardInterrupt(f"received signal {signum}")
 
     previous = signal.signal(signal.SIGTERM, interrupted)
     code = 0
     try:
         checkpoint()
-        for model in models:
-            directory = args.output / model["slug"]
-            directory.mkdir()
-            (directory / "env.txt").write_text(environment(model, options[model["model"]], gpu))
-            (directory / "vllm.log").touch()
         require_free_ports((args.vllm_port, args.swift_port))
+        # Preconditions are read-only. The runner never installs dependencies.
+        if importlib.metadata.version("vllm") != VLLM_VERSION:
+            raise RuntimeError("preflight requires installed vLLM 0.30.0")
         supervisor.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,driver_version,memory.total",
-                "--format=csv,noheader",
-            ],
+            ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
             args.output / "gpu.txt",
         )
         gpu = (args.output / "gpu.txt").read_text()
-        supervisor.run(
-            [sys.executable, "-m", "pip", "install", f"vllm=={VLLM_VERSION}"],
-            args.output / "install.log",
-        )
-        supervisor.run(
-            [sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."],
-            args.output / "install.log",
-        )
-        if importlib.metadata.version("vllm") != VLLM_VERSION:
-            raise RuntimeError("installed vLLM version differs from requested pin")
-        checkpoint("install")
-        for model in models:
-            directory = args.output / model["slug"]
-            model_options = options[model["model"]]
-            kwargs = json.dumps(model_options["chat_template_kwargs"])
-            try:
-                begin(model["slug"] + "/resolve")
-                supervisor.run(
-                    [
-                        sys.executable,
-                        str(Path(__file__).resolve()),
-                        "_resolve",
-                        model["model"],
-                        model["requested_revision"],
-                        str(directory / "revision.json"),
-                        kwargs,
-                    ],
-                    directory / "resolve.log",
+        checkpoint("preflight_environment")
+        for priority in state["priorities"]:
+            if not priority["enabled"]:
+                continue
+            if time.monotonic() >= cap:
+                state["status"] = "time_cap"
+                code = 124
+                break
+            priority["status"] = "running"
+            priority["started_elapsed_s"] = time.monotonic() - started
+            # Soft global cap is checked at boundaries. A hung priority has a
+            # distinct fixed emergency bound and leaves invalid partial output.
+            supervisor.work_deadline = time.monotonic() + priority["minutes"] * 60
+            supervisor.deadline = supervisor.work_deadline + 30
+            checkpoint()
+            if priority["id"] == "P0":
+                start_model(models[0])
+            elif priority["id"] == "P1":
+                collect_model(models[0], select=True)
+            elif priority["id"] == "P2":
+                probe_best_two(models[0])
+            elif priority["id"] == "P3":
+                collect_model(models[1])
+            else:
+                arm = {
+                    **models[0],
+                    "slug": "ayaka_large_lora",
+                    "lora_path": str(args.lora_path),
+                    "served_model": "ayaka-large-swift",
+                    "adapter_revision": args.lora_revision,
+                }
+                config = json.loads(
+                    (args.lora_path / "adapter_config.json").read_text(encoding="utf-8")
                 )
-                resolved = json.loads((directory / "revision.json").read_text())
-                model["revision"] = resolved["revision"]
-                state["models"][model["slug"]] = resolved
-                (directory / "env.txt").write_text(environment(model, model_options, gpu))
-                checkpoint(state["current_step"])
-                begin(model["slug"] + "/vllm_health")
-                backend = supervisor.start(
-                    serve_command(model, args.vllm_port, model_options), directory / "vllm.log"
-                )
-                backend_url = f"http://127.0.0.1:{args.vllm_port}"
-                supervisor.health(backend_url + "/health", backend, args.health_timeout)
-                checkpoint(state["current_step"])
-                begin(model["slug"] + "/parity")
-                supervisor.run(
-                    [
-                        sys.executable,
-                        str(REPO / "scripts/swift/parity.py"),
-                        *dict.fromkeys(
-                            path for dataset in manifest["datasets"] for path in dataset["paths"]
-                        ),
-                        "--model",
-                        model["model"],
-                        "--revision",
-                        model["revision"],
-                        "--vllm-url",
-                        backend_url,
-                        "--chat-template-kwargs",
-                        kwargs,
-                        "--n",
-                        str(getattr(args, "parity_n", 50)),
-                        "--max-abs",
-                        str(getattr(args, "parity_max_abs", 0.02)),
-                        "--min-argmax-agreement",
-                        str(getattr(args, "parity_min_agreement", 0.98)),
-                        "--hf-device",
-                        getattr(args, "parity_hf_device", "cpu"),
-                        "--output",
-                        str(directory / "parity.json"),
-                        "--prompt-variants",
-                        *args.prompt_variants,
-                    ],
-                    directory / "parity.log",
-                )
-                parity = json.loads((directory / "parity.json").read_text())
-                if parity.get("complete") is not True or parity.get("passed") is not True:
-                    raise RuntimeError("HF/vLLM parity failed; collection aborted")
-                checkpoint(state["current_step"])
-                for variant in args.prompt_variants:
-                    variant_directory = directory / variant
-                    variant_directory.mkdir()
-                    for dataset in manifest["datasets"]:
-                        begin(model["slug"] + "/" + variant + "/" + dataset["name"])
-                        supervisor.run(
-                            [
-                                sys.executable,
-                                "-m",
-                                "ayaka.swift.collect",
-                                *dataset["paths"],
-                                "--output",
-                                str(variant_directory / (dataset["name"] + ".reads.jsonl")),
-                                "--prompt-variant",
-                                variant,
-                                "--backend",
-                                "vllm",
-                                "--vllm-url",
-                                backend_url,
-                                "--model",
-                                model["model"],
-                                "--revision",
-                                model["revision"],
-                                "--concurrency",
-                                str(args.concurrency),
-                                "--chat-template-kwargs",
-                                kwargs,
-                                "--group-size",
-                                str(manifest["group_size"]),
-                            ],
-                            variant_directory / "collect.log",
-                        )
-                        checkpoint(state["current_step"])
-                for variant in args.prompt_variants:
-                    variant_directory = directory / variant
-                    begin(model["slug"] + "/" + variant + "/swift_health")
-                    swift = supervisor.start(
-                        [
-                            sys.executable,
-                            "-m",
-                            "ayaka.swift.server",
-                            "--prompt-variant",
-                            variant,
-                            "--backend",
-                            "vllm",
-                            "--vllm-url",
-                            backend_url,
-                            "--model",
-                            model["model"],
-                            "--chat-template-kwargs",
-                            kwargs,
-                            "--host",
-                            "127.0.0.1",
-                            "--port",
-                            str(args.swift_port),
-                            "--max-parallel",
-                            "1",
-                            "--group-size",
-                            str(manifest["group_size"]),
-                        ],
-                        variant_directory / "swift.log",
+                if config.get("base_model_name_or_path") != arm["model"] or config.get(
+                    "revision"
+                ) not in (None, arm["revision"]):
+                    raise ValueError(
+                        "LoRA adapter base/revision differs from the pinned comparison base"
                     )
-                    swift_url = f"http://127.0.0.1:{args.swift_port}"
-                    supervisor.health(swift_url + "/health", swift, args.health_timeout)
-                    checkpoint(state["current_step"])
-                    public = next(d for d in manifest["datasets"] if d["name"] == "jevbench_public")
-                    begin(model["slug"] + "/" + variant + "/latency")
-                    supervisor.run(
-                        [
-                            sys.executable,
-                            str(REPO / "scripts/swift/latency_probe.py"),
-                            *public["paths"],
-                            "--url",
-                            swift_url,
-                            "--output",
-                            str(variant_directory / "latency.json"),
-                            "--model",
-                            model["model"],
-                            "--revision",
-                            model["revision"],
-                            "--prompt-variant",
-                            variant,
-                            "--reads",
-                            "200",
-                        ],
-                        variant_directory / "latency.log",
-                    )
-                    checkpoint(state["current_step"])
-                    supervisor.stop([swift])
-            except (RuntimeError, ValueError) as exc:
-                state.setdefault("errors", []).append(
-                    {"step": state["current_step"], "error": str(exc)}
+                arm["adapter_sha256"] = fingerprint(
+                    {
+                        p.relative_to(args.lora_path).as_posix(): sha256(p)
+                        for p in sorted(args.lora_path.rglob("*"))
+                        if p.is_file()
+                    }
                 )
-                code = 1
-                checkpoint()
-            finally:
-                supervisor.stop()
-                checkpoint(model["slug"] + "/servers_stopped")
-        state["status"] = "complete" if code == 0 else "partial_failure"
+                collect_model(arm)
+            priority.update(status="complete", finished_elapsed_s=time.monotonic() - started)
+            checkpoint(priority["id"])
+        if state["status"] == "running":
+            state["status"] = "complete"
     except DeadlineReached as exc:
-        state.update(status="time_cap", error=str(exc))
+        state.update(status="priority_timeout", error=str(exc), comparison_valid=False)
         code = 124
     except KeyboardInterrupt as exc:
-        state.update(status="interrupted", error=str(exc))
+        state.update(status="interrupted", error=str(exc), comparison_valid=False)
         code = 130
     except Exception as exc:
-        state.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+        state.update(status="failed", error=f"{type(exc).__name__}: {exc}", comparison_valid=False)
         code = 1
     finally:
-        # Ignore further TERM/INT during the reserved, bounded cleanup/packing phase.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         old_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        supervisor.deadline = time.monotonic() + 30
         supervisor.stop()
-        for model in models:
-            directory = args.output / model["slug"]
-            if directory.exists():
-                (directory / "env.txt").write_text(environment(model, options[model["model"]], gpu))
+        for priority in state["priorities"]:
+            if priority["status"] == "pending":
+                priority.update(status="skipped", skip_reason=state["status"])
+            elif priority["status"] == "running":
+                priority["status"] = "failed"
         state.update(
             elapsed_s=time.monotonic() - started,
             stopped_at_step=state["current_step"],
@@ -662,8 +884,7 @@ def execute(
         )
         checkpoint()
         write_json(args.output / "inputs.manifest.json", manifest)
-        # Supervise compression too, so the reserve is part of the hard cap.
-        supervisor.work_deadline = deadline
+        supervisor.work_deadline = supervisor.deadline
         try:
             supervisor.run(
                 [
@@ -716,12 +937,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--vllm-port", type=int, default=8000)
     parser.add_argument("--swift-port", type=int, default=8009)
     parser.add_argument("--health-timeout", type=float, default=600)
-    parser.add_argument("--parity-n", type=int, default=50)
-    parser.add_argument("--parity-max-abs", type=float, default=0.02)
-    parser.add_argument("--parity-min-agreement", type=float, default=0.98)
+    parser.add_argument("--with-lora-arm", action="store_true")
     parser.add_argument(
-        "--parity-hf-device", default="cpu", help="CPU avoids the active vLLM GPU allocation"
+        "--lora-path", type=Path, help="already cached ayaka-large adapter directory"
     )
+    parser.add_argument("--lora-revision", help="immutable adapter receipt SHA")
     args = parser.parse_args(argv)
     try:
         if (
@@ -734,13 +954,21 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("concurrency, max minutes, and health timeout must be positive")
         if args.swift_port == args.vllm_port:
             raise ValueError("Swift and vLLM ports must differ")
+        if tuple(args.prompt_variants) != FIXED_VARIANTS:
+            raise ValueError("the minimal plan fixes prompt variants to min,cygnet,rules")
         if (
-            args.parity_n < 1
-            or not math.isfinite(args.parity_max_abs)
-            or args.parity_max_abs < 0
-            or not 0 <= args.parity_min_agreement <= 1
+            args.with_lora_arm
+            and not args.dry_run
+            and (
+                not args.lora_path
+                or not args.lora_path.is_dir()
+                or not args.lora_revision
+                or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", args.lora_revision)
+            )
         ):
-            raise ValueError("invalid parity count or thresholds")
+            raise ValueError(
+                "LoRA arm needs a locally cached --lora-path and pinned --lora-revision"
+            )
         if not all(1 <= port <= 65535 for port in (args.swift_port, args.vllm_port)):
             raise ValueError("ports must be in 1..65535")
         if args.archive.resolve().is_relative_to(args.output.resolve()):
@@ -750,8 +978,14 @@ def main(argv: list[str] | None = None) -> int:
         if not args.dry_run:
             args.archive.parent.mkdir(parents=True, exist_ok=True)
         models = model_specs(args.model, dry_run=args.dry_run)
+        if len(models) != 2:
+            raise ValueError("fixed plan requires primary 12B and secondary E4B model slots")
+        if tuple(model["model"] for model in models) != FIXED_MODELS:
+            raise ValueError("fixed plan model slots are gemma-4-12B-it then gemma-4-E4B-it")
         options = model_options(args.model_options, models)
         manifest, _ = inventory(REPO, args.manifest)
+        if {dataset["name"] for dataset in manifest["datasets"]} != set(DATASET_ORDER):
+            raise ValueError("fixed plan requires calibration, dev, Cygnet and public datasets")
         if not any(
             d["name"] == "jevbench_public" and d["items"] >= 200 for d in manifest["datasets"]
         ):
@@ -766,10 +1000,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.max_minutes,
                 options,
                 args.prompt_variants,
-                parity_n=args.parity_n,
-                parity_max_abs=args.parity_max_abs,
-                parity_min_agreement=args.parity_min_agreement,
-                parity_hf_device=args.parity_hf_device,
+                with_lora_arm=args.with_lora_arm,
             ),
             flush=True,
         )

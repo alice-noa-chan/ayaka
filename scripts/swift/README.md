@@ -1,294 +1,166 @@
-# Swift GPU read collection
+# Swift collection and exact read receipts
 
-This runner targets Ubuntu, CUDA, Python 3.11, and one 48 GB GPU. It installs
-`vllm==0.30.0`, then `pip install --no-deps -e .`: Swift's serving and collection
-paths use the standard library, and vLLM supplies torch/transformers. Ayaka's
-training extras and PEFT are unnecessary here. Run inside a fresh virtualenv.
-Nothing in a dry run installs packages, contacts the Hub, or loads a GPU model.
-
-## Prepare inputs locally
-
-From the repository root, with no downloads:
+The live runner targets Linux, Python 3.11 and one GPU. Dependencies, model
+weights, tokenizers and any optional adapter must already be available. It
+checks installed `vllm==0.30.0`; it never runs pip or downloads a tokenizer.
+`--dry-run` inventories inputs and prints the fixed plan without GPU, model
+loading, subprocesses or network calls.
 
 ```powershell
-python scripts/swift/pack_inputs.py
 python scripts/swift/gpu_runner.py --dry-run
+python scripts/swift/pack_inputs.py
 ```
 
-The packer writes `scripts/swift/inputs.tar.gz` and its `.sha256`. Its explicit
-[manifest](manifest.json) includes only v2 calibration/dev, the vendored Cygnet
-calibration data and notices, and all 231 JevBench public items and their LICENSE.
-The v2 `test.jsonl` stays unopened; the packer refuses any `test.jsonl` input.
-It stores normalized tar metadata, gzip mtime=0, sorted entries, input hashes,
-and an exact decision/read inventory. Identical inputs produce identical bytes.
+The input packer uses the explicit [manifest](manifest.json), refuses
+`test.jsonl`, and preserves input hashes and deterministic archive metadata.
+Transfer code and the input archive to the intended host yourself. The stored
+[parity cohort](parity_cohort.jsonl) travels with the repository code.
 
-If the repository's JevBench copy is incomplete, pass
-`--jevbench-dir PATH_TO_AUDIT_CLONE_PUBLIC_DIRECTORY`; that directory must contain
-`easy.jsonl`, `hard.jsonl`, `original.jsonl`, and `LICENSE`, totaling exactly 231
-items. The packer places them at the canonical repository paths in the archive.
-It never scans other audit-clone datasets. Cygnet's 241 generated items are copied
-unchanged from commit `3cf591c692dec649f7c134449814610307c7bb3a`; see the vendored
-[attribution](../../ayaka/swift/data/cygnet_ATTRIBUTION.md) and
-[MIT license](../../ayaka/swift/data/cygnet_LICENSE).
-
-Transfer the repository code and this input archive to the GPU host yourself.
-The input archive contains data and a generated manifest, not repository source,
-model weights, or the test set. Extract it **at the repository root**:
-
-```bash
-sha256sum -c scripts/swift/inputs.tar.gz.sha256
-tar -xzf scripts/swift/inputs.tar.gz
-python3.11 -m venv .venv
-source .venv/bin/activate
-```
-
-## Run on the GPU host
-
-Obtain access to any gated models beforehand and set `HF_TOKEN` on the GPU host
-if needed. Secrets are not written to `env.txt`. Supply the E4B revision
-explicitly; there is no silent `main` fallback:
+## Fixed priorities and budgets
 
 ```bash
 export SWIFT_GEMMA_E4B_REVISION=FULL_COMMIT_SHA
-export SWIFT_MAX_MINUTES=75
 bash scripts/swift/collect_gpu.sh --dry-run
-bash scripts/swift/collect_gpu.sh --prompt-variants min,cygnet,rules
+bash scripts/swift/collect_gpu.sh --max-minutes 75
 ```
 
-The default models are:
+| Priority | Minutes | Work |
+| --- | ---: | --- |
+| P0 | 10 | 12B HF GPU bf16 reference; exit/free GPU memory; vLLM load and exact-ID parity |
+| P1 | 35 | gemma-4-12B-it x min,cygnet,rules: calibration, dev, Cygnet; select on dev; public diagnostic last |
+| P2 | 5 | 200 serial HTTP requests for each of P1's best two variants |
+| P3 | 20 | E4B x the same variants/datasets, with its own sequential HF/vLLM parity |
+| P4 | 15 | Optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer |
+| Setup/pack | 5 | Environment preflight and result archive |
 
-| Model | Requested revision |
-| --- | --- |
-| `google/gemma-4-12B-it` | `707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7` |
-| `google/gemma-4-E4B-it` | `SWIFT_GEMMA_E4B_REVISION` |
+These are planning estimates, not measured throughput. The default enabled
+plan totals 75 minutes; enabling P4 gives 90 minutes. The global cap is checked
+at priority boundaries: finish the current priority, then mark later priorities
+`skipped`. A stuck priority has a separate emergency timeout equal to its table
+budget. That timeout keeps diagnostic partials and aborts the run. Cleanup and
+packing have a separate bounded 30-second reserve, so the cap is a boundary
+stop rule rather than a promise to kill an active priority at that instant.
 
-Qwen3.5-4B is already measured on the board as frozen SemIf and is excluded
-from the defaults. It can still be requested explicitly with `--model`.
+The primary pin is `google/gemma-4-12B-it` at
+`707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`; E4B needs an explicit revision.
+The variant set is fixed to `min,cygnet,rules`. Models run alone in bf16 with
+context 16384, GPU utilization 0.90 and prefix caching. Extra server arguments
+cannot override the pinned tokenizer, revisions, dtype, context, logits mode,
+server name or address. Chat kwargs default to `{"enable_thinking": false}`.
 
-Repeat `--model MODEL@REVISION` to replace this list. SHA, tag, or branch inputs
-are resolved once through the Hub on the GPU host. Both weights and tokenizer
-are then served at the resolved immutable commit; each read row records `model`
-and `revision`, plus `prompt_variant`. Dry runs leave unspecified pins visibly unresolved and require
-no Hub access.
+P4 is enabled only by `--with-lora-arm`, with a cached `--lora-path` and pinned
+`--lora-revision`. The runner checks adapter base/revision metadata, hashes local
+adapter files, reads an HF+PEFT reference, and serves the adapter with vLLM LoRA.
+PEFT must already be installed for that arm. The receipt records adapter and
+base-tokenizer provenance. This compares a native letter weight arm on the same
+serving base; it does not reproduce ayaka-large's published hybrid system.
 
-Each model runs alone with bf16, context length 16,384, GPU memory utilization
-0.90, and prefix caching enabled. The server must use
-`--logprobs-mode processed_logprobs --max-logprobs 26`; the runner supplies
-these flags and refuses overrides. The supervisor waits for `/health`, runs
-HF/vLLM parity for every selected prompt variant, then collects
-every manifest dataset once per prompt variant with
-`python -m ayaka.swift.collect --concurrency 16 --prompt-variant VARIANT`.
-It reuses that vLLM server and its prefix cache across all bulk collections,
-then starts a Swift HTTP server for each variant's serial probe (200 requests
-each). Each Swift server stops before the next probe; the vLLM process group,
-including GPU workers, stops before the next model.
-See [vLLM's pinned serving arguments](https://docs.vllm.ai/en/v0.30.0/cli/serve/).
+## Canonical raw readout
 
-Gemma and Qwen default to `chat_template_kwargs={"enable_thinking":false}`.
-[Qwen3.5-4B's template](https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/chat_template.jinja)
-uses that flag to place an empty, closed `<think>` block in the generation
-prefix. The runner verifies this behavior against the **resolved revision's**
-tokenizer before serving Qwen and records the rendered prefix/verification in
-`revision.json`. For other models, `--model-options options.json` supports
-per-model switches and additional vLLM options:
+`canonical_letter_raw` is the raw logit of one predeclared canonical token per
+letter at the first assistant position. The client renders the pinned model's
+chat template, then requires appending each letter to add exactly one distinct
+token without changing the prefix. It lazily loads only a tokenizer through
+transformers with `local_files_only=True`, cached per model/revision.
 
-```json
-{
-  "Qwen/Qwen3.5-4B": {
-    "chat_template_kwargs": {"enable_thinking": false},
-    "vllm_args": []
-  }
-}
-```
+The grammar-free vLLM request uses `logprobs=true`, `logprob_token_ids`,
+`return_tokens_as_token_ids=true`, `return_token_ids=true`, `max_tokens=1` and
+`temperature=0`. The server runs `--logprobs-mode raw_logits`. Field names and
+`token_id:N` strings were checked against the pinned source described in the
+[source audit](../../docs/experiments/V2_VLLM_READ_AUDIT_2026-10-04.md).
 
-Additional arguments cannot override the required revision, dtype, context,
-memory, prefix-cache, address, or model-name settings. Other useful arguments
-are `--prompt-variants min,cygnet,rules` (default; any distinct subset allowed),
-`--concurrency N`, `--vllm-port`, `--swift-port`, `--health-timeout SECONDS`,
-`--manifest PATH`, `--output PATH`, and `--archive PATH`. Live output must be an
-empty directory. The lower-level collector resumes only exact bindings and
-preflights the entire requested input before making any reader call. Changed
-inputs, candidate order, targets, splits, model/revision or runtime recipe are
-errors; duplicate IDs and legacy rows without bindings are refused.
+The wire key `logprob` contains logits in this mode. Never exponentiate an
+unshifted value as a probability. Normalize the complete candidate logits with
+a shifted softmax, then apply policy. Every requested token must appear exactly
+once, be finite and strictly exceed -9999; floor hits are clipped reads and are
+rejected. Only an extra sampled token can be ignored. The client also verifies
+returned server prompt token IDs against its own input. All 26 letters fit one
+request; grouping begins only above 26 options.
 
-## Canonical readout and parity gate
+`swift_canonical_tokens_v2` receipts bind model/revision, tokenizer revision,
+runtime recipe, actual prompt IDs/hashes, canonical ID map/hash, rendered input,
+ordered labels, targets, original split and case/lineage provenance. The Swift
+read index validates record and binding hashes and gathered logits/probabilities.
+It uses the shared fingerprint convention; grouped diagnostics keep a separate
+contract from `read_artifact.make_binding`. Hashes detect changed receipts and
+inputs; they do not attest checkpoint execution. Legacy receipts require
+recollection for strict use. Cache reuse preflights the complete requested input
+before starting model reads.
 
-`canonical_letter` means softmax over one canonical token per option letter at
-the assistant answer position. HF derives each ID by tokenizing the actual
-chat-template-rendered prompt plus that letter; it requires exactly one appended
-token. Vocabulary alias scanning is available only with HF `--readout alias_sum`
-for diagnostics. vLLM accepts only exact letter token strings and records/rejects
-letter aliases. It requests `top_logprobs=min(20, number_of_letters)` and requires
-every letter to be present. Missing mass is an error, including 21–26 letter
-reads whose top-20 response cannot cover all candidates.
+## Parity gate
 
-`scripts/swift/parity.py` reads the same rendered messages with HF and vLLM,
-reporting maximum/mean absolute probability difference and argmax agreement.
-The runner uses 50 single-pass items per variant, maximum difference ≤0.02 and
-agreement ≥0.98. Configure `--parity-n`, `--parity-max-abs`,
-`--parity-min-agreement` and `--parity-hf-device`; failure aborts that model's
-collection and still packs the partial results, including `parity.json` and
-`parity.log`. HF defaults to CPU/bf16 so it does not compete with the active
-vLLM GPU allocation; the host needs RAM for the reference model. This gate
-requires actual GPU-host verification; CPU fixtures do not establish parity.
+The [deterministic builder](build_parity_cohort.py) derives seven stored fixtures
+from non-public calibration data only: 2, 20 and 26 options, an explicitly skewed
+case, a typed score case, and two permutations of the same 26-option item.
+Added distractors are marked synthetic; this cohort tests tokenization/kernel
+agreement and is not an accuracy benchmark. Rebuild explicitly with
+`python scripts/swift/build_parity_cohort.py`; the runner never regenerates it.
 
-Swift uses the shared `read_artifact.fingerprint` and `resolve_target`, but its
-`swift_letter_messages_v1` binding is intentionally distinct from the native
-contract. `make_binding`/`ReadIndex` require raw logits, actual input token IDs,
-and tokenizer fingerprints, which the processed-logprob vLLM HTTP API does not
-provide; grouped reads also exceed the native contract's 26-candidate limit.
-The Swift equivalent binds model ID/revision, backend/readout/logprobs recipe,
-prompt variant/state format, rendered messages, ordered labels, state, target,
-split and case lineage. It also hashes the reader/prompt/grouping implementations.
-Grouped bindings include the deterministic initial messages; each actual pass,
-including the adaptive winner pass, records a message/label binding derived from
-the parent recipe. These hashes bind declared content and do not attest server
-execution or hash the checkpoint weights.
+Predeclared bf16 thresholds in [parity.py](parity.py) are P max-abs <=0.02,
+argmax agreement >=0.98 and centered log-mass max-abs <=0.05 nats. For each item,
+compare identical prompt token IDs/hashes and canonical IDs, complete finite
+raw gathers, and max abs of `(logit_i - mean(logit))` differences. Centering
+ignores a common offset while retaining errors in tiny-probability tails.
+The CPU R14 fixture (B=1e-40 versus 1e-9) fails this gate despite negligible P
+error and identical argmax. This tolerance is fixed before GPU observations.
 
-## Policy fitting and reports
+The HF reference runs first on the same GPU in bf16 in a subprocess. Only after
+that child exits, releasing model/allocator/context memory, does vLLM start.
+`load_times.json` and `parity.json` record HF load time and vLLM startup-to-health
+time. Any parity failure aborts bulk and preserves an artifact with
+`comparison_valid:false`, plus per-item samples/error and logs. CPU fakes do
+not establish real model/kernel parity.
 
-`Policy()` defaults to no commitment (`commit_margin=None`). Legacy JSON with
-`noul_commit=true` and no margin loads explicitly as margin 0. Fit accepts only
-explicit non-public `split="calibration"` rows. `--diagnostic` (or legacy
-`--allow-public`) permits exploratory fitting and saves `promotable:false`.
-Collection preserves the original split, including Cygnet's `private` split.
-Canonical clusters use metadata source lineage/case-facts hash; public items
-preserve `group` or item ID, and Cygnet preserves item ID.
+Reference rows and comparison samples are saved atomically during the run,
+with `comparison_valid:false` until every variant passes. Missing wire values,
+nonfinite gathers, interruption and model/server startup failures retain the
+completed samples and an invalid diagnostic. Failed startup attempts record
+elapsed load time when available; vLLM is never started after an HF failure.
 
-Explicit `gold_distribution` targets take precedence over hard argmax hints,
-with strict label/mass validation; hard and distribution-target counts are
-recorded. Canonical source booleans are converted to numeric 0/1 at adaptation.
-Swift retains candidate log masses for stable temperature scaling and CE with
-the same semantics as `read_artifact.logspace_nll`; that helper itself requires
-a native raw receipt. Legacy probability zeros with positive target mass have
-infinite NLL, reported as `NLL:null` plus `nll_infinite_n`, without a floor.
+## Fit and select guards
 
-Evaluation reports raw / temperatures / temperatures+commit(margin 0) / fitted
-arms, each with typed competence and emitted-probability NLL, class-summed Brier
-and ECE per primitive. These all-item probability diagnostics are separate from
-JevBench's tier/scoring calibration axes. Score ordinal-value nMAE/chance/CC
-diagnostics are separate from JevBench's position metric; the HTTP API requires
-contiguous integer ordinals. Positive effective reasoning budgets receive 422
-before inference; omitted settings, off and explicit zero budgets are accepted.
+Strict fitting accepts bound, non-public `split="calibration"` reads. Selector
+roles must match the recorded calibration/dev split exactly; public, train,
+test, unknown and conflicting metadata splits are rejected. Source-namespaced
+case/lineage and rendered-message/token hash overlap across all variants are
+checked before fitting. Cygnet retains its original split and is collected
+separately as a diagnostic; it is never renamed dev or used in selection.
+Public and Cygnet rows are explicitly marked `diagnostic:true` in their receipts.
+Grouped approximation rows are reported separately and excluded from strict
+single-pass selection after the full-role overlap check.
 
-Hierarchical reads record `readout="grouped_approx"`, pass counts and aggregate
-token usage. Evaluation and fitting report them separately and exclude them
-from single-pass metrics by default. Bootstrap helpers and the prompt selector
-resample complete `cluster_id` groups across types/languages, stratifying by
-primitive coverage; public items are independent singletons.
+Unbound, legacy or diagnostic fitting inputs require `--exploratory`; policies
+and selector reports then carry `promotable:false`. Legacy `--diagnostic` and
+`--allow-public` fitting overrides also require that explicit flag. Selector
+exploration still enforces role/public/isolation rules and needs rendered input
+hashes to check overlap. Fresh bound reads need nonempty model/revisions,
+tokenizer revision, runtime, readout and prompt variant with valid Swift hashes.
 
-## Counts and latency
+P1 fits each variant on v2 calibration and ranks it on matching v2 dev. It uses
+local composite A, input-only cost and a declared estimated speed axis, with
+paired whole-case bootstrap (B=2000, seed=15). A confidence interval containing
+zero favors fewer input tokens. P2 probes only the two highest-A variants;
+latency reports do not retroactively refit the policies. The public accuracy
+arm runs after the policy/variant selection is frozen.
 
-The current default input inventory, **per model per variant**, is:
+## Outputs and counts
 
-| Dataset | JSONL rows | Decisions | One-position model reads |
-| --- | ---: | ---: | ---: |
-| v2 calibration | 1,472 | 1,824 | 2,208 |
-| v2 dev | 1,472 | 1,824 | 2,208 |
-| Cygnet calibration | 241 | 241 | 241 |
-| JevBench public | 231 | 231 | 231 |
-| Bulk total | 3,416 | 4,120 | 4,888 |
+The manifest currently gives 4120 decisions / 4888 model reads per model/variant,
+including grouped reads. Both models and three variants total 24720 bulk
+decisions / 29328 model reads. P2 adds 400 serial requests; parity adds 84
+forwards (7 items x 3 variants x HF/vLLM x 2 models). Optional P4 adds its own
+bulk/parity work. Dry-run output recomputes the inventory and prints priorities.
 
-Canonical rows can contain multiple questions; option sets above 26 require
-hierarchical reads, so model-read counts exceed decision counts. Three variants
-give **12,360 bulk decisions / 14,664 model reads + 600 serial requests per model**.
-Both default models total **24,720 bulk decisions / 29,328 model reads**, plus
-**1,200 serial Swift HTTP requests** (200 extra model reads per model/variant
-with these public items), or **30,528 model reads including probes**. The default
-parity gate adds **600 forwards** (300 HF, 300 vLLM), for 31,128 total forwards.
-Dry runs recompute these counts from the manifest, rather than hard-coding them.
+The latency probe shuffles the public items deterministically, requests one
+question at a time through Swift HTTP, and records raw p50/p95 seconds with no
+bulk traffic. Prefix caching remains enabled after collection, so these are
+warm-cache measurements. Bulk `latency_s` must not supply the Speed axis.
 
-The probe deterministically shuffles the 231 public items with seed 20261004 and
-uses 200 distinct items, one HTTP request and one question at a time, through
-`/v1/systemone`. No bulk requests are active then. It includes Swift HTTP,
-prompt rendering, vLLM, and response transfer in the measured seconds. It runs
-after bulk collection, with prefix caching enabled and no artificial warmups;
-this is a warm-cache measurement, and that context matters when comparing Speed.
-
-Each variant's `latency.json` contains its variant, each raw sample, raw `p50_s`/`p95_s`, completed count,
-and `complete`. Quantiles use the same order-statistic convention as the local
-JevBench evaluator. For JevBench's self-hosted Speed estimate, first adjust each
-quantile with `seconds * 2 + 0.15`, then average the scores
-`100 - 20 * log10(adjusted_seconds / 0.1)`. Bulk row `latency_s` measures backend
-timing under load and must **not** be used for Speed. A partial probe's quantiles
-are clearly marked incomplete.
-
-## Choose the prompt on non-public dev
-
-`min` preserves the original messages byte for byte and remains the serving
-default. `cygnet` reproduces Cygnet's MIT system scaffold and measured user
-layout (state, instructions, Options, letter-only answer suffix); Noul remains
-false-first. `rules` adds a short system scaffold for governing definitions,
-exceptions/amendments, effective dates, arithmetic and chained inference. The
-CPU whitespace proxy measures 42 extra tokens (budget: 80); real model
-token counts come from collected `input_tokens`, including grouped passes.
-
-Run separately for each model after copying results back:
-
-```bash
-M=out/google_gemma-4-12B-it
-python scripts/swift/select_variant.py \
-  --calibration "$M"/{min,cygnet,rules}/v2_calibration.reads.jsonl \
-  --dev "$M"/{min,cygnet,rules}/{v2_dev,cygnet_calibration}.reads.jsonl \
-  --latency "$M"/{min,cygnet,rules}/latency.json \
-  --output "$M/variant_selection.json" --policy-dir "$M/policies"
-```
-
-The existing fit runs separately on each variant's **v2 calibration** reads.
-Evaluation uses the SAME **v2 dev + 241 Cygnet generated items** for every
-variant (2,065 input decisions per variant, before grouped-read exclusion).
-The selector excludes grouped approximations from these single-pass comparisons.
-It refuses public or unmarked
-reads, duplicate/missing rows, changed gold/type/case metadata, overlapping
-calibration/dev IDs and mixed models/revisions. Do not pass public accuracy
-reads to it. Freeze the selected prompt/policy before opening public diagnostics.
-
-Reports include I, C, local A, Speed and Cost. Cost uses mean input tokens only
-with `--usd-in-per-m 0.0403` by default. Speed uses each variant's complete raw
-serial latency probe; probes must match model/revision and sampled items.
-Without probes, all variants use the explicitly marked `--speed-axis 91`
-estimate; bulk `latency_s` never supplies Speed.
-
-The paired case bootstrap uses B=2,000, seed=15, resamples whole cases within
-primitive-coverage strata, and reports 95% CIs for A and I deltas against `min`.
-Every draw keeps paired variants and questions in each case together, recomputes
-I/C/input cost, and holds fitted policies and Speed fixed. Select the highest A;
-if its A-delta CI against the runner-up includes zero, prefer the one with fewer
-mean input tokens (equal tokens retain higher A). The report includes that
-comparison and decision, per-variant policies and a selected `policies/policy.json`.
-
-Serve the selected variant explicitly:
-
-```bash
-python -m ayaka.swift.server --policy "$M/policies/policy.json" --prompt-variant SELECTED_VARIANT
-```
-
-Policies record `prompt_variant`; old policies default to `min`. A server rejects
-a different `--prompt-variant` unless `--force-variant` is explicitly supplied.
-
-## Deadline and outputs
-
-`SWIFT_MAX_MINUTES` defaults to 75; `--max-minutes` overrides it. The clock starts
-at runner entry, including input checks, installation, Hub resolution, and server
-startup. Up to 30 seconds (20% for shorter caps) are reserved for cleanup and
-packing. All blocking subprocesses, health waits, and final compression are
-bounded by the remaining budget. Process groups receive TERM, then KILL after
-a shared grace period of at most three seconds. SIGINT/SIGTERM also clean up
-and pack. `progress.json` identifies finished steps, resolved revisions, errors,
-and `complete`, `partial_failure`, `time_cap`, or `interrupted` status.
-
-Each `out/<model_slug>/<variant>/` contains four dataset `*.reads.jsonl` files,
-`latency.json`, `swift.log`, and collection/probe logs. Shared `vllm.log`, `revision.json`,
-and `env.txt` are under `out/<model_slug>/`, with GPU name, driver, memory, package versions, requested/resolved
-revisions, and model options. Steps that never started may have no output file.
-Each successful bulk row is flushed; each latency sample is saved atomically.
-Installation logs, the input manifest, and the progress marker are under `out/`.
-
-Finally, the runner produces **`out.tar.zst` and `out.tar.zst.sha256`**, including
-partial results after a cap or failure. Compression uses installed Python
-`zstandard`, or Ubuntu's `libzstd` without requiring a successful pip install.
-Ensure one of these is available before starting. The reserved packing phase
-must fit the remaining cap; an unavailable compressor or stalled filesystem is
-reported as a packing failure. Exit codes: 0 complete, 1 failure/partial failure,
-124 time cap, 130 interrupted. Verify with `sha256sum -c out.tar.zst.sha256`.
-No cloud deployment or paid instance launch is performed by these scripts.
+`progress.json` records priority statuses, completed steps, errors and elapsed
+time. Model directories hold references, parity diagnostics, load times,
+resolved revisions, environment metadata, selection and per-variant reads.
+Only the best two primary variants have latency artifacts. Successful rows are
+flushed as collected. Final `out.tar.zst` and its SHA256 include partial results;
+Python zstandard or system libzstd must already be available. Exit codes are
+0 complete, 1 failure, 124 boundary cap/emergency timeout, and 130 interrupted.
+These scripts do not launch a paid instance or push/deploy anything.
