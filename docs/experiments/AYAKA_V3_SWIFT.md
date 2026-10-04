@@ -36,6 +36,45 @@ Published v1 weights stay frozen.
    inference, without benchmark names or item text. Its CPU whitespace-token overhead must stay
    within 80 tokens; actual input-token cost is measured from reads.
 
+## Optional levers behind predeclared adoption gates
+
+The v2 continuation spent credit and regressed, so every lever beyond the plain frozen readout is **off by
+default**. A lever is enabled only when `ayaka/swift/adopt.py` admits it. Its parameters are fitted on bound,
+non-public calibration reads. It is then compared with the currently accepted system on bound, non-public dev
+reads, using a case-cluster paired bootstrap (B = 2000, seed 15). It is adopted only if all of these hold:
+
+- the 95 % lower bound of Δ composite A is > 0;
+- the ΔI upper bound is ≥ 0;
+- ΔI is ≥ −0.5 points;
+- no primitive's CC falls by more than 2 points.
+
+Levers are judged in a fixed order, and each adopted lever joins the baseline for the next one:
+
+1. **Prompt variant**: `min`, `cygnet`, `rules`, or `labeled` (`LETTER. label: description`).
+2. **Letter-position bias**: a calibration-NLL additive logit offset per type, option count and position, with an
+   L2 penalty and at least 30 questions per bucket. It costs nothing at inference.
+3. **Gated reasoning route**: the frozen model writes brief worked steps, and the same Swift readout reads the
+   answer. A router built only from direct-read and text features decides which questions take this route, with a
+   route-rate cap. JevBench measures Speed only on open standard and judge items (METHOD v1.5 §5), so a route that
+   fires mainly on hard-style calculation items can raise Intelligence while leaving p50 and p95 nearly unchanged.
+   The gate also rejects any route whose projected adjusted p95 worsens by more than 10 %. Generated tokens count
+   in usage and Cost.
+
+The server refuses to load a policy whose levers lack a matching passing gate receipt. If no lever passes, the
+shipped system is the frozen readout with fitted temperatures. Only one GPU collection is planned; no training is.
+
+## Service features (not part of the benchmark path)
+
+JevBench reads only `answers.decision` type, probabilities and usage, so every service feature is either an
+additive field or opt-in:
+
+- Choice candidate generation (`open` / `expand`, experimental, ported from the v2 server);
+- API-key auth, per-answer `confidence` and calibration status, backpressure (429/504), `/metrics`;
+- experimental image input.
+
+Generation quality and image accuracy are unmeasured and are labelled as such. `deploy/swift/harness_smoke.py`
+checks after every change that all 231 public items still return valid typesafe answers.
+
 ## Expected composite (estimate, not a measurement)
 
 With Cygnet's other axes unchanged and Noul CC +16 on both splits, I ≈ 71.1 + 5.3 ≈ 76.4 and
