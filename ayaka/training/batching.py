@@ -41,6 +41,9 @@ class TrainItem:
     proposal_positions: list[int] | None = None
     proposal_labels: list[int] | None = None
     direct_distillation: bool = False  # original-input arm; trainer must retain gold NLL
+    base_probs: list[float] | None = (
+        None  # frozen native probabilities; separate from reasoned teacher
+    )
 
     @property
     def length(self) -> int:
@@ -161,6 +164,8 @@ class TrainTensors:
     flagged: torch.Tensor  # [n_q] bool
     teacher: torch.Tensor | None  # [n_c]
     teacher_mask: torch.Tensor | None  # [n_q] bool
+    base_probs: torch.Tensor | None = None
+    base_mask: torch.Tensor | None = None
 
     def to(self, device) -> TrainTensors:
         mv = lambda t: t.to(device) if t is not None else None  # noqa: E731
@@ -171,6 +176,8 @@ class TrainTensors:
             mv(self.flagged),
             mv(self.teacher),
             mv(self.teacher_mask),
+            mv(self.base_probs),
+            mv(self.base_mask),
         )
 
 
@@ -201,4 +208,17 @@ def collate_items(
             dtype=torch.float32,
         )
         teacher_mask = torch.tensor([it.teacher is not None for it in items], dtype=torch.bool)
-    return TrainTensors(batch, targets, ordinals, flagged, teacher, teacher_mask)
+    base_probs = base_mask = None
+    if any(it.base_probs is not None for it in items):
+        base_probs = torch.tensor(
+            [
+                p
+                for it in items
+                for p in (it.base_probs if it.base_probs is not None else [0.0] * len(it.target))
+            ],
+            dtype=torch.float32,
+        )
+        base_mask = torch.tensor([it.base_probs is not None for it in items], dtype=torch.bool)
+    return TrainTensors(
+        batch, targets, ordinals, flagged, teacher, teacher_mask, base_probs, base_mask
+    )

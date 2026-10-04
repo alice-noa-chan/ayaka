@@ -39,6 +39,7 @@ from .direct_state import (
     training_binding,
     validate_training_config,
 )
+from .frozen_replay import attach_base_replay
 from .native_snapshot import verify_snapshot
 from .optimization import OptimizationConfig, optimize_and_verify
 from .prepare_v2 import canonical
@@ -165,6 +166,7 @@ def run_pipeline(
     resume=None,
     paid_elapsed_seconds=None,
     expected_bundle_sha256=None,
+    saved_base_reads=None,
 ):
     started = time.monotonic()
     if action not in {"audit", "profile", "train"}:
@@ -240,6 +242,16 @@ def run_pipeline(
     model.backbone.requires_grad_(False)
     apply_lora(model)
     trainer = Trainer(model, tok, tcfg, dev)
+    base_reads = None
+    if tcfg.loss_weights.base_replay:
+        if resume is not None and saved_base_reads is None:
+            raise ValueError("optimizer resume requires the original frozen-base reads")
+        base_reads = attach_base_replay(
+            trainer, splits["train"], groups, native_sha, saved=saved_base_reads
+        )
+    elif saved_base_reads is not None:
+        raise ValueError("saved frozen-base reads require a positive replay coefficient")
+    binding["frozen_base_reads_sha256"] = fingerprint(base_reads)
     probes = [item for index in stress_indices(inventory) for item in groups[index]]
     application = optimize_and_verify(
         trainer, probes, OptimizationConfig(**recipe["optimizations"])
@@ -249,6 +261,8 @@ def run_pipeline(
     _write(root, "initial_admission.json", admitted)
     _write(root, "kernel_parity.json", application.report)
     _write(root, "training_config.json", asdict(tcfg))
+    if base_reads is not None:
+        _write(root, "frozen_base_reads.json", base_reads)
     by_id = {
         sample.metadata["source_example_id"]: group
         for sample, group in zip(splits["train"], groups, strict=True)
@@ -387,6 +401,9 @@ def main(argv=None):
     parser.add_argument("--snapshot-record", type=Path)
     parser.add_argument("--snapshot-path", type=Path)
     parser.add_argument("--expected-bundle-sha256")
+    parser.add_argument(
+        "--base-reads", type=Path, help="original frozen native reads, required for replay resume"
+    )
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-every", default=100, type=int)
     parser.add_argument(
@@ -416,6 +433,7 @@ def main(argv=None):
         checkpoint_every=args.checkpoint_every,
         paid_elapsed_seconds=args.paid_elapsed_seconds,
         expected_bundle_sha256=args.expected_bundle_sha256,
+        saved_base_reads=read(args.base_reads),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

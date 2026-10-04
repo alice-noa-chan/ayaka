@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
@@ -181,6 +182,16 @@ def _prepare(
     allow_tiny=False,
 ):
     # Verify every reserved split too; no holdout answer enters training or teacher selection.
+    if (
+        type(weights.base_replay) not in (int, float)
+        or not math.isfinite(weights.base_replay)
+        or weights.base_replay < 0
+    ):
+        raise ValueError("frozen-base replay weight must be finite and nonnegative")
+    if weights.base_replay and not any(
+        s.metadata.get("data_kind") == "natural" for s in splits["train"]
+    ):
+        raise ValueError("frozen-base replay requires natural train rehearsal")
     audit_splits(splits)
     verify_gold, gold_sources = _gold_verifier(
         splits, natural_registry, allow_tiny=allow_tiny and cfg.backbone == "tiny"
@@ -289,6 +300,16 @@ def prepare_bundle(
     if type(allow_tiny) is not bool:
         raise ValueError("mechanics-only mode must be boolean")
     weights = weights or LossWeights(gold_nll_with_teacher=True, distill=0.2, pointer_aux=0)
+    if (
+        type(weights.base_replay) not in (int, float)
+        or not math.isfinite(weights.base_replay)
+        or weights.base_replay < 0
+    ):
+        raise ValueError("frozen-base replay weight must be finite and nonnegative")
+    if weights.base_replay and not any(
+        s.metadata.get("data_kind") == "natural" for s in splits["train"]
+    ):
+        raise ValueError("frozen-base replay requires natural train rehearsal")
     if weights.pointer_aux != 0:
         raise ValueError("native direct-student arm does not train a pointer auxiliary loss")
     if type(seed) is not int or seed < 0:
@@ -476,6 +497,7 @@ def main(argv=None):
     prepare.add_argument("--rows-per-step", required=True, type=int)
     prepare.add_argument("--seed", default=20261004, type=int)
     prepare.add_argument("--distill-weight", default=0.2, type=float)
+    prepare.add_argument("--base-replay-weight", default=0, type=float)
     prepare.add_argument("--mechanics-only", action="store_true")
     prepare.add_argument(
         "--attention", choices=("native", "sdpa", "flash_attention_2"), default="native"
@@ -509,7 +531,10 @@ def main(argv=None):
             rows_per_step=args.rows_per_step,
             seed=args.seed,
             weights=LossWeights(
-                gold_nll_with_teacher=True, distill=args.distill_weight, pointer_aux=0
+                gold_nll_with_teacher=True,
+                distill=args.distill_weight,
+                pointer_aux=0,
+                base_replay=args.base_replay_weight,
             ),
             allow_tiny=args.mechanics_only,
             optimizations=OptimizationConfig(attention=args.attention, liger=args.liger),

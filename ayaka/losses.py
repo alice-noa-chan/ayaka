@@ -76,6 +76,7 @@ class LossWeights:
     pointer_aux: float = 0.3  # pointer-only NLL keeps the pointer usable alone (large sets)
     distill: float = 1.0  # KL to teacher, when teacher targets exist
     gold_nll_with_teacher: bool = False  # opt-in direct student: gold NLL + auxiliary teacher KL
+    base_replay: float = 0.0  # opt-in frozen native distribution preservation on natural rehearsal
 
 
 def decision_loss(
@@ -86,6 +87,8 @@ def decision_loss(
     missing_mask: torch.Tensor | None = None,
     teacher_probs: torch.Tensor | None = None,
     teacher_mask: torch.Tensor | None = None,
+    base_probs: torch.Tensor | None = None,
+    base_mask: torch.Tensor | None = None,
     weights: LossWeights | None = None,
     missing_tau: float = 0.8,
 ) -> dict[str, torch.Tensor]:
@@ -139,6 +142,38 @@ def decision_loss(
         main = w.nll * nll_loss(logp, targets, cu)
     parts["nll"] = nll_loss(logp, targets, cu).detach()
     total = main
+    if (
+        type(w.base_replay) not in (int, float)
+        or not math.isfinite(w.base_replay)
+        or w.base_replay < 0
+    ):
+        raise ValueError("frozen-base replay weight must be finite and nonnegative")
+    if base_probs is not None or base_mask is not None:
+        if (
+            not w.gold_nll_with_teacher
+            or base_probs is None
+            or base_mask is None
+            or base_probs.shape != targets.shape
+            or base_mask.shape != out.primitive.shape
+            or base_mask.dtype != torch.bool
+            or not torch.isfinite(base_probs).all()
+            or (base_probs < 0).any()
+        ):
+            raise ValueError(
+                "frozen-base replay requires gold-anchored, aligned finite probabilities"
+            )
+        reference = base_probs.detach().to(logp.dtype)
+        if not torch.allclose(
+            per_question_sum(reference, cu)[base_mask],
+            torch.ones_like(out.primitive[base_mask], dtype=logp.dtype),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError("frozen-base distributions must sum to one")
+        replay = per_question_sum(torch.special.xlogy(reference, reference) - reference * logp, cu)
+        total = total + w.base_replay * torch.where(base_mask, replay, 0.0).mean()
+        if base_mask.any():
+            parts["base_replay_kl"] = replay[base_mask].mean().detach()
 
     br = brier_loss(p, targets, cu)
     total = total + w.brier * br

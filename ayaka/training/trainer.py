@@ -292,6 +292,8 @@ class Trainer:
         return out, t
 
     def _backward(self, items: list[TrainItem]):
+        if any(it.base_probs is not None and not it.direct_distillation for it in items):
+            raise ValueError("frozen-base replay requires explicitly direct-distillation items")
         direct = [it for it in items if it.direct_distillation]
         if direct:
             if len(direct) != len(items):
@@ -336,6 +338,8 @@ class Trainer:
                 missing_mask=t.flagged,
                 teacher_probs=t.teacher,
                 teacher_mask=t.teacher_mask,
+                base_probs=t.base_probs,
+                base_mask=t.base_mask,
                 weights=self.cfg.loss_weights,
                 missing_tau=self.cfg.missing_tau,
             )
