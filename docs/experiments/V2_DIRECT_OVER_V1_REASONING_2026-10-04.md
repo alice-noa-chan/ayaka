@@ -1119,3 +1119,53 @@ full log SHA: c9ef00eb9cc0f33172b843473c884e5ff3d72259130497e32b85a5333e5efe8a
 complete native weights/CUDA parity·throughput, 전체 workflow credit admission과
 matched v1 reasoning 대비 v2 off·독립 test이다. Policy corpus 준비는 진행됐으나
 학습 직전 모든 조건 완료, 품질 향상이나 승격을 주장하지 않는다.
+
+## 2026-10-05 실제 full weights와 CPU 업로드 준비
+
+위의 complete native weights 조건은 이번 단계에서 실제 다운로드와 검증으로
+진행했다. `google/gemma-4-12B-it`의 고정 revision 전체 safetensors
+23,919,549,408 bytes가 공식 LFS SHA256과 일치한다. 설치된 HF loader와 같은
+key 변환으로 666개 BF16 text tensor가 persistent state 667개를 충족하며,
+생략된 native output은 진짜 tied embedding alias다. 별도 untied head를 입력
+embedding으로 대체하지 않는다. Full weights와 실제 LoRA·판독 모듈의 보수적
+합은 12,104,772,662 parameters다. Header·meta 검사는 runtime proof가 아니다.
+
+새 `scripts/direct_v2/native_layout.py`와 upload 도구는 `ea48f3d`, `94f6005`로
+따로 커밋했다. 기존 감사 Ayaka source, main과 Swift/API 소유 파일은 바꾸지 않았다.
+소스·bytecode import, snapshot 변경과 output alias, compressed stream hash,
+tar buffer의 숨은 payload, command/anchor binding 반례를 독립 검토로 확인하고
+회귀 검사로 닫았다. 관련 37개 CPU 검사 및 312개 source의 lint/format이 통과했다.
+
+실제 최종 zstd level 3 archive는 169개 파일 / 18,736,900,543 bytes다.
+압축 전 payload 23,977,145,314 bytes 대비 21.855% 줄었다. 검증된 source,
+개발용 학습 입력, receipts와 full native files만 포함하며 원본 test 입력,
+raw source 및 HF download cache는 제외했다. 전체 archive 검증 후 새 디렉터리에
+복원한 실제 12B/control도 HF offline·빈 cache에서 CPU audit가 통과했다.
+Native bytes verified true, pretrained tensors loaded false, optimizer 0이다.
+
+```text
+archive: .dev/direct-policy-native-upload-final-61f3c6b-20261005.tar.zst
+archive SHA: 6781202a7c0521f6cdef57b35944e8df6ea42f94283d30211da49118e1b9c9f2
+native record SHA: 9b0a408a6f4f198e4002e455ec233bd6ab4882e18784b3affccdad1c6f48273e
+layout report SHA: afc1c3a4e76fb2ae2511d2717ba2b5ff0c58e5100bd7d51d29de147b840dc0d1
+restored audit SHA: 7c4f58da635e01e2f97eb42011640f9b9b4f810e6a228c25edf31f7d70dfcafa
+```
+
+전체 입력·절차는 [DIRECT_UPLOAD_PREPARATION.md](DIRECT_UPLOAD_PREPARATION.md)에
+기록했다. Linux/CUDA runtime은 아직 포함하지 않았고 default action은 CPU audit다.
+Actual teacher 이득, prior private inventory, CUDA kernels/throughput와 전체 비용
+검증 및 matched v1 reasoning 대비 v2 off의 독립 품질 비교는 계속 남아 있다.
+이번 단계의 GPU 사용과 paid API 호출은 0이다. Claude incoming은 section 18이
+마지막이며 새 결과를 `.dev`로 공유했지만 승인을 추정하지 않는다.
+
+최종 고정 `94f6005` 전체 CPU 검사는 **2147 passed, 2 skipped, 1 warning /
+649.63초**다. Source와 fixture의 전후 hash 동일, exit0/stable_pass=True다.
+첫 실행은 Git archive에서 ignored 개발 fixture가 빠져 7개 실패했고, 이전
+검증본의 calibration/dev JSONL 두 개만 동일 해시로 복사한 뒤 통과했다.
+실패 receipt는 보존했으며 코드를 바꾸거나 원본 test 입력을 가져오지 않았다.
+Warning은 중복 ZIP member 공격 fixture의 예상 경고다.
+
+```text
+full receipt: .dev/codex-native-upload-full-94f6005-fixtures-20261005.json
+full log SHA: 5c5ee1291800b05cb8e6c887bdedf13d61cb29472aa2f494b2d0d1bdd9db671c
+```
