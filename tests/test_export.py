@@ -174,7 +174,7 @@ def test_http_server_roundtrip(model):
         )
         with pytest.raises(urllib.error.HTTPError) as e:
             request_bytes(bad, timeout=60)
-        assert e.value.code == 400
+        assert e.value.code == 422  # Jev API: request validation failures are 422
         health = urllib.request.Request(f"http://127.0.0.1:{port}/health")
         assert json.loads(request_bytes(health, timeout=10))["status"] == "ok"
     finally:

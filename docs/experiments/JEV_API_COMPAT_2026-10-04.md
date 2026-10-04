@@ -1,7 +1,12 @@
 # TypeSafe Jev API / SDK compatibility — design and status (2026-10-04)
 
-**Status: design fixed, implementation in progress on `ayaka-v2-experiments`. Not yet verified with the official
-SDK.** This page records why the work is needed and the decisions it follows.
+**Status: implemented on `ayaka-v2-experiments` (`06199e0`, `b67768d`).** Both `ayaka.serve` and
+`ayaka.swift.server` use the shared `ayaka/jev_api.py`, which is the only place confidence is computed. The
+official `typesafe-sdk` 0.7.2 drives both servers on CPU fakes in `tests/test_jev_api_compat*.py` (53 passed),
+and JevBench's typesafe adapter smoke test gives 231/231 valid answers. No real model or GPU was involved. `main`
+(v1) is not changed yet.
+
+This page records why the work was needed and the decisions it follows.
 
 ## Why
 
