@@ -204,7 +204,7 @@ def prepare_swift_evidence_inputs(
     return SwiftEvidenceInputs(inputs, recipe, fingerprint(recipe))
 
 
-def extract_swift_evidence_features(text, prepared, **options):
+def validate_swift_evidence_inputs(prepared):
     if not isinstance(prepared, SwiftEvidenceInputs):
         raise ValueError("require bound Swift evidence inputs")
     # Revalidate the immutable inputs and retained serving rows before forward.
@@ -214,6 +214,10 @@ def extract_swift_evidence_features(text, prepared, **options):
         or prepared.recipe.get("readout") != READOUT
     ):
         raise ValueError("Swift evidence serving-input binding changed")
+
+
+def extract_swift_evidence_features(text, prepared, **options):
+    validate_swift_evidence_inputs(prepared)
     features = extract_evidence_features(text, prepared.inputs, **options)
     features.metadata.update(
         prior_recipe=copy.deepcopy(prepared.recipe),
