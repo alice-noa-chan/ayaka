@@ -13,10 +13,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ayaka.reasoning import resolve_settings
 
-from .grouping import validate_option_count
+from .candidates import (
+    CandidateEvaluation,
+    CandidateGenerationError,
+    CandidateGenerator,
+    VLLMCandidateGenerator,
+    evaluate_candidates,
+    request_policies,
+)
+from .grouping import read_question, validate_option_count
 from .policy import Policy
 from .prompt import InvalidQuestion, parse_question, validate_prompt_variant
-from .readers import LetterReader, add_reader_arguments, reader_from_args
+from .readers import LetterReader, VLLMChatReader, add_reader_arguments, reader_from_args
 from .reasoning import system_read
 
 MAX_HTTP_BYTES = 8 * 1024 * 1024
@@ -37,6 +45,7 @@ class DecisionService:
         prompt_variant: str = "min",
         force_variant: bool = False,
         diagnostic: bool = False,
+        candidate_generator: CandidateGenerator | None = None,
     ):
         if max_parallel < 1 or max_questions < 1:
             raise ValueError("parallelism and question limits must be positive")
@@ -73,6 +82,9 @@ class DecisionService:
         self.max_questions = max_questions
         self.group_size = group_size
         self.state_format = state_format
+        # Offline tests may inject a CPU fake; serving always uses the reader's
+        # own frozen vLLM model, never a client-selected proposing backend.
+        self.candidate_generator = candidate_generator
         self._pool = ThreadPoolExecutor(max_workers=max_parallel)
 
     def close(self) -> None:
@@ -86,7 +98,11 @@ class DecisionService:
             raise InvalidQuestion("questions must be a non-empty object")
         if len(questions) > self.max_questions:
             raise InvalidQuestion(f"maximum {self.max_questions} questions per request")
-        parsed = [parse_question(question) for question in questions.values()]
+        policies = request_policies(body)
+        parsed = [
+            parse_question(question) if policies[name]["mode"] != "open" else None
+            for name, question in questions.items()
+        ]
         options = body.get("options", {})
         if not isinstance(options, dict):
             raise InvalidQuestion("options must be an object")
@@ -106,11 +122,20 @@ class DecisionService:
         except ValueError as exc:
             raise InvalidQuestion(str(exc)) from exc
         for question in parsed:
+            if question is None:
+                continue
             validate_option_count(len(question.labels), self.group_size)
             if question.type == "score":
                 ordinals = [int(label) for label in question.labels]
                 if any(b - a != 1 for a, b in zip(ordinals, ordinals[1:], strict=False)):
                     raise InvalidQuestion("score ordinals must be uniform and contiguous")
+        if any(policy["mode"] != "fixed" for policy in policies.values()):
+            generator = self.candidate_generator
+            if generator is None:
+                if not isinstance(self.reader, VLLMChatReader):
+                    raise InvalidQuestion("candidate generation needs the frozen vLLM chat backend")
+                generator = VLLMCandidateGenerator(self.reader)
+            return self._handle_candidates(body, policies, parsed, generator)
         futures = [
             self._pool.submit(
                 system_read,
@@ -144,6 +169,80 @@ class DecisionService:
                 "input_tokens": sum(result.input_tokens for result in reads),
                 "output_tokens": sum(result.output_tokens for result in reads),
             },
+        }
+
+    def _handle_candidates(self, body, policies, parsed, generator):
+        """Experimental generated partitions; fixed JevBench never enters here."""
+        generated_policy = replace(self.policy, letter_bias=None, reasoning_route=None)
+
+        def score(question, *, generated=False):
+            policy = generated_policy if generated else self.policy
+            read = (read_question if generated else system_read)(
+                self.reader,
+                body.get("state", ""),
+                question,
+                **({} if generated else {"policy": policy}),
+                group_size=self.group_size,
+                state_format=self.state_format,
+                prompt_variant=self.prompt_variant,
+            )
+            return policy.decide(
+                question.type, read.raw_probs, candidate_log_masses=read.candidate_log_masses
+            ), read
+
+        def evaluate(name, question):
+            if policies[name]["mode"] != "fixed":
+                return evaluate_candidates(
+                    body.get("state", ""), body["questions"][name], policies[name], score, generator
+                )
+            answer, read = score(question)
+            return CandidateEvaluation(
+                answer,
+                {"input_tokens": read.input_tokens, "output_tokens": read.output_tokens},
+                {"input_tokens": 0, "output_tokens": 0},
+            )
+
+        futures = [
+            self._pool.submit(evaluate, name, question)
+            for name, question in zip(body["questions"], parsed, strict=True)
+        ]
+        try:
+            results = [future.result() for future in futures]
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
+        usage = {
+            key: sum(result.usage[key] for result in results)
+            for key in ("input_tokens", "output_tokens")
+        }
+        proposal_usage = {
+            key: sum(result.proposal_usage[key] for result in results) for key in usage
+        }
+        extension_usage = {
+            "proposal_input_tokens": proposal_usage["input_tokens"],
+            "proposal_output_tokens": proposal_usage["output_tokens"],
+            "scoring_input_tokens": usage["input_tokens"] - proposal_usage["input_tokens"],
+            "scoring_output_tokens": usage["output_tokens"] - proposal_usage["output_tokens"],
+        }
+        failures = {
+            name: result.extension
+            for name, result in zip(body["questions"], results, strict=True)
+            if result.answer is None
+        }
+        if failures:
+            failed = next(iter(failures))
+            raise CandidateGenerationError(
+                f"open candidate generation failed for {failed}: {failures[failed]['diagnostics']['error']}",
+                {"usage": usage, "ayaka": {"usage": extension_usage, "questions": failures}},
+            )
+        return {
+            "model": body.get("model") or self.model_name,
+            "answers": {
+                name: result.answer for name, result in zip(body["questions"], results, strict=True)
+            },
+            "usage": usage,
+            "ayaka": {"usage": extension_usage},
         }
 
 
@@ -221,7 +320,7 @@ def make_handler(service: DecisionService) -> type[BaseHTTPRequestHandler]:
             try:
                 response = service.handle(body)
             except InvalidQuestion as exc:
-                self._send(422, {"error": str(exc)})
+                self._send(422, getattr(exc, "response", {"error": str(exc)}))
             except Exception as exc:
                 self._send(502, {"error": f"backend failure: {type(exc).__name__}"})
             else:
