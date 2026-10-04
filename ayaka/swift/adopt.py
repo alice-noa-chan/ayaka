@@ -27,6 +27,15 @@ from .evaluate import cluster_strata, percentile
 from .fit import fit_policy
 from .policy import Policy
 from .provenance import assert_roles_isolated, group_reads
+from .router import (
+    ROUTE_RATE_CAP,
+    ROUTER_ITERATIONS,
+    ROUTER_L2,
+    fit_router,
+    projected_latency,
+    routed_rows,
+    validate_pairs,
+)
 from .score import (
     TYPES,
     calibration,
@@ -42,8 +51,13 @@ from .score import (
 # All adoption choices are predeclared here and copied verbatim to every report.
 # The Intelligence CI must also rule out a significantly negative change.
 GATE_CONSTANTS = {
-    "lever_order": ["variant", "bias"],
-    "future_lever_order": ["reasoning_route"],
+    "lever_order": ["variant", "bias", "reasoning_route"],
+    "reasoning_route_rate_cap": ROUTE_RATE_CAP,
+    "reasoning_router_l2": ROUTER_L2,
+    "reasoning_router_iterations": ROUTER_ITERATIONS,
+    "reasoning_projected_adjusted_p95_max_ratio": 1.10,
+    "reasoning_candidate": "direct_max_prob<=0.95_or_digit_in_state_instructions; K<=26",
+    "reasoning_threshold_selection": "highest_calibration_A_under_overall_cap; off_first_ties",
     "variant_order": ["min", "cygnet", "rules", "labeled"],
     "variant_selection": "highest_calibration_A_then_predeclared_order",
     "dev_latency_is_gate_only": True,
@@ -74,6 +88,8 @@ def validate_adopted_policy(policy: Policy) -> None:
         active.append("variant")
     if policy.letter_bias:
         active.append("bias")
+    if policy.reasoning_route is not None:
+        active.append("reasoning_route")
     if not active:
         return
     receipt = policy.adoption or {}
@@ -102,6 +118,15 @@ def validate_adopted_policy(policy: Policy) -> None:
         for comparison in (comparisons[lever] for lever in active)
     ):
         raise ValueError("optional Swift lever failed its predeclared adoption gate")
+    if (
+        "reasoning_route" in active
+        and comparisons["reasoning_route"].get("lever") != "reasoning_route"
+    ):
+        raise ValueError("reasoning route receipt requires the projected p95 guard")
+    if "reasoning_route" in active and any(
+        not hashes.get("reasoned", {}).get(role) for role in ("calibration", "dev")
+    ):
+        raise ValueError("reasoning route receipt requires paired calibration/dev data hashes")
 
 
 def gate_decision(comparison: dict) -> dict:
@@ -117,6 +142,15 @@ def gate_decision(comparison: dict) -> dict:
             for kind in TYPES
         ),
     }
+    if comparison.get("lever") == "reasoning_route":
+        before = comparison.get("projected_adjusted_p95_before", 0)
+        after = comparison.get("projected_adjusted_p95_after", math.inf)
+        checks["projected_p95_guard"] = (
+            math.isfinite(before)
+            and math.isfinite(after)
+            and before > 0
+            and after <= before * GATE_CONSTANTS["reasoning_projected_adjusted_p95_max_ratio"]
+        )
     reasons = [name for name, passed in checks.items() if not passed]
     return {
         "adopted": not reasons,
@@ -276,21 +310,29 @@ def adopt_levers(
     *,
     levers=(),
     latency=None,
+    reasoning_calibration=None,
+    reasoning_dev=None,
+    routed_latency=None,
+    direct_system_latency=None,
     assumed_speed=91.0,
     assumed_cost=56.4,
     usd_in_per_m=0.0403,
-    usd_out_per_m=0.0,
+    usd_out_per_m=0.0403,
 ) -> dict:
     """Default requests no levers. No exploratory/public/test escape hatch."""
     requested = set(levers)
     if requested - set(GATE_CONSTANTS["lever_order"]) or len(requested) != len(levers):
-        raise ValueError(
-            "supported unique levers are variant and bias; reasoning route is disabled"
-        )
-    if (
+        raise ValueError("supported unique levers are variant, bias and reasoning_route")
+    continuing = bool(baseline.adoption) and requested == {"reasoning_route"}
+    if baseline.reasoning_route is not None:
+        raise ValueError("reasoning route is already adopted; dev gate retries are refused")
+    if continuing:
+        validate_adopted_policy(baseline)
+    if not continuing and (
         baseline.prompt_variant != "min"
         or baseline.letter_bias
         or baseline.adoption
+        or baseline.reasoning_route is not None
         or not baseline.promotable
     ):
         raise ValueError("baseline must be the promotable min policy without new levers")
@@ -310,9 +352,12 @@ def adopt_levers(
         role: {variant: fingerprint(rows) for variant, rows in groups.items()}
         for role, groups in (("calibration", cal), ("dev", dev))
     }
+    if continuing and baseline.adoption["data_hashes"] != hashes:
+        raise ValueError("continuing adoption requires the original exact calibration/dev data")
     current = replace(baseline)
     policies = {"min": asdict(baseline)}
-    reports, accepted = [], []
+    reports = []
+    accepted = list(baseline.adoption["adopted_levers"]) if continuing else []
     for lever in GATE_CONSTANTS["lever_order"]:
         before_hash = fingerprint(asdict(current))
         entry = {
@@ -360,10 +405,133 @@ def adopt_levers(
                 "calibration_A": cal_scores,
                 "policies": policies,
             }
-        else:
+        elif lever == "bias":
             params = fit_letter_bias(cal[current.prompt_variant], current)
             proposal = replace(current, letter_bias=params["letter_bias"] or None, promotable=False)
             entry["fitted_params"] = params
+        else:
+            variant = current.prompt_variant
+            cal_paired = validate_pairs(cal[variant], reasoning_calibration or [])
+            dev_paired = validate_pairs(dev[variant], reasoning_dev or [])
+            if (
+                cal_paired
+                and dev_paired
+                and next(iter(cal_paired.values()))["recipe"]
+                != next(iter(dev_paired.values()))["recipe"]
+            ):
+                raise ValueError("calibration/dev reasoning recipes must match")
+            if not cal_paired or not dev_paired:
+                entry.update(
+                    fitted_params=None,
+                    comparison=None,
+                    gate={"adopted": False, "reason": "no_paired_candidates"},
+                    current_after_sha256=before_hash,
+                )
+                reports.append(entry)
+                continue
+            params = fit_router(
+                cal[variant],
+                cal_paired,
+                current,
+                usd_in_per_m=usd_in_per_m,
+                usd_out_per_m=usd_out_per_m,
+                assumed_cost=assumed_cost,
+            )
+            proposal = replace(current, reasoning_route=params["router"], promotable=False)
+            entry["fitted_params"] = params
+            if params["calibration"]["route_rate"] == 0:
+                entry.update(
+                    comparison=None,
+                    gate={"adopted": False, "reason": "calibration_selected_off"},
+                    current_after_sha256=before_hash,
+                )
+                reports.append(entry)
+                continue
+            after_rows, flags = routed_rows(dev[variant], params["router"], dev_paired)
+            projected_before = projected_latency(dev[variant], [False] * len(flags), dev_paired)
+            projected_after = projected_latency(dev[variant], flags, dev_paired)
+            before_speed, after_speed = projected_before["S"], projected_after["S"]
+            speed_source = "projected_assumed"
+            if routed_latency:
+                if (
+                    len(routed_latency) != 1
+                    or routed_latency[0].get("system") != "reasoning_route"
+                    or routed_latency[0].get("router_sha256") != fingerprint(params["router"])
+                ):
+                    raise ValueError("routed latency must bind the fitted router")
+                if routed_latency[0].get("policy_sha256") != policy_fingerprint(proposal):
+                    raise ValueError("routed latency must bind the fitted readout policy")
+                after_speed = resource_speeds(
+                    {variant: dev[variant]}, routed_latency, assumed_speed
+                )[variant]
+                if latency:
+                    before_speed = speeds[variant]
+                if direct_system_latency:
+                    if direct_system_latency[0].get("system") != "direct" or direct_system_latency[
+                        0
+                    ].get("policy_sha256") != policy_fingerprint(current):
+                        raise ValueError("direct system latency must bind the accepted policy")
+                    before_speed = resource_speeds(
+                        {variant: dev[variant]}, direct_system_latency, assumed_speed
+                    )[variant]
+                    a, b = direct_system_latency[0], routed_latency[0]
+                    if (a.get("seed"), a.get("samples") and [s["id"] for s in a["samples"]]) != (
+                        b.get("seed"),
+                        b.get("samples") and [s["id"] for s in b["samples"]],
+                    ):
+                        raise ValueError(
+                            "direct/routed system probes must use the same ordered sample"
+                        )
+                for probe in [*(direct_system_latency or []), *routed_latency]:
+                    ids = [s["id"] for s in probe.get("samples", [])]
+                    allowed = {r["id"] for r in dev[variant] if r["tier"] in ("standard", "judge")}
+                    if (
+                        len(ids) != probe["completed_reads"]
+                        or len(ids) != len(set(ids))
+                        or set(ids) - allowed
+                    ):
+                        raise ValueError(
+                            "system latency samples must bind distinct non-public dev standard/judge items"
+                        )
+                speed_source = "serial_non_public_dev_probe"
+            comparison = paired_comparison(
+                dev[variant],
+                current,
+                after_rows,
+                proposal,
+                before_speed=before_speed,
+                after_speed=after_speed,
+                assumed_cost=assumed_cost,
+                usd_in_per_m=usd_in_per_m,
+                usd_out_per_m=usd_out_per_m,
+            )
+            comparison.update(
+                lever=lever,
+                projected_adjusted_p95_before=projected_before["adjusted_p95_s"],
+                projected_adjusted_p95_after=projected_after["adjusted_p95_s"],
+                latency={
+                    "before": projected_before,
+                    "after": projected_after,
+                    "speed_source": speed_source,
+                    "assumed": not bool(routed_latency and (direct_system_latency or latency)),
+                },
+            )
+            entry["reasoned_data_hashes"] = {
+                "calibration": fingerprint(reasoning_calibration),
+                "dev": fingerprint(reasoning_dev),
+            }
+            hashes["reasoned"] = entry["reasoned_data_hashes"]
+            decision = gate_decision(comparison)
+            if decision["adopted"]:
+                current = replace(proposal, promotable=True)
+                accepted.append(lever)
+            entry.update(
+                comparison=comparison,
+                gate=decision,
+                current_after_sha256=fingerprint(asdict(current)),
+            )
+            reports.append(entry)
+            continue
         comparison = paired_comparison(
             dev[current.prompt_variant],
             current,
@@ -393,7 +561,12 @@ def adopt_levers(
             "data_hashes": hashes,
             "adopted_levers": accepted,
             "comparisons": {
-                entry["lever"]: entry["comparison"] for entry in reports if entry["gate"]["adopted"]
+                **(baseline.adoption["comparisons"] if continuing else {}),
+                **{
+                    entry["lever"]: entry["comparison"]
+                    for entry in reports
+                    if entry["gate"]["adopted"]
+                },
             },
             "policy_sha256": policy_fingerprint(current),
         }
@@ -417,6 +590,18 @@ def adopt_levers(
         "assumed_axes": {"S": assumed_speed, "Cost": assumed_cost},
         "token_prices": {"input_per_m": usd_in_per_m, "output_per_m": usd_out_per_m},
         "latency_sha256": fingerprint(latency) if latency else None,
+        "routed_latency_sha256": fingerprint(routed_latency) if routed_latency else None,
+        "reasoning_speed": next(
+            (
+                entry["comparison"]["latency"]
+                for entry in reports
+                if entry["lever"] == "reasoning_route" and entry["comparison"]
+            ),
+            None,
+        ),
+        "direct_system_latency_sha256": fingerprint(direct_system_latency)
+        if direct_system_latency
+        else None,
         "levers": reports,
         "adopted_levers": accepted,
         "variant_policies": policies,

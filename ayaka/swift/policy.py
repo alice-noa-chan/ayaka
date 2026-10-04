@@ -65,9 +65,14 @@ class Policy:
     promotable: bool = True
     letter_bias: dict[str, dict[str, list[float]]] | None = None
     adoption: dict | None = None
+    reasoning_route: dict | None = None
 
     def __post_init__(self) -> None:
         validate_prompt_variant(self.prompt_variant)
+        if self.reasoning_route is not None:
+            from .router import validate_router
+
+            validate_router(self.reasoning_route)
         if self.letter_bias is not None:
             if not isinstance(self.letter_bias, dict):
                 raise ValueError("letter_bias must be a primitive/bucket mapping")
@@ -199,6 +204,8 @@ class Policy:
             values.pop("letter_bias")
         if self.adoption is None:
             values.pop("adoption")
+        if self.reasoning_route is None:
+            values.pop("reasoning_route")
         Path(path).write_text(
             json.dumps(values, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )

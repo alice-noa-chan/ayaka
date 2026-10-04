@@ -13,10 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ayaka.reasoning import resolve_settings
 
-from .grouping import read_question, validate_option_count
+from .grouping import validate_option_count
 from .policy import Policy
 from .prompt import InvalidQuestion, parse_question, validate_prompt_variant
 from .readers import LetterReader, add_reader_arguments, reader_from_args
+from .reasoning import system_read
 
 MAX_HTTP_BYTES = 8 * 1024 * 1024
 CLOSE_DRAIN_SECONDS = 0.10
@@ -112,10 +113,11 @@ class DecisionService:
                     raise InvalidQuestion("score ordinals must be uniform and contiguous")
         futures = [
             self._pool.submit(
-                read_question,
+                system_read,
                 self.reader,
                 body.get("state", ""),
                 question,
+                policy=self.policy,
                 group_size=self.group_size,
                 state_format=self.state_format,
                 prompt_variant=self.prompt_variant,

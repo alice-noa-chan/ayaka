@@ -158,7 +158,7 @@ def test_order_determinism_and_bias_fits_accepted_variant_only(tmp_path, monkeyp
         list(reversed(cal)), list(reversed(dev)), Policy(), levers=("variant", "bias")
     )
     assert result == repeated
-    assert [entry["lever"] for entry in result["levers"]] == ["variant", "bias"]
+    assert [entry["lever"] for entry in result["levers"]] == ["variant", "bias", "reasoning_route"]
     assert calls == [({"calibration"}, {"labeled"}, "labeled")] * 2
     assert (
         result["levers"][1]["current_before_sha256"] == result["levers"][0]["current_after_sha256"]
@@ -285,7 +285,7 @@ def test_resource_axes_use_measurements_or_record_assumptions(tmp_path):
     )
     after = measured["levers"][0]["comparison"]["after"]
     assert after["S"] == speed_axis(0.03, 0.05)
-    assert after["Cost"] == cost_score(100 * 0.08 / 1000)
+    assert after["Cost"] == cost_score((100 * 0.08 + 0.0403) / 1000)
     assert after["A"] == composite(after["I"], after["C"], after["S"], after["Cost"])
     assert measured["resource_sources"] == {
         "speed": "serial_non_public_dev_probe",
@@ -396,7 +396,7 @@ def test_cli_failure_writes_no_output(tmp_path):
     assert not report.exists() and not policy.exists()
 
 
-@pytest.mark.parametrize("levers", [("reasoning_route",), ("bias", "bias")])
+@pytest.mark.parametrize("levers", [("unknown",), ("bias", "bias")])
 def test_unsupported_or_duplicate_levers_refused(tmp_path, levers):
     cal, dev = roles(tmp_path, n=1)
     with pytest.raises(ValueError, match="supported unique levers"):

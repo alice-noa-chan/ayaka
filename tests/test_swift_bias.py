@@ -12,7 +12,7 @@ from ayaka.swift.policy import Policy
 from ayaka.swift.readers import FakeReader, ReadResult, logmass_probs
 
 
-def bound_synthetic(tmp_path, split, variant, specs):
+def bound_synthetic(tmp_path, split, variant, specs, *, tier="hard"):
     """specs = [(kind, raw log masses in position order, gold), ...]."""
     items, results = [], []
     for index, (kind, masses, gold) in enumerate(specs):
@@ -29,7 +29,7 @@ def bound_synthetic(tmp_path, split, variant, specs):
                 "state": f"{split}/{index}",
                 "public": False,
                 "split": split,
-                "tier": "hard",
+                "tier": tier,
                 "labels": labels,
                 "expected": labels[gold] if isinstance(gold, int) else labels[0],
                 "question": {"type": kind, "criteria": dict.fromkeys(labels, "option")},

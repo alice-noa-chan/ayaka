@@ -21,10 +21,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--baseline-policy", type=Path, required=True)
     parser.add_argument("--levers", nargs="+", choices=GATE_CONSTANTS["lever_order"], default=[])
     parser.add_argument("--latency", nargs="+", help="complete serial non-public dev probes")
+    parser.add_argument("--reasoning-calibration", nargs="+")
+    parser.add_argument("--reasoning-dev", nargs="+")
+    parser.add_argument("--routed-latency", nargs="+")
+    parser.add_argument("--direct-system-latency", nargs="+")
     parser.add_argument("--speed-axis", type=float, default=91.0)
     parser.add_argument("--cost-axis", type=float, default=56.4)
     parser.add_argument("--usd-in-per-m", type=float, default=0.0403)
-    parser.add_argument("--usd-out-per-m", type=float, default=0.0)
+    parser.add_argument("--usd-out-per-m", type=float, default=0.0403)
     parser.add_argument(
         "--assume-cost", action="store_true", help="use fixed Cost instead of token cost"
     )
@@ -39,6 +43,20 @@ def main(argv: list[str] | None = None) -> None:
             load_reads(args.dev),
             Policy.load(args.baseline_policy),
             levers=args.levers,
+            reasoning_calibration=load_reads(args.reasoning_calibration)
+            if args.reasoning_calibration
+            else None,
+            reasoning_dev=load_reads(args.reasoning_dev) if args.reasoning_dev else None,
+            routed_latency=[
+                json.loads(Path(p).read_text(encoding="utf-8")) for p in args.routed_latency
+            ]
+            if args.routed_latency
+            else None,
+            direct_system_latency=[
+                json.loads(Path(p).read_text(encoding="utf-8")) for p in args.direct_system_latency
+            ]
+            if args.direct_system_latency
+            else None,
             latency=[json.loads(Path(p).read_text(encoding="utf-8")) for p in args.latency]
             if args.latency
             else None,

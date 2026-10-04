@@ -8,7 +8,7 @@ import re
 from collections import deque
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ayaka.eval.read_artifact import fingerprint
@@ -266,6 +266,9 @@ def collect(
     revision: str | None = None,
     prompt_variant: str = "min",
     diagnostic: bool = False,
+    reasoned: bool = False,
+    direct_reads: list[dict] | None = None,
+    trace_max_tokens: int = 384,
 ) -> int:
     """Append reads in input order, with at most concurrency decisions in flight.
 
@@ -293,6 +296,13 @@ def collect(
             "production collection requires --revision as an immutable model/tokenizer commit"
         )
     index = SwiftReadIndex(load_reads([output]) if output.exists() else [])
+    direct_index = SwiftReadIndex(direct_reads or [])
+    if reasoned:
+        from .reasoning import reasoning_recipe
+
+        recipe = reasoning_recipe(trace_max_tokens)
+        if not direct_reads:
+            raise ValueError("--reasoned requires bound --direct-reads")
     if limit == 0:
         return 0
     # Preflight the entire request before launching even one read. A mismatch
@@ -313,8 +323,25 @@ def collect(
             group_size=group_size,
             diagnostic=diagnostic,
         )
-        if index.get(binding) is None:
-            planned.append((item, binding))
+        original = None
+        if reasoned:
+            from .router import candidate
+
+            original = direct_index.get(binding)
+            if original is None:
+                raise ValueError("reasoned collection requires an exact direct read for every item")
+            if not candidate(original["raw_probs"], item.state, item.question.instruction):
+                continue
+        existing = index.get(binding)
+        if existing is not None and reasoned:
+            nested = existing.get("reasoned_read", {})
+            if (
+                nested.get("recipe") != recipe
+                or nested.get("direct_record_sha256") != original["record_sha256"]
+            ):
+                raise ValueError("cached reasoned read differs from budget/recipe/direct binding")
+        if existing is None:
+            planned.append((item, binding, original))
     count = 0
     submitted = 0
     items = iter(planned)
@@ -331,28 +358,43 @@ def collect(
                 planned_item = next(items, None)
                 if planned_item is None:
                     break
-                item, binding = planned_item
-                future = pool.submit(
-                    read_question,
-                    reader,
-                    item.state,
-                    item.question,
-                    group_size=group_size,
-                    state_format=state_format,
-                    prompt_variant=prompt_variant,
-                )
-                pending.append((item, binding, future))
+                item, binding, original = planned_item
+                if reasoned:
+                    from .reasoning import reasoned_read
+
+                    future = pool.submit(
+                        reasoned_read,
+                        reader,
+                        item.state,
+                        item.question,
+                        state_format=state_format,
+                        prompt_variant=prompt_variant,
+                        max_tokens=trace_max_tokens,
+                    )
+                else:
+                    future = pool.submit(
+                        read_question,
+                        reader,
+                        item.state,
+                        item.question,
+                        group_size=group_size,
+                        state_format=state_format,
+                        prompt_variant=prompt_variant,
+                    )
+                pending.append((item, binding, original, future))
                 submitted += 1
 
         fill()
         while pending:
-            item, binding, future = pending.popleft()
+            item, binding, original, future = pending.popleft()
             try:
                 result = future.result()
             except BaseException:
-                for _, _, queued in pending:
+                for _, _, _, queued in pending:
                     queued.cancel()
                 raise
+            if reasoned:
+                result, metadata = result
             row = {
                 "id": item.id,
                 "model": model,
@@ -399,6 +441,16 @@ def collect(
             if result.candidate_log_masses is not None:
                 row["candidate_log_masses"] = result.candidate_log_masses
             row["record_sha256"] = fingerprint(row)
+            if reasoned:
+                nested = {
+                    **asdict(result),
+                    **metadata,
+                    "direct_binding_sha256": original["binding_sha256"],
+                    "direct_record_sha256": original["record_sha256"],
+                }
+                row = {k: v for k, v in original.items() if k != "record_sha256"}
+                row["reasoned_read"] = nested
+                row["record_sha256"] = fingerprint(row)
             stream.write(json.dumps(row, ensure_ascii=False) + "\n")
             stream.flush()
             count += 1
@@ -420,6 +472,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", "--out", default="reads.jsonl")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--reasoned", action="store_true")
+    parser.add_argument(
+        "--direct-reads", nargs="+", help="exact direct reads for candidate selection/binding"
+    )
+    parser.add_argument("--trace-max-tokens", type=int, default=384)
     parser.add_argument(
         "--diagnostic",
         action="store_true",
@@ -439,6 +496,9 @@ def main(argv: list[str] | None = None) -> None:
         revision=args.revision,
         prompt_variant=args.prompt_variant,
         diagnostic=args.diagnostic,
+        reasoned=args.reasoned,
+        direct_reads=load_reads(args.direct_reads) if args.direct_reads else None,
+        trace_max_tokens=args.trace_max_tokens,
     )
     print(f"Wrote {count} new reads to {args.output}")
 
