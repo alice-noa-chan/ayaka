@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 data = ["datasets>=3.0"]
 beam = ["beam-client>=0.2.200"]
+sdk-compat = ["typesafe-sdk==0.7.2"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
