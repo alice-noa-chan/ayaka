@@ -56,8 +56,9 @@ Clef evidence head는 별도 절제군이며 자동으로 기본 학습 구조�
    teacher는 train 문항에만 연결한다. 원본 state·질문·후보 설명/순서·soft gold·lineage를
    fingerprint로 묶고 Noul의 false/true 순서를 맞춘다.
 2. caller의 독립 gold verifier가 증거로 다시 계산한 분포와 저장된 정답이 일치해야 한다.
-   verifier가 단순히 저장된 target을 읽는 구현이면 실제 검증이 아니다. 이 독립성은
-   verifier 소스와 corpus에 대한 별도 검토가 필요하며 CPU 계약만으로 증명하지 않는다.
+   새 `ayaka/data/direct_verification.py`는 지원하는 authored curriculum v3의 원본
+   문서·질문·후보를 해석해 gold를 다시 계산한다. 저장된 target이나 trace, generator의
+   계산 함수를 읽지 않는다. 지원하지 않는 문서 형식은 명시적으로 거부한다.
 3. 생성 토큰 0·length 종료·fallback으로 기록된 관측, 잘못된 확률, 변경된 문항의
    teacher 관측을 거부한다. trace 본문은 이 계약에서 다시 검사하지 않는다.
    원본 입력이 길이 한도를 넘으면 잘라서 학습하지 않는다.
@@ -71,30 +72,110 @@ Clef evidence head는 별도 절제군이며 자동으로 기본 학습 구조�
 teacher가 있는 문항에 detached forward KL을 더한다. 0.2는 새 opt-in 준비 함수의
 기본 보조 가중치이며 최적이라는 실측 주장은 아니다. `distill=0`은 gold-only 절제군이다.
 기존 v1은 기본값 `gold_nll_with_teacher=False`로 기존 teacher-KL 대체 동작을 유지한다.
-호출자는 준비 함수와 Trainer에 같은 loss weights를 넘겨야 한다.
+준비 item에는 `direct_distillation=True`가 붙는다. 실제 Trainer는 forward 전에
+gold NLL 보존 설정, 양수 gold 가중치와 유한한 비음수 distillation 가중치를 검사한다.
+trace/proposal/image 학습 필드가 들어온 item도 거부한다. 설정을 전달하지 않아
+기존 v1의 KL 대체 경로로 되돌아가는 실수를 학습 시작 전에 검출한다.
 
 준비 보고서는 split/content/token/teacher fingerprints, teacher 수용/거부 사유와
 직접 학습 토큰 수를 기록한다. `promotable=false`, `execution_attested=false`를 유지한다.
 선언된 hash는 backend 실행 증명이 아니며 정답 일치가 풀이의 모든 단계 검증도 아니다.
 
+## 저장·재검증·학습 일정 연결
+
+`ayaka/training/direct_bundle.py`는 CPU 전용 CLI다. 이미 로컬에 있는 고정 revision의
+tokenizer와 config만 읽으며 모델 weights, optimizer, GPU 실행을 시작하지 않는다.
+
+```bash
+python -m ayaka.training.direct_bundle prepare \
+  --corpus /path/to/five-split-jsonl-directory \
+  --config /path/to/electra-config.json \
+  --teacher-reads /path/to/saved-teacher-reads.json \
+  --out /path/to/new-bundle-directory \
+  --steps 3 --rows-per-step 32 --seed 20261004 --distill-weight 0.2
+python -m ayaka.training.direct_bundle audit --bundle /path/to/new-bundle-directory
+```
+
+teacher가 없는 gold-only 제어군은 `--teacher-reads`를 생략하고 `--distill-weight 0`을
+사용한다. 실제 대규모 학습의 steps를 위 예제의 3으로 고정하라는 뜻은 아니다.
+`--mechanics-only`는 random tiny 모델 검사에만 사용한다.
+
+- 원본 다섯 split, 저장된 teacher, 실제 `TrainItem`, recipe와 준비 보고서를 저장한다.
+  파일 checksum, 전체 Ayaka Python 소스 hash, 실제 tokenizer serialization과 chat
+  template을 묶는다. 기존 출력 디렉터리를 덮어쓰지 않는다.
+- audit은 저장한 token/item을 신뢰해 불러오기만 하지 않는다. 원본 gold 검증,
+  teacher 선별, tokenization과 유한한 전체 일정까지 다시 계산해 비교한다.
+  item이나 보고서를 수정한 뒤 checksum만 새로 써도 불일치를 검출한다.
+- train과 모든 heldout 문항의 **전체** 원본 입력을 실제 tokenizer로 검사한다.
+  문맥 초과나 실제 vocab 밖의 token을 거부하며 잘라서 통과시키지 않는다.
+  이 native LM arm은 label이 있는 최대 26개 후보를 지원한다. 그 이상은 별도
+  pointer/hybrid 절제군이 필요하며 자동 fallback으로 학습 구조를 바꾸지 않는다.
+- `training_batches(..., start_step=...)`는 고정된 step/rows/seed 일정과 재현 가능한
+  whole-step 재개 위치를 제공한다. optimizer/checkpoint/RNG 상태 저장·복원까지
+  구현되었다는 뜻은 아니다.
+- independent gold 검증은 현재 authored 날짜·수치·규칙 자료의 10개 family에
+  한정된다. 자연 문서의 judge/score 정답이나 teacher 풀이의 전 단계를 검증하는
+  일반 verifier가 아니다. 검증 계산은 자료 준비에서만 실행한다.
+
+`ayaka/training/direct_preflight.py`는 meta 장치에 실제 native text 구조와 LoRA를
+구성한다. 실제 output head, 임베딩과의 weight tying, 각 projection의 LoRA 개수,
+전체 파라미터와 native context를 검사한다. 선언한 target에 LoRA가 붙지 않거나
+14B 제한을 넘으면 bundle을 만들지 않는다. 이 구조 기록을 저장하고 audit에서
+재구성해 비교한다. 실제 weight bytes와 GPU cache/logits parity는 별도 검증이다.
+
+## 실제 CPU 준비 결과와 범위
+
+고정된 `google/gemma-4-12B-it` revision
+`707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7`, native LM readout과 LoRA rank 32/alpha 64를
+사용해 로컬 tokenizer·config와 meta 구조로 실제 준비 묶음을 만들고 재검증했다.
+
+| 항목 | 확인한 값 |
+|---|---:|
+| native text 파라미터 | 11,907,350,272 |
+| 공식 full-checkpoint element 수 | 11,959,730,224 |
+| 추가 adapter/decision 파라미터 | 145,042,438 |
+| 보수적인 전체 파라미터 수 | **12,104,772,662** |
+| native output head | 262,144 × 3,840, input과 tied, bias 없음 |
+| LoRA 위치 | q/k/o/gate/up/down 각 48개, v 40개 |
+| 준비 문항 | split별 96개, 총 480개 |
+| 실제 train 일정 | 3 steps × 32 rows = 96 rows, 각 row 1회 |
+| 일정의 원본 입력 토큰 | 15,250 |
+| split별 최대 입력 길이 | 207–212 tokens |
+| teacher 관측 / 수용 수 | **0 / 0** |
+| 실제 optimizer steps / model forward | **0 / 0** |
+
+이 묶음은 영어 authored mechanics 자료와 gold-only 제어군이다. production 품질 학습
+corpus를 완성했다는 뜻이 아니며 독립된 자연 문항에서 성능을 측정하지 않았다.
+96 train rows의 source lineage는 26개이므로 96개의 독립 규칙으로도 부르지 않는다.
+`promotable=false`, `execution_attested=false`를 유지한다. 실제 GPU/API 사용은 없었다.
+로컬 receipt는 `.dev/direct-native-cpu-20261004/receipt.json`이며 `.dev`는 Git 제외다.
+
 ## 아직 필요한 작업과 비용 조건
 
 - Claude의 독립 설계 판단 및 새 모듈 코드 리뷰. 요청은
-  `.dev/codex-direct-goal-to-claude-20261004.md`에 남겼으며 아직 답신이 없다.
-- 실제 사용할 corpus에 대한 독립 gold verifier와 decontamination, 기존 saved teacher의
-  model/prompt/원본 입력 binding. 새 teacher를 만드는 비용도 전체 예산에 포함한다.
+  `.dev/codex-direct-goal-to-claude-20261004.md`와
+  `.dev/codex-direct-runner-to-claude-20261004.md`에 남겼다. Swift 후속 snapshot과
+  기존 Clef head/objective 리뷰는 받았지만 이 direct 학습 가설/새 모듈 답신은 아직 없다.
+- 실제 품질 학습 corpus의 준비와 decontamination, authored 형식 밖의 독립 gold
+  검증, 실제 saved teacher의 model/prompt/원본 입력 및 실행 provenance 연결.
+  새 teacher를 만드는 비용도 전체 예산에 포함한다.
 - 정확한 weights/tokenizer/readout/LoRA 설정에 연결한 학습 runner, checkpoint/resume,
   학습 뒤 calibration→dev 선택→설정 freeze→독립 test 순서.
 - 실제 GPU의 logits/cache parity, 처리량·VRAM·serial latency, teacher 준비부터
   학습/test/회수까지 **잔액 안에서 완주**하는 사전 admission. R15 전체 시간 cap 문제는
-  Claude 측 Swift 담당 범위이며 해결 확인 전 과금 실행하지 않는다.
+  Claude 측 Swift 담당 범위이며 해결 확인 전 과금 실행하지 않는다. 최신 Swift 소스의
+  fake-clock CPU 재검사에서도 전체 60초 설정이 첫 priority의 work 600초/cleanup 630초로
+  늘어나는 반례가 유지되었다. 신규 GPU/API/process 없이 확인한 결과다.
 - 첫 CPU tiny-LoRA optimizer step은 데이터/손실 연결 검사다. 실제 성능 향상이나
   전체 생산 학습의 완료 증거가 아니다. 낮은 예산으로 실행 가능한 완전한 workload를
   먼저 정하며, 중도 시간 종료를 기본 학습 계획으로 쓰지 않는다.
 
-완료한 단위: `7daf9d6` gold NLL 보존, `974f95c` 직접 증류 준비.
-관련 CPU 테스트 46 passed / 5.67s, Ruff lint/format 통과.
-마지막 전체 CPU 회귀 검사: **1049 passed, 1 skipped / 142.91s**,
-소스 변경 0. 영수증은 `.dev/codex-direct-distillation-full-20261004.json`에 있다.
-whole-tree Ruff lint/format도 228 Python files에서 통과했다.
+완료한 단위: `7daf9d6` gold NLL 보존, `974f95c` 직접 증류 준비,
+`2447831` Trainer 사전 guard, `4df88fc` 원본 문서 gold verifier,
+`19f6c3e` immutable CPU bundle, `9f2a8dd` native meta 구조 검사,
+`80c8eb3` 실제 구조/heldout 문맥과 bundle 연결. 단위별 코드/테스트 수정 → lint/format →
+재검사 → 관련 테스트 → diff 검토 → 별도 커밋 순서로 검증했다.
+마지막 전체 CPU 회귀 검사: **1190 passed, 1 skipped / 166.10s**,
+소스 변경 0. 영수증은 `.dev/codex-direct-bundle-full-20261004.json`에 있다.
+whole-tree Ruff lint/format도 234 Python files에서 통과했다.
 새로운 GPU/API inference와 학습된 checkpoint는 없다.
