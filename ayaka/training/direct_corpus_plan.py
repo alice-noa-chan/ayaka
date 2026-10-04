@@ -253,6 +253,8 @@ def whole_epochs(plan, inventory, schedule, *, weights=None):
 
 
 def prepared_groups_sha256(groups):
+    """Bind CPU row fields; runtime frozen-base reads have a separate binding."""
+
     def portable(value):
         if isinstance(value, Decimal):
             return str(value)
@@ -262,9 +264,38 @@ def prepared_groups_sha256(groups):
             return [portable(v) for v in value]
         return value
 
-    return fingerprint(
-        [[fingerprint(portable(asdict(item))) for item in group] for group in groups]
-    )
+    def prepared(item):
+        value = asdict(item)
+        # Only this runtime attachment is excluded. The runner binds the
+        # validated frozen reads separately in its optimizer-state identity.
+        value["base_probs"] = None
+        return fingerprint(portable(value))
+
+    return fingerprint([[prepared(item) for item in group] for group in groups])
+
+
+def validate_runtime_replay(recipe, inventory, groups):
+    weight = recipe["loss_weights"]["base_replay"]
+    if type(weight) not in (int, float) or not math.isfinite(weight) or weight < 0:
+        raise ValueError("planned runtime base replay weight must be finite and nonnegative")
+    for sample, group in zip(inventory, groups, strict=True):
+        for item in group:
+            values = item.base_probs
+            required = weight > 0 and sample["data_kind"] == "natural"
+            if not required:
+                if values is not None:
+                    raise ValueError(
+                        "runtime base replay cannot be attached to unplanned/authored rows"
+                    )
+            elif (
+                not isinstance(values, list)
+                or len(values) != len(item.target)
+                or any(type(p) not in (int, float) or not math.isfinite(p) or p < 0 for p in values)
+                or not math.isclose(math.fsum(values), 1, rel_tol=0, abs_tol=1e-6)
+            ):
+                raise ValueError(
+                    "planned natural rows require aligned normalized frozen-base reads"
+                )
 
 
 def validate_contract(plan, splits, commitment, inventory, groups, schedule):
@@ -309,6 +340,8 @@ def validate_contract(plan, splits, commitment, inventory, groups, schedule):
         len(group) != len(row["rows"]) for group, row in zip(groups, inventory, strict=True)
     ):
         raise ValueError("corpus prepared group widths differ from the whole-question inventory")
+    if any(item.base_probs is not None for group in groups for item in group):
+        raise ValueError("CPU corpus preparation must exclude runtime frozen-base probabilities")
     if len(inventory) != len(splits["train"]) or any(
         row["content_sha256"] != fingerprint(sample.to_json())
         or row["language"] != sample.metadata["language"]

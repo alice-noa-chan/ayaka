@@ -29,6 +29,7 @@ from .direct_corpus_plan import (
     recipe_plan,
     split_summary,
     validate_contract,
+    validate_runtime_replay,
     whole_epochs,
 )
 from .direct_distillation import prepare_direct_distillation
@@ -668,6 +669,7 @@ def training_batches(recipe, inventory, groups, *, start_step=0):
             or prepared_groups_sha256(groups) != contract["prepared_groups_sha256"]
         ):
             raise ValueError("actual corpus training groups differ from the frozen complete epochs")
+        validate_runtime_replay(recipe, inventory, groups)
     if type(start_step) is not int or not 0 <= start_step <= schedule["steps"]:
         raise ValueError("resume step must be inside the complete fixed schedule")
     for step, batch in enumerate(scheduled_batches(inventory, **schedule)):
