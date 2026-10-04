@@ -40,7 +40,7 @@ GEMMA_12B_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
 DEFAULT_KWARGS = {"enable_thinking": False}
 # Planning estimates, not measured throughput. Loads are additional to priority
 # work: each new model/adapter needs an HF reference and a fresh vLLM server.
-PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P2": 5, "P3": 20, "P4": 15}
+PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P1R": 20, "P2": 5, "P3": 20, "P4": 15}
 ENVIRONMENT_PREP_MINUTES = 3
 HF_LOAD_MINUTES = 2
 VLLM_LOAD_MINUTES = 3
@@ -182,13 +182,19 @@ def priority_plan(models, *, with_lora_arm=False):
             "id": "P1",
             "minutes": PRIORITY_MINUTES["P1"],
             "enabled": True,
-            "work": f"{primary} x min,cygnet,rules,labeled: calibration, dev, Cygnet; public last (diagnostic); select on dev only",
+            "work": f"{primary} x min,cygnet,rules,labeled: calibration, dev, Cygnet; calibration selection + dev gate; public last (diagnostic)",
+        },
+        {
+            "id": "P1R",
+            "minutes": PRIORITY_MINUTES["P1R"],
+            "enabled": True,
+            "work": "reasoned reads for calibration+dev candidates with the selected variant; fit router on calibration only",
         },
         {
             "id": "P2",
             "minutes": PRIORITY_MINUTES["P2"],
             "enabled": True,
-            "work": "200 serial HTTP latency reads for the best TWO P1 variants only",
+            "work": "best TWO P1 variants: 400 public diagnostic requests; selected direct+routed system: 400 non-public serial requests then gate",
         },
         {
             "id": "P3",
@@ -305,7 +311,13 @@ def plan(
     decisions = sum(d["items"] for d in manifest["datasets"])
     reads = sum(d["reads"] for d in manifest["datasets"])
     lines.append(
-        f"All models: {len(models) * len(variants) * decisions} bulk decisions, {len(models) * len(variants) * reads} bulk model reads + 400 serial HTTP requests"
+        f"All models: {len(models) * len(variants) * decisions} bulk decisions, {len(models) * len(variants) * reads} bulk model reads + 800 serial HTTP requests"
+    )
+    candidates = sum(
+        d["items"] for d in manifest["datasets"] if d["name"] in ("v2_calibration", "v2_dev")
+    )
+    lines.append(
+        f"P1R upper bound: {candidates} candidate decisions, {2 * candidates} additional model calls; actual subset: direct max<=0.95 OR digit/date, K<=26; budget=384 trace tokens"
     )
     lines.append(
         "Output: HF references, parity.json, load_times.json, variant reads, top-two latency, selection, env.txt, progress.json; out.tar.zst + SHA256 includes partials"
@@ -539,6 +551,64 @@ def select_model_results(directory: Path) -> dict:
     for variant, policy in selection["policies"].items():
         Policy(**policy).save(directory / variant / "policy.json")
     return selection
+
+
+def reasoning_results(directory: Path, *, gate=False):
+    """Separate calibration fit from the single dev gate after the serial probe."""
+    from dataclasses import replace
+
+    from ayaka.swift.adopt import adopt_levers
+    from ayaka.swift.collect import load_reads
+    from ayaka.swift.policy import Policy
+    from ayaka.swift.router import fit_router, public_route_diagnostic, validate_pairs
+
+    current = Policy.load(directory / "policy.json")
+    variant = current.prompt_variant
+    cal, dev = [], []
+    for v in FIXED_VARIANTS:
+        cal += [
+            r
+            for r in load_reads([directory / v / "v2_calibration.reads.jsonl"])
+            if r["readout"] != "grouped_approx"
+        ]
+        dev += [
+            r
+            for r in load_reads([directory / v / "v2_dev.reads.jsonl"])
+            if r["readout"] != "grouped_approx"
+        ]
+    selected = directory / variant
+    cal_reasoned = load_reads([selected / "v2_calibration.reasoned.jsonl"])
+    dev_reasoned = load_reads([selected / "v2_dev.reasoned.jsonl"])
+    if not gate:
+        rows = [r for r in cal if r["prompt_variant"] == variant]
+        params = fit_router(rows, validate_pairs(rows, cal_reasoned), current)
+        candidate = replace(
+            current, reasoning_route=params["router"], promotable=False, adoption=None
+        )
+        write_json(directory / "reasoning_fit.json", params)
+        candidate.save(directory / "reasoning_candidate.policy.json")
+        return params
+    baseline = current
+    if not baseline.adoption:
+        # With no earlier lever accepted, this is the original min baseline.
+        baseline = replace(current, adoption=None)
+    report = adopt_levers(
+        cal,
+        dev,
+        baseline,
+        levers=("reasoning_route",),
+        reasoning_calibration=cal_reasoned,
+        reasoning_dev=dev_reasoned,
+        direct_system_latency=[json.loads((directory / "direct_system.latency.json").read_text())],
+        routed_latency=[json.loads((directory / "routed_system.latency.json").read_text())],
+    )
+    final = Policy(**report["final_policy"])
+    write_json(directory / "reasoning_adoption.json", report)
+    write_json(directory / "adoption.json", report)
+    final.save(directory / "policy.json")
+    public = load_reads([selected / "jevbench_public.reads.jsonl"])
+    write_json(directory / "public_route.diagnostic.json", public_route_diagnostic(public, final))
+    return report
 
 
 def execute(args, models, manifest, started, options):
@@ -883,6 +953,106 @@ def execute(args, models, manifest, started, options):
                 )
             finally:
                 supervisor.stop([swift])
+        # A candidate is served diagnostically before any reasoning adoption.
+        root = args.output / model["slug"]
+        current = json.loads((root / "policy.json").read_text())
+        variant = current["prompt_variant"]
+        dev = next(d for d in manifest["datasets"] if d["name"] == "v2_dev")
+        for system, policy_path in (
+            ("direct", root / "policy.json"),
+            ("routed", root / "reasoning_candidate.policy.json"),
+        ):
+            swift = supervisor.start(
+                [
+                    sys.executable,
+                    "-m",
+                    "ayaka.swift.server",
+                    "--prompt-variant",
+                    variant,
+                    *reader_flags(model),
+                    "--policy",
+                    str(policy_path),
+                    "--diagnostic",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(args.swift_port),
+                    "--max-parallel",
+                    "1",
+                ],
+                root / (system + "_system.swift.log"),
+            )
+            try:
+                swift_url = f"http://127.0.0.1:{args.swift_port}"
+                supervisor.health(swift_url + "/health", swift, args.health_timeout)
+                run(
+                    [
+                        sys.executable,
+                        str(REPO / "scripts/swift/latency_probe.py"),
+                        *dev["paths"],
+                        "--url",
+                        swift_url,
+                        "--output",
+                        str(root / (system + "_system.latency.json")),
+                        "--model",
+                        model["model"],
+                        "--revision",
+                        model["revision"],
+                        "--prompt-variant",
+                        variant,
+                        "--reads",
+                        "200",
+                        "--non-public",
+                        "--policy",
+                        str(policy_path),
+                    ],
+                    root / (system + "_system.latency.log"),
+                    model["slug"] + "/" + system + "_system_latency",
+                )
+            finally:
+                supervisor.stop([swift])
+        run(
+            [sys.executable, str(Path(__file__).resolve()), "_reasoning_gate", str(root)],
+            root / "reasoning_gate.log",
+            model["slug"] + "/reasoning_gate",
+        )
+
+    def collect_reasoning(model):
+        root = args.output / model["slug"]
+        variant = json.loads((root / "policy.json").read_text())["prompt_variant"]
+        for dataset in manifest["datasets"]:
+            if dataset["name"] not in ("v2_calibration", "v2_dev"):
+                continue
+            directory = root / variant
+            run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ayaka.swift.collect",
+                    *dataset["paths"],
+                    "--output",
+                    str(directory / (dataset["name"] + ".reasoned.jsonl")),
+                    "--direct-reads",
+                    str(directory / (dataset["name"] + ".reads.jsonl")),
+                    "--reasoned",
+                    "--trace-max-tokens",
+                    "384",
+                    "--prompt-variant",
+                    variant,
+                    *reader_flags(model),
+                    "--concurrency",
+                    str(args.concurrency),
+                    "--group-size",
+                    str(manifest["group_size"]),
+                ],
+                directory / "reasoned.log",
+                model["slug"] + "/reasoned/" + dataset["name"],
+            )
+        run(
+            [sys.executable, str(Path(__file__).resolve()), "_reasoning_fit", str(root)],
+            root / "reasoning_fit.log",
+            model["slug"] + "/reasoning_fit",
+        )
 
     def interrupted(signum, frame):
         raise KeyboardInterrupt(f"received signal {signum}")
@@ -927,6 +1097,8 @@ def execute(args, models, manifest, started, options):
                 collect_model(models[0], select=True)
             elif priority["id"] == "P2":
                 probe_best_two(models[0])
+            elif priority["id"] == "P1R":
+                collect_reasoning(models[0])
             elif priority["id"] == "P3":
                 collect_model(models[1])
             else:
@@ -1051,6 +1223,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv and argv[0] == "_select":
         select_model_results(Path(argv[1]))
+        return 0
+    if argv and argv[0] in ("_reasoning_fit", "_reasoning_gate"):
+        reasoning_results(Path(argv[1]), gate=argv[0] == "_reasoning_gate")
         return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")

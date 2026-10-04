@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ayaka.swift.collect import collect, iter_dataset
+from ayaka.swift.collect import collect, iter_dataset, load_reads
 from ayaka.swift.readers import FakeReader
 from ayaka.swift.server import DecisionService, serve
 from scripts.swift import gpu_runner
@@ -174,17 +174,18 @@ def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatc
     assert gpu_runner.main(["--dry-run", "--manifest", str(DEFAULT_MANIFEST)]) == 0
     output = capsys.readouterr().out
     assert "vllm==0.30.0" in output
-    assert "32960 bulk decisions, 39104 bulk model reads + 400 serial HTTP requests" in output
+    assert "32960 bulk decisions, 39104 bulk model reads + 800 serial HTTP requests" in output
+    assert "P1R upper bound: 3648 candidate decisions, 7296 additional model calls" in output
     assert "Prompt variants: min,cygnet,rules,labeled" in output
     assert "Qwen/Qwen3.5-4B" not in output
     assert "<set revision via env/--model>" in output
     assert "75 minutes" in output
     assert "Time budget table" in output
     assert "pre-launch admission" in output
-    assert "Enabled plan total: 85 minutes" in output
+    assert "Enabled plan total: 105 minutes" in output
     assert "Admission: REFUSED" in output
     assert "Cleanup/pack reserve: 120s inside the cap" in output
-    assert all(priority in output for priority in ("P0", "P1", "P2", "P3", "P4"))
+    assert all(priority in output for priority in ("P0", "P1", "P1R", "P2", "P3", "P4"))
     assert "best TWO" in output
     assert "P4           15  False" in output
     assert "centered log-mass <= 0.05 nats" in output
@@ -224,7 +225,7 @@ def test_dry_run_fixed_variants_and_optional_lora(capsys):
     assert gpu_runner.main(["--dry-run", "--with-lora-arm"]) == 0
     output = capsys.readouterr().out
     assert "P4           15  True" in output
-    assert "Enabled plan total: 105 minutes" in output
+    assert "Enabled plan total: 125 minutes" in output
     for invalid in ("", "min,min", "min,unknown", "min,", "min,rules"):
         with pytest.raises(SystemExit):
             gpu_runner.main(["--dry-run", "--prompt-variants", invalid])
@@ -436,7 +437,7 @@ def runner_fixture(
     failure=None,
     cap_after_p1=False,
     with_lora_arm=False,
-    max_minutes=105,
+    max_minutes=125,
     allow_partial=False,
     started=100.0,
     cleanup_seconds=0,
@@ -555,6 +556,10 @@ def runner_fixture(
                 )
                 events.append(("collect", model, Path(source).stem, variant))
                 reader = FakeReader()
+                if "--reasoned" in command:
+                    from test_swift_reasoning import TraceReader
+
+                    reader = TraceReader()
                 reader.backend = "vllm"
                 reader.logprobs_mode = "raw_logits"
                 collect(
@@ -565,6 +570,10 @@ def runner_fixture(
                     revision=command[command.index("--revision") + 1],
                     prompt_variant=variant,
                     diagnostic="--diagnostic" in command,
+                    reasoned="--reasoned" in command,
+                    direct_reads=load_reads([command[command.index("--direct-reads") + 1]])
+                    if "--reasoned" in command
+                    else None,
                 )
                 if cap_after_p1 and Path(source).stem == "jevbench_public" and variant == "labeled":
                     now[0] = self.work_deadline
@@ -573,10 +582,42 @@ def runner_fixture(
                 now[0] += selection_seconds
                 self.remaining()
                 gpu_runner.select_model_results(Path(command[-1]))
+            elif "_reasoning_fit" in command or "_reasoning_gate" in command:
+                events.append(
+                    ("reasoning_gate" if "_reasoning_gate" in command else "reasoning_fit",)
+                )
+                gpu_runner.reasoning_results(Path(command[-1]), gate="_reasoning_gate" in command)
             elif any(str(part).endswith("latency_probe.py") for part in command):
                 assert active == ["vllm", "swift"]
                 events.append(("probe", command[command.index("--prompt-variant") + 1]))
-                Path(command[command.index("--output") + 1]).write_text('{"complete":true}')
+                if "--non-public" in command:
+                    from ayaka.eval.read_artifact import fingerprint
+                    from ayaka.swift.policy import Policy
+
+                    policy = Policy.load(command[command.index("--policy") + 1])
+                    result = {
+                        "complete": True,
+                        "public": False,
+                        "split": "dev",
+                        "model": command[command.index("--model") + 1],
+                        "revision": "a" * 40,
+                        "prompt_variant": policy.prompt_variant,
+                        "system": "reasoning_route" if policy.reasoning_route else "direct",
+                        "router_sha256": fingerprint(policy.reasoning_route)
+                        if policy.reasoning_route
+                        else None,
+                        "concurrency": 1,
+                        "units": "seconds",
+                        "requested_reads": 3,
+                        "completed_reads": 3,
+                        "seed": 15,
+                        "samples": [{"id": str(i)} for i in range(3)],
+                        "p50_s": 0.03,
+                        "p95_s": 0.05,
+                    }
+                else:
+                    result = {"complete": True}
+                Path(command[command.index("--output") + 1]).write_text(json.dumps(result))
             elif "_pack" in command:
                 assert not active
                 assert float(command[command.index("--deadline") + 1]) == started + max_minutes * 60
@@ -654,13 +695,14 @@ def test_runner_reference_exit_before_vllm_and_parity_aborts_bulk(tmp_path, monk
             assert diagnostic["samples"]
         return
     assert progress["status"] == "complete"
-    assert [p["status"] for p in progress["priorities"]] == ["complete"] * 4 + ["skipped"]
-    assert len([e for e in events if e[0] == "probe"]) == 2
-    assert {e[1] for e in events if e[0] == "probe"} == set(progress["best_two_variants"])
+    assert [p["status"] for p in progress["priorities"]] == ["complete"] * 5 + ["skipped"]
+    assert len([e for e in events if e[0] == "probe"]) == 4
+    assert {e[1] for e in events if e[0] == "probe"} >= set(progress["best_two_variants"])
+    assert ("reasoning_fit",) in events and ("reasoning_gate",) in events
     for model in ("first", "second"):
         collected = [e for e in events if e[0] == "collect" and e[1] == model]
-        assert len(collected) == 16
-        assert all(e[2] == "jevbench_public" for e in collected[-3:])
+        assert len(collected) == (18 if model == "first" else 16)
+        assert len([e for e in collected if e[2] == "jevbench_public"]) == 4
         assert events.index(("parity", model)) < events.index(collected[0])
         timings = json.loads((args.output / model / "load_times.json").read_text())
         assert timings["hf_load_s"] == 0.1 and timings["vllm_load_s"] >= 0
@@ -683,6 +725,7 @@ def test_runner_last_command_at_deadline_is_incomplete_and_later_priorities_skip
         "skipped",
         "skipped",
         "skipped",
+        "skipped",
     ]
     assert len([e for e in events if e[0] == "collect"]) == 16
     assert not any(e[0] == "probe" for e in events)
@@ -693,7 +736,7 @@ def test_optional_lora_arm_only_runs_with_flag_and_records_adapter_hash(tmp_path
     code, args, events, commands = runner_fixture(tmp_path, monkeypatch, with_lora_arm=True)
     assert code == 0
     state = json.loads((args.output / "progress.json").read_text())
-    assert state["priorities"][4]["status"] == "complete"
+    assert state["priorities"][5]["status"] == "complete"
     assert len([e for e in events if e[0] == "collect" and e[1] == "ayaka-large-swift"]) == 16
     arm = state["models"]["ayaka_large_lora"]
     assert len(arm["adapter_sha256"]) == 64
@@ -714,12 +757,12 @@ def test_reference_failure_keeps_invalid_artifact_and_never_starts_vllm(tmp_path
 def test_admission_includes_environment_all_enabled_work_loads_and_cleanup():
     models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
     admission = gpu_runner.admission_plan(models, 75)
-    assert admission["planned_minutes"] == 85
+    assert admission["planned_minutes"] == 105
     assert admission["environment_prep_minutes"] == 3
     assert admission["cleanup_reserve_seconds"] == 120
-    assert [p["load_minutes"] for p in admission["priorities"]] == [5, 0, 0, 5, 5]
+    assert [p["load_minutes"] for p in admission["priorities"]] == [5, 0, 0, 0, 5, 5]
     assert admission["refused"] and not any(p["admitted"] for p in admission["priorities"])
-    assert gpu_runner.admission_plan(models, 105, with_lora_arm=True)["planned_minutes"] == 105
+    assert gpu_runner.admission_plan(models, 125, with_lora_arm=True)["planned_minutes"] == 125
 
 
 @pytest.mark.parametrize(
@@ -729,8 +772,10 @@ def test_admission_includes_environment_all_enabled_work_loads_and_cleanup():
         (20, ["P0"]),
         (45, ["P0"]),
         (55, ["P0", "P1"]),
-        (60, ["P0", "P1", "P2"]),
-        (85, ["P0", "P1", "P2", "P3"]),
+        (60, ["P0", "P1"]),
+        (75, ["P0", "P1", "P1R"]),
+        (80, ["P0", "P1", "P1R", "P2"]),
+        (105, ["P0", "P1", "P1R", "P2", "P3"]),
     ],
 )
 def test_allow_partial_admits_a_prefix_including_exact_fit(minutes, admitted_ids):
@@ -756,7 +801,7 @@ def test_overbudget_execute_refuses_before_any_environment_or_model_work(tmp_pat
     monkeypatch.setattr(gpu_runner, "require_free_ports", forbidden)
     monkeypatch.setattr(gpu_runner.importlib.metadata, "version", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
-    with pytest.raises(ValueError, match="planned total 85 minutes exceeds --max-minutes 1"):
+    with pytest.raises(ValueError, match="planned total 105 minutes exceeds --max-minutes 1"):
         gpu_runner.execute(
             args, models, {"datasets": []}, 0.0, gpu_runner.model_options(None, models)
         )
@@ -778,7 +823,7 @@ def test_r15_counterexample_60_second_cap_never_extends_any_deadline(tmp_path, m
     assert state["status"] == "partial"
     assert state["hard_deadline_elapsed_s"] == 60
     assert state["finished_steps"] == []
-    assert [p["skip_reason"] for p in state["priorities"]] == ["not_admitted"] * 4 + ["disabled"]
+    assert [p["skip_reason"] for p in state["priorities"]] == ["not_admitted"] * 5 + ["disabled"]
 
 
 def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypatch):
@@ -796,8 +841,8 @@ def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypa
     )
     assert code == 0
     initial = initial_states[0]
-    assert [p["status"] for p in initial["priorities"]] == ["pending"] + ["skipped"] * 4
-    assert [p["skip_reason"] for p in initial["priorities"]] == [None] + ["not_admitted"] * 3 + [
+    assert [p["status"] for p in initial["priorities"]] == ["pending"] + ["skipped"] * 5
+    assert [p["skip_reason"] for p in initial["priorities"]] == [None] + ["not_admitted"] * 4 + [
         "disabled"
     ]
     state = json.loads((args.output / "progress.json").read_text())
@@ -807,7 +852,7 @@ def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypa
 
 def test_priority_timeout_stops_work_and_preserves_partial_archive(tmp_path, monkeypatch):
     code, args, events, commands = runner_fixture(
-        tmp_path, monkeypatch, priority_seconds=901, max_minutes=85
+        tmp_path, monkeypatch, priority_seconds=901, max_minutes=105
     )
     assert code == 124
     state = json.loads((args.output / "progress.json").read_text())
@@ -817,7 +862,7 @@ def test_priority_timeout_stops_work_and_preserves_partial_archive(tmp_path, mon
     assert not any(e[0] in ("serve", "collect", "probe") for e in events)
     assert not any(command[0] == "vllm" for command in commands)
     assert args.archive.is_file()
-    assert all(e[1] <= 85 * 60 for e in events if e[0] in ("deadline", "work_deadline"))
+    assert all(e[1] <= 105 * 60 for e in events if e[0] in ("deadline", "work_deadline"))
 
 
 def test_environment_deadline_is_capped_and_timeout_skips_all_priorities(tmp_path, monkeypatch):
@@ -843,7 +888,7 @@ def test_cleanup_after_hard_deadline_cannot_launch_pack_or_extend_cap(tmp_path, 
 
 
 def test_pack_timeout_cannot_report_complete(tmp_path, monkeypatch):
-    code, args, _, _ = runner_fixture(tmp_path, monkeypatch, max_minutes=85, pack_seconds=85 * 60)
+    code, args, _, _ = runner_fixture(tmp_path, monkeypatch, max_minutes=105, pack_seconds=105 * 60)
     assert code == 124
     state = json.loads((args.output / "progress.json").read_text())
     assert state["status"] == "partial" and state["archive_status"] == "timeout"
@@ -870,22 +915,27 @@ def test_next_priority_deadline_is_clamped_to_global_work_limit(tmp_path, monkey
         nonlocal advanced
         if path.name == "progress.json" and "P1" in data["finished_steps"] and not advanced:
             # Simulate time between priorities: just one second of work remains.
-            now[0] = 60 * 60 - gpu_runner.CLEANUP_RESERVE_SECONDS - 1
+            now[0] = 75 * 60 - gpu_runner.CLEANUP_RESERVE_SECONDS - 1
             advanced = True
         real_write(path, data)
 
     monkeypatch.setattr(gpu_runner, "write_json", slow_checkpoint)
     code, args, events, _ = runner_fixture(
-        tmp_path, monkeypatch, max_minutes=60, allow_partial=True, started=0, clock=now
+        tmp_path, monkeypatch, max_minutes=75, allow_partial=True, started=0, clock=now
     )
     assert code == 0
     state = json.loads((args.output / "progress.json").read_text())
     priority = state["priorities"][2]
-    assert priority["started_elapsed_s"] == 3479
-    assert priority["work_deadline_elapsed_s"] == 3480
-    assert priority["work_deadline_elapsed_s"] < priority["started_elapsed_s"] + 5 * 60
-    assert all(p.get("work_deadline_elapsed_s", 0) <= 3480 for p in state["priorities"])
-    assert all(e[1] <= 3600 for e in events if e[0] in ("deadline", "work_deadline"))
+    assert priority["started_elapsed_s"] == 4379
+    assert priority["work_deadline_elapsed_s"] == 4380
+    assert priority["work_deadline_elapsed_s"] < priority["started_elapsed_s"] + 20 * 60
+    assert all(p.get("work_deadline_elapsed_s", 0) <= 4380 for p in state["priorities"])
+    assert all(e[1] <= 4500 for e in events if e[0] in ("deadline", "work_deadline"))
+    root = args.output / "first"
+    assert json.loads((root / "policy.json").read_text()).get("reasoning_route") is None
+    assert (root / "reasoning_candidate.policy.json").exists()
+    assert ("reasoning_gate",) not in events
+    assert not any(e[0] == "probe" for e in events)
 
 
 def test_supervisor_cleanup_grace_is_bounded_by_absolute_deadline(tmp_path, monkeypatch):
@@ -920,3 +970,52 @@ def test_dry_run_allow_partial_prints_admission_prefix(capsys):
     rows = [line for line in output.splitlines() if line.startswith(("P0 ", "P1 ", "P2 ", "P3 "))]
     assert "admitted" in rows[0]
     assert all("skipped: not_admitted" in line for line in rows[1:])
+
+
+def test_system_latency_probe_non_public_standard_judge_only(tmp_path, monkeypatch):
+    from test_swift_reasoning import always_router
+
+    from ayaka.eval.read_artifact import fingerprint
+    from ayaka.swift.policy import Policy
+
+    path = tmp_path / "dev.jsonl"
+    rows = [
+        {**record(i), "id": str(i), "public": False, "split": "dev", "tier": tier}
+        for i, tier in enumerate(("hard", "standard", "judge"))
+    ]
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    calls = []
+
+    def urlopen(request, timeout):
+        calls.append(json.loads(request.data))
+        return io.BytesIO(b'{"answers":{"probe":{}}}')
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    policy = Policy(reasoning_route=always_router())
+    result = probe(
+        [path],
+        "http://fake",
+        tmp_path / "latency.json",
+        model="frozen",
+        revision="a" * 40,
+        reads=2,
+        non_public=True,
+        policy=policy,
+    )
+    assert {s["id"] for s in result["samples"]} == {"1", "2"}
+    assert result["public"] is False and result["split"] == "dev"
+    assert result["system"] == "reasoning_route"
+    assert result["router_sha256"] == fingerprint(policy.reasoning_route)
+    assert len(calls) == 2
+    path.write_text(json.dumps({**rows[1], "public": True}) + "\n")
+    with pytest.raises(ValueError, match="non-public dev"):
+        probe(
+            [path],
+            "http://fake",
+            tmp_path / "refused.json",
+            model="frozen",
+            revision="a" * 40,
+            reads=1,
+            non_public=True,
+        )
+    assert len(calls) == 2

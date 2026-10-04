@@ -12,7 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from ayaka.eval.read_artifact import fingerprint  # noqa: E402
+from ayaka.swift.adopt import policy_fingerprint  # noqa: E402
 from ayaka.swift.collect import iter_dataset  # noqa: E402
+from ayaka.swift.policy import Policy  # noqa: E402
 from ayaka.swift.prompt import PROMPT_VARIANTS, validate_prompt_variant  # noqa: E402
 
 
@@ -40,9 +43,19 @@ def probe(
     timeout: float = 120,
     seed: int = 20261004,
     prompt_variant: str = "min",
+    non_public: bool = False,
+    policy: Policy | None = None,
 ) -> dict:
     validate_prompt_variant(prompt_variant)
     items = list(iter_dataset(paths))
+    if non_public:
+        if any(item.public or item.split != "dev" for item in items):
+            raise ValueError("system probes require exclusively non-public dev")
+        items = [
+            item
+            for item in items
+            if item.tier in ("standard", "judge") and len(item.question.labels) <= 26
+        ]
     if reads < 1 or reads > len(items):
         raise ValueError("probe requires enough distinct items for the requested reads")
     random.Random(seed).shuffle(items)
@@ -65,6 +78,14 @@ def probe(
         "p95_s": None,
         "samples": samples,
         "self_hosted_adjustment": {"scale": 2, "offset_s": 0.15, "applied": False},
+        "public": not non_public,
+        "split": "dev" if non_public else "public",
+        "tier_filter": ["standard", "judge"] if non_public else None,
+        "system": "reasoning_route" if policy and policy.reasoning_route else "direct",
+        "router_sha256": fingerprint(policy.reasoning_route)
+        if policy and policy.reasoning_route
+        else None,
+        "policy_sha256": policy_fingerprint(policy) if policy else None,
     }
     write_json(output, result)
     for item in items[:reads]:
@@ -121,6 +142,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--reads", type=int, default=200)
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument("--prompt-variant", choices=PROMPT_VARIANTS, default="min")
+    parser.add_argument("--non-public", action="store_true")
+    parser.add_argument("--policy", type=Path, help="policy served by the probed system")
     args = parser.parse_args(argv)
     probe(
         args.dataset,
@@ -131,6 +154,8 @@ def main(argv: list[str] | None = None) -> None:
         reads=args.reads,
         timeout=args.timeout,
         prompt_variant=args.prompt_variant,
+        non_public=args.non_public,
+        policy=Policy.load(args.policy) if args.policy else None,
     )
 
 

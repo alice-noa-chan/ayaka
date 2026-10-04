@@ -21,7 +21,7 @@ Transfer code and the input archive to the intended host yourself. The stored
 ```bash
 export SWIFT_GEMMA_E4B_REVISION=FULL_COMMIT_SHA
 bash scripts/swift/collect_gpu.sh --dry-run
-bash scripts/swift/collect_gpu.sh --max-minutes 85
+bash scripts/swift/collect_gpu.sh --max-minutes 105
 # Or explicitly admit a prefix within the default 75-minute cap:
 bash scripts/swift/collect_gpu.sh --max-minutes 75 --allow-partial
 ```
@@ -29,8 +29,9 @@ bash scripts/swift/collect_gpu.sh --max-minutes 75 --allow-partial
 | Priority | Work minutes | Load minutes | Work |
 | --- | ---: | ---: | --- |
 | P0 | 10 | 5 | 12B HF GPU bf16 reference; exit/free GPU memory; vLLM load and exact-ID parity |
-| P1 | 35 | 0 | gemma-4-12B-it x min,cygnet,rules,labeled: calibration, dev, Cygnet; select on dev; public diagnostic last |
-| P2 | 5 | 0 | 200 serial HTTP requests for each of P1's best two variants |
+| P1 | 35 | 0 | gemma-4-12B-it x min,cygnet,rules,labeled: calibration selection, dev gate, Cygnet; public diagnostic last |
+| P1R | 20 | 0 | Reasoned calibration+dev candidates with the accepted variant; calibration-only router fit |
+| P2 | 5 | 0 | 200 public diagnostic requests per best two variants; 200 non-public direct and 200 routed system requests; reasoning gate |
 | P3 | 20 | 5 | E4B x the same variants/datasets, with its own sequential HF/vLLM parity |
 | P4 | 15 | 5 | Optional ayaka-large LoRA arm on the identical pinned 12B base/tokenizer |
 | Environment prep | 3 | 0 | Environment preflight |
@@ -38,11 +39,13 @@ bash scripts/swift/collect_gpu.sh --max-minutes 75 --allow-partial
 
 These are planning estimates, not measured throughput. Each new model/adapter
 adds 2 minutes for HF loading and 3 for vLLM loading. The enabled plan totals
-85 minutes; enabling P4 gives 105 minutes. Before environment prep or model
+105 minutes; enabling P4 gives 125 minutes. Before environment prep or model
 loading, the runner refuses an over-budget plan. The default 75-minute cap
 therefore needs a larger cap or `--allow-partial`. With that flag, only the
 priority prefix whose full estimated total fits is admitted; at 75 minutes this
-is P0/P1/P2. All remaining enabled priorities are marked `skipped` with
+is P0/P1/P1R. At 80 minutes P2 fits too. If P2 is excluded, the reasoning fit
+remains a diagnostic candidate and the accepted direct policy stays exported.
+All remaining enabled priorities are marked `skipped` with
 `skip_reason: not_admitted` up front. Dry runs print the admission table, including
 refusals, without launching anything. If no priority fits, no environment or
 model work starts.
@@ -172,13 +175,75 @@ python scripts/swift/adopt.py --calibration cal/*.reads.jsonl --dev dev/*.reads.
   --output adoption.json --policy policy.json
 ```
 
-The fixed sequence is variant then bias; reasoning routing is reserved and refused.
+The fixed sequence is variant, bias, then reasoning_route.
 A variant is chosen on calibration only, then tested once on dev. Bias fits only
 calibration rows for the accepted variant, with frozen temperatures. Its objective
 is mean pre-commit NLL + 0.001/2 times squared offsets. Choice and Score use one
 vector per option count; Noul uses one true-logit intercept. Buckets below 30
 questions have no bias. Bias uses raw canonical letter masses and applies before
 temperature; it requires no additional inference.
+
+### Gated worked steps
+
+The frozen backend receives the active variant's original user turn with a fixed
+instruction appended: work out relevant facts, rules, dates and arithmetic step
+by step, briefly, without a final letter. Generation is greedy, thinking disabled,
+with a predeclared 384-token default budget and EOS stopping. The second request
+uses that user turn, the assistant trace, and `Answer with only the option letter.`
+The existing canonical raw-token gather supplies the distribution. Length-capped
+traces are read and flagged. Trace text remains internal and in offline binding
+artifacts; it never appears in TypeSafe responses.
+
+Collect paired candidates only after direct reads exist:
+
+```sh
+python -m ayaka.swift.collect calibration.jsonl --output cal.reasoned.jsonl \
+  --reasoned --direct-reads cal.reads.jsonl --trace-max-tokens 384 \
+  --model MODEL --revision SHA --prompt-variant min
+python -m ayaka.swift.collect dev.jsonl --output dev.reasoned.jsonl \
+  --reasoned --direct-reads dev.reads.jsonl --model MODEL --revision SHA
+python scripts/swift/adopt.py --calibration cal.reads.jsonl --dev dev.reads.jsonl \
+  --baseline-policy baseline.json --levers reasoning_route \
+  --reasoning-calibration cal.reasoned.jsonl --reasoning-dev dev.reasoned.jsonl
+```
+
+Candidates have direct max probability <=0.95 OR any digit/date in state or
+instructions, and at most 26 options. Selection happens before generation and
+resume checks bind the exact direct record, recipe and trace budget. Adoption
+requires complete paired reads for this subset of the accepted prompt, matching
+calibration/dev budgets, all original non-public role/binding/isolation guards,
+and all three primitive types in the full direct cohorts.
+
+The pure-Python logistic router predicts lower proper log loss under the accepted
+policy using only primitive type, K, raw max probability, margin, entropy, digit,
+ISO-like date, currency/percent and comparison counts, and log state length. It
+never sees tier, labels, targets or traces as features. Training targets use the
+paired calibration outcomes. Standardized features, L2=0.01 and 400 deterministic
+gradient iterations are fixed. Choose the threshold by calibration composite A
+under the overall 10% route cap; ties prefer off. This cap applies on calibration,
+not as a guarantee of a future cohort's route rate.
+
+The system first reads directly to decide whether to route. A routed decision
+therefore makes three backend calls. Usage and token Cost include all three
+inputs, trace output tokens and both one-position outputs. Default adoption token
+prices are 0.0403 USD/million for input and output; supply actual prices explicitly
+when measuring. Explicit client requests for a positive reasoning budget still
+return 422 before backend calls; only the loaded gated policy enables routing.
+
+Fit Speed is projected by mixing collected direct and full routed latency
+distributions at the routed share. This projection uses bulk backend timings and
+is explicitly marked `assumed`; it is not a serial benchmark measurement. Dev
+Speed uses a complete non-public serial system probe when supplied, otherwise the
+same flagged projection. In addition to every existing gate, the projected
+adjusted p95 (`2 * raw + 0.15`) must stay within 10% of the accepted direct system.
+An optional routed probe binds the exact router; paired direct/routed probes use
+the same ordered non-public standard/judge sample and seed. Public standard+judge
+route rates go only to `public_route.diagnostic.json`, labeled DIAGNOSTIC_ONLY,
+after the final policy is frozen, and never enter fitting or gates.
+
+The runner's P1R fits a candidate after P1's accepted prompt is fixed. P2 probes
+the selected direct and candidate routed systems, then gates reasoning once,
+preserving earlier accepted lever receipts without retrying their dev gates.
 
 For each requested lever, paired whole-case bootstrap uses the existing primitive
 coverage strata, B=2000 and seed=15. Adopt only when the 95% lower bound of delta A
@@ -187,10 +252,11 @@ least -0.5, and every primitive's point CC delta is at least -2. An accepted lev
 becomes the next baseline. Rejection leaves it off; there are no dev retries.
 These finite-sample gates provide evidence rather than certainty of future gains.
 
-Token Cost is computed from the measured read counts and declared prices. Speed
+Token Cost is computed from measured input and output counts and declared prices. Speed
 uses complete serial non-public dev probes supplied with --latency, otherwise
 --speed-axis (91) is recorded as assumed. --assume-cost records the fixed
---cost-axis (56.4) as assumed. Bulk concurrency timings do not supply Speed.
+--cost-axis (56.4) as assumed. Reasoning projections are explicitly assumed;
+bulk concurrency timings never count as measured serial Speed.
 Public/test reads, diagnostic reads, invalid bindings, role overlap and mismatched
 recipes are refused before fitting. There is no exploratory override in adoption.
 
@@ -205,19 +271,25 @@ candidates. Candidate-only fits of non-min prompts are never promotable.
 
 The manifest currently gives 4120 decisions / 4888 model reads per model/variant,
 including grouped reads. Both models and four variants total 32960 bulk
-decisions / 39104 model reads. P2 adds 400 serial requests; parity adds 112
+decisions / 39104 model reads. P1R adds at most 3648 candidate decisions / 7296
+backend calls (the actual subset depends on direct reads). P2 adds 800 serial
+HTTP requests; routed requests may make three backend calls. Parity adds 112
 forwards (7 items x 4 variants x HF/vLLM x 2 models). Optional P4 adds its own
 bulk/parity work. Dry-run output recomputes the inventory and prints priorities.
 
 The latency probe shuffles the public items deterministically, requests one
 question at a time through Swift HTTP, and records raw p50/p95 seconds with no
 bulk traffic. Prefix caching remains enabled after collection, so these are
-warm-cache measurements. Bulk `latency_s` must not supply the Speed axis.
+warm-cache measurements. The selected system probes additionally filter a
+non-public dev standard+judge sample, use the same deterministic order, and
+record split/public provenance and policy/router hashes.
 
 `progress.json` records priority statuses, completed steps, errors and elapsed
 time. Model directories hold references, parity diagnostics, load times,
 resolved revisions, environment metadata, selection and per-variant reads.
-Only the best two primary variants have latency artifacts. Successful rows are
+The best two primary variants and selected direct/routed systems have latency
+artifacts. Reasoning fit/adoption and public route diagnostic reports are separate.
+Successful rows are
 flushed as collected. Final `out.tar.zst` and its SHA256 include partial results;
 Python zstandard or system libzstd must already be available. Exit codes are
 0 complete or an explicitly allowed partial prefix, 1 failure, 124 work/cleanup
