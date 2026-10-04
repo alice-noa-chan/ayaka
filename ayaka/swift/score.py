@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import mean
 
 from .losses import row_nll, target_distribution
@@ -269,11 +269,15 @@ def probability_metrics(rows: list[dict], items: list[ScoredItem], policy: Polic
         for row, item in pairs:
             target = target_distribution(row)
             temperature = getattr(policy, f"t_{kind}")
-            scaled = Policy(**{f"t_{kind}": temperature}).apply(
-                kind, row["raw_probs"], candidate_log_masses=row.get("candidate_log_masses")
+            ordered_probs = {label: row["raw_probs"][label] for label in item.labels}
+            scaled = replace(policy, noul_commit=False, commit_margin=None).apply(
+                kind, ordered_probs, candidate_log_masses=row.get("candidate_log_masses")
             )
             if item.probs == scaled:
-                losses.append(row_nll(row, temperature))
+                masses = policy.biased_log_masses(
+                    kind, ordered_probs, row.get("candidate_log_masses")
+                )
+                losses.append(row_nll({**row, "candidate_log_masses": masses}, temperature))
             else:
                 losses.append(
                     row_nll({**row, "raw_probs": item.probs, "candidate_log_masses": None})

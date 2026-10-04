@@ -1,4 +1,4 @@
-"""Per-primitive temperature scaling and optional Noul commitment."""
+"""Per-primitive temperatures, optional position bias and Noul commitment."""
 
 from __future__ import annotations
 
@@ -63,9 +63,29 @@ class Policy:
     search: dict | None = None
     prompt_variant: str = "min"
     promotable: bool = True
+    letter_bias: dict[str, dict[str, list[float]]] | None = None
+    adoption: dict | None = None
 
     def __post_init__(self) -> None:
         validate_prompt_variant(self.prompt_variant)
+        if self.letter_bias is not None:
+            if not isinstance(self.letter_bias, dict):
+                raise ValueError("letter_bias must be a primitive/bucket mapping")
+            for kind, buckets in self.letter_bias.items():
+                if kind not in ("choice", "noul", "score") or not isinstance(buckets, dict):
+                    raise ValueError("unknown letter_bias primitive or invalid buckets")
+                for count, values in buckets.items():
+                    if (
+                        not isinstance(count, str)
+                        or not count.isdigit()
+                        or str(int(count)) != count
+                        or not 2 <= int(count) <= 26
+                        or (kind == "noul" and count != "2")
+                        or not isinstance(values, list)
+                        or len(values) != (1 if kind == "noul" else int(count))
+                        or any(type(v) not in (int, float) or not math.isfinite(v) for v in values)
+                    ):
+                        raise ValueError("invalid letter_bias option count/finite position vector")
         if any(not math.isfinite(t) or t <= 0 for t in (self.t_choice, self.t_noul, self.t_score)):
             raise ValueError("temperatures must be finite and positive")
         if not 0 <= self.commit_lo <= 0.2 or not 0.8 <= self.commit_hi <= 1:
@@ -81,6 +101,33 @@ class Policy:
             self.commit_margin = None
         self.noul_commit = self.commit_margin is not None
 
+    def biased_log_masses(
+        self,
+        question_type: str,
+        label_probs: dict[str, float],
+        candidate_log_masses: dict[str, float] | None,
+    ) -> dict[str, float] | None:
+        """Position is the request/canonical letter order, never the label name.
+
+        Noul has a single intercept on its true logit. A matching bias bucket
+        requires raw masses so probabilities that underflowed remain recoverable.
+        """
+        bias = (self.letter_bias or {}).get(question_type, {}).get(str(len(label_probs)))
+        if bias is None:
+            return candidate_log_masses
+        if candidate_log_masses is None or set(candidate_log_masses) != set(label_probs):
+            raise ValueError("position bias requires aligned raw canonical log masses")
+        if question_type == "noul":
+            true = noul_labels(label_probs)[1]
+            return {
+                label: mass + (bias[0] if label == true else 0.0)
+                for label, mass in candidate_log_masses.items()
+            }
+        return {
+            label: candidate_log_masses[label] + offset
+            for label, offset in zip(label_probs, bias, strict=True)
+        }
+
     def apply(
         self,
         question_type: str,
@@ -91,6 +138,9 @@ class Policy:
         temperatures = {"choice": self.t_choice, "noul": self.t_noul, "score": self.t_score}
         if question_type not in temperatures:
             raise ValueError(f"unknown question type: {question_type!r}")
+        candidate_log_masses = self.biased_log_masses(
+            question_type, label_probs, candidate_log_masses
+        )
         if candidate_log_masses is None:
             probs = temperature_scale(label_probs, temperatures[question_type])
         else:
@@ -144,7 +194,14 @@ class Policy:
         return {"type": "score", "score": expected, "probabilities": probs}
 
     def save(self, path: str | Path = "policy.json") -> None:
-        Path(path).write_text(json.dumps(asdict(self), indent=2) + "\n", encoding="utf-8")
+        values = asdict(self)
+        if not self.letter_bias:
+            values.pop("letter_bias")
+        if self.adoption is None:
+            values.pop("adoption")
+        Path(path).write_text(
+            json.dumps(values, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
 
     @classmethod
     def load(cls, path: str | Path = "policy.json") -> Policy:
