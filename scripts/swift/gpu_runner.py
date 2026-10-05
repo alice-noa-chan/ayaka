@@ -46,7 +46,7 @@ GEMMA_12B_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
 DEFAULT_KWARGS = {"enable_thinking": False}
 # Planning estimates, not measured throughput. Loads are additional to priority
 # work: each new model/adapter needs an HF reference and a fresh vLLM server.
-PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P1R": 20, "P2": 5, "P3": 20, "P4": 15, "P5": 15}
+PRIORITY_MINUTES = {"P0": 10, "P1": 35, "P1R": 40, "P2": 5, "P3": 20, "P4": 15, "P5": 15}
 ENVIRONMENT_PREP_MINUTES = 3
 HF_LOAD_MINUTES = 2
 VLLM_LOAD_MINUTES = 3
