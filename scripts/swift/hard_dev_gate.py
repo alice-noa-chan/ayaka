@@ -45,7 +45,10 @@ def file_sha(path: Path) -> str:
 
 def hard_ids(path: Path) -> set[str]:
     ids = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # Split on "\n" only: splitlines() also breaks on U+2028 etc. inside JSON strings.
+    for line in path.read_text(encoding="utf-8").split("\n"):
+        if not line:
+            continue
         record = json.loads(line)
         ids |= {f"{record['id']}/{q['id']}" for q in record["questions"]}
     return ids
