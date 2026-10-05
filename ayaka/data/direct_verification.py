@@ -12,7 +12,7 @@ import ast
 import hashlib
 import re
 from datetime import date, datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 VERSION = "ayaka-authored-direct-gold-1"
 WRAPPERS = {
@@ -65,7 +65,14 @@ def _value(facts):
         facts,
     )
     if m:
-        return "rounding", int((Decimal(m[1]) * 100).to_integral_value(rounding=ROUND_HALF_UP))
+        amount = Decimal(m[1])
+        # Multiplication otherwise rounds long exact coefficients at the ambient
+        # precision before HALF_UP sees the cents boundary. Keep this local so
+        # preparation does not change another caller's Decimal context.
+        with localcontext() as context:
+            context.prec = max(28, len(amount.as_tuple().digits) + 3)
+            cents = (amount * 100).to_integral_value(rounding=ROUND_HALF_UP)
+        return "rounding", int(cents)
     m = re.fullmatch(
         rf"Before ({ISO_DATE}) the limit is ({INTEGER})\. Starting on ({ISO_DATE}) it is ({INTEGER})\. The event is on ({ISO_DATE})\. Report its limit\.",
         facts,
