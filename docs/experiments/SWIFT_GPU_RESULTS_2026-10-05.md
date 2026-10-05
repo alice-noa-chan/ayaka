@@ -19,10 +19,9 @@ E4B (P3) was not measured.
 | `6e2d0ae` | the 0.05-nat centred log-mass parity gate was below bf16 resolution (ulp 0.125 at \|logit\| 16–32) | gate on log-odds of letters with p ≥ 1e-3 within 4 bf16 ulps (user-approved revision, disclosed) |
 | `c0b7cf2` | 384 image rows per v2 split carry only a placeholder text; 192 calibration/dev inputs collided | skip `modality=image` rows (1,440 decisions per split) |
 | `693d747`, `04f6669` | P1R needed more than 20 minutes; the latency probe sent Score criteria as a map (422) | 40-minute P1R; Jev-shaped Score arrays; 3 unmeasured warm-ups |
-| `c2bafe1`* | adapter key mapping did not accept `gemma4_unified` | treat it like `gemma4` (`model.language_model.`) |
+| `c2bafe1` | adapter key mapping did not accept `gemma4_unified` | treat it like `gemma4` (`model.language_model.`) |
 | `6ed8c9f` | `judge_hard` items in `hard.jsonl` were tiered as judge | explicit tier/split and file name decide first |
 
-\* fix commit on the branch that the second instance checked out.
 
 The parity gate passed for all four prompt variants after these fixes: identical prompt and canonical token ids,
 argmax agreement 1.0, probability max-abs ≤ 0.0125.
