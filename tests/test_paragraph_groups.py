@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
+import ayaka.data.paragraph_groups as paragraph_module
 from ayaka.data.paragraph_groups import (
     ParagraphIndex,
     audit_paragraph_roles,
@@ -64,6 +65,28 @@ def test_unselected_bridge_closes_whole_inventory_and_bound_selected_samples():
     groups, _ = connected_groups(bound)
     assert groups[0] == groups[1]
     assert rows[1]["type"] is None
+
+
+def test_large_shared_component_is_hashed_once_instead_of_once_per_member(monkeypatch):
+    rows = [row(str(i), ["Shared", f"Article {i}"]) for i in range(80)]
+    anchor = paragraph_inventory_digest(rows, namespace=NAMESPACE)
+    original = paragraph_module.fingerprint
+    component_hash_calls = []
+
+    def counted(value):
+        if (
+            isinstance(value, list)
+            and value
+            and all(isinstance(alias, str) and alias.startswith("paragraph-") for alias in value)
+        ):
+            component_hash_calls.append(len(value))
+        return original(value)
+
+    monkeypatch.setattr(paragraph_module, "fingerprint", counted)
+    result = build_paragraph_index(rows, namespace=NAMESPACE, expected_inventory_sha256=anchor)
+    assert len({r.component_id for r in result.rows}) == 1
+    assert len(component_hash_calls) == 1
+    assert component_hash_calls[0] > len(rows)
 
 
 def test_digest_and_components_are_order_independent_and_accept_one_shot_input():

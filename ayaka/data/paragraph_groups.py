@@ -144,6 +144,10 @@ def _closed_rows(records, *, namespace, expected_inventory_sha256):
         for row, (_, aliases) in zip(records, parsed, strict=True)
     ]
     indices, groups = connected_groups(samples)
+    component_ids = {
+        group: "paragraph-component/" + fingerprint(values["identities"])
+        for group, values in groups.items()
+    }
     rows = tuple(
         ParagraphRow(
             row["id"],
@@ -151,7 +155,7 @@ def _closed_rows(records, *, namespace, expected_inventory_sha256):
             row["type"],
             state,
             aliases,
-            "paragraph-component/" + fingerprint(groups[group]["identities"]),
+            component_ids[group],
         )
         for row, (state, aliases), group in zip(records, parsed, indices, strict=True)
     )
