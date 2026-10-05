@@ -269,6 +269,7 @@ def test_per_model_options_and_immutable_serving_settings(tmp_path):
     assert "--enable-prefix-caching" in command
     assert command[command.index("--logprobs-mode") + 1] == "raw_logits"
     assert command[command.index("--max-logprobs") + 1] == "26"
+    assert command[command.index("--chat-template-content-format") + 1] == "string"
     assert command[-1] == "--enforce-eager"
     options_path.write_text(json.dumps({"fixture": {"vllm_args": ["--revision=main"]}}))
     with pytest.raises(ValueError, match="must not override"):

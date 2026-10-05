@@ -38,7 +38,7 @@ vllm serve "$MODEL" --revision "$REVISION" --tokenizer-revision "$REVISION" \
   --served-model-name "$SERVED_NAME" --host 127.0.0.1 --port "$VLLM_PORT" \
   --max-model-len "$MAX_MODEL_LEN" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --dtype bfloat16 --enable-prefix-caching \
-  --logprobs-mode raw_logits --max-logprobs 26 &
+  --logprobs-mode raw_logits --max-logprobs 26 --chat-template-content-format string &
 VLLM_PID=$!
 trap 'kill "$VLLM_PID" 2>/dev/null || true; wait "$VLLM_PID" 2>/dev/null || true' EXIT
 

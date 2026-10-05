@@ -97,6 +97,7 @@ def model_options(path: Path | None, models: list[dict]) -> dict:
         "--served-model-name",
         "--logprobs-mode",
         "--max-logprobs",
+        "--chat-template-content-format",
     }
     for model in models:
         options = overrides.get(model["model"], {})
@@ -166,6 +167,10 @@ def serve_command(model: dict, port: int, options: dict) -> list[str]:
         "raw_logits",
         "--max-logprobs",
         "26",
+        # vLLM otherwise renders string messages as content-part lists for Gemma 4, adding a
+        # space before <turn|>; string format keeps server prompt ids equal to the HF template.
+        "--chat-template-content-format",
+        "string",
         "--host",
         "127.0.0.1",
         "--port",
