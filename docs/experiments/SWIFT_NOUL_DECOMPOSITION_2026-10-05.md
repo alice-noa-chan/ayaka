@@ -20,7 +20,7 @@ Almost all of cygnet's v2 Intelligence gain (ΔI +4.8) is Noul.
 ## Noul: discrimination or threshold?
 
 Accuracy is on raw P(true). "Cal-fit" uses a logit threshold fit on calibration. "Oracle" is the best threshold on
-dev; it is an upper bound and never a policy.
+dev. It is the best accuracy any single threshold reaches on that set, and it is never a policy.
 
 | Slice | Prompt | AUC | acc @0.5 | cal-fit threshold | oracle | policy CC |
 |---|---|---:|---:|---:|---:|---:|
@@ -35,9 +35,11 @@ dev; it is an upper bound and never a policy.
 
 ## Findings
 
-1. **Mostly real discrimination, not a threshold.** On v2 dev, `min` leans "false": mean P(true) is .43 against 51%
-   true gold. Even its dev-oracle threshold reaches only 0.886, while cygnet reaches 0.918 at 0.5. About a third of
-   the gap is threshold; about two thirds is AUC (0.930 → 0.978).
+1. **A threshold does not close the gap.** On v2 dev, `min` leans "false": mean P(true) is .43 against 51% true
+   gold. Re-thresholding `min` helps: 0.849 at 0.5, 0.872 with a calibration-fit threshold. But even the best
+   single threshold on dev reaches only 0.886, below cygnet's 0.918 at 0.5. cygnet also ranks items better (AUC
+   0.930 → 0.978). These are qualitative observations: the accuracy and AUC differences do not split the gain into
+   causal shares.
 2. **The gain is specific to the repository-authored Noul items.** It does not appear on natural multi-hop Noul:
    hard dev HotpotQA has equal policy CC (82.8 and 82.8) and AUC .978 vs .985. On the 32 verified procedural items,
    cygnet is worse.
