@@ -77,15 +77,25 @@ Public accuracy by Swift prompt variant on frozen 12B: min 193, labeled 198, **c
 
 What this shows, within the resolution of 231 items:
 
-1. **Fine-tuning did not destroy base ability.** Under v1's own format, the v1 checkpoint gains 5.2 points over
-   frozen (13 vs 25 discordant, p = 0.073). Under the Swift readout, the adapter is neutral (12 vs 12). This rejects
-   the earlier hypothesis and agrees with Codex's caution that it had not been shown.
-2. **Format and readout matter for the frozen model:** native to Swift adds 6.1 points (12 vs 26, p = 0.034).
-3. **The remaining gap to Cygnet is the prompt.** Swift `min` trails Cygnet by 10 items (2 vs 12, p = 0.013), while
-   Swift with the `cygnet` prompt reaches 201 against Cygnet's 203. Two small differences remain: the content-format
-   rendering and calibration.
-4. The 4,096-token truncation suspicion is ruled out: the current v1 at 8,192 tokens scores 191, against 192
-   historically.
+1. **No support for the earlier "fine-tuning destroyed base ability" hypothesis in this cohort.** Under v1's own
+   format, the whole v1 checkpoint (adapter, pointer head, gates and temperatures together) scores 5.2 points above
+   frozen (13 vs 25 discordant, p = 0.073). That is not significant, so it does not establish a general
+   fine-tuning gain. Under the Swift readout, the adapter alone is neutral (12 vs 12). Codex had cautioned that the
+   hypothesis was never shown.
+2. **The native-versus-Swift factor matters for the frozen model:** it adds 6.1 points (12 vs 26, p = 0.034). This
+   factor combines input serialization and readout and cannot separate them.
+3. **Most of the remaining gap to Cygnet follows the prompt.** Swift `min` trails Cygnet by 10 items (2 vs 12,
+   p = 0.013). Swift with the `cygnet` prompt reaches 201 against Cygnet's 203. Content-format rendering and
+   calibration still differ.
+4. **No large context-recovery gain was observed.** The current v1 at an 8,192-token context scores 191; the
+   historical report, run with a 4,096-token budget, scores 192. The two runs used different implementations, so
+   this is not a context-only ablation, and truncation is not ruled out for every task.
+
+**Routing actually adopted.** The adopted router sent 16 of 1,312 dev decisions to reasoning, all from the
+verified procedural source. It routed none of the HelpSteer2 (natural), CommonsenseQA or repository-authored rows.
+Codex's paired diagnostic shows that raw worked steps worsen the natural HelpSteer2 rows
+(`.dev/codex-actual-paired-source-diagnostic-20261005.json`). The adopted policy therefore avoids that regression on
+this dev cohort. It is a selective serving gain, not evidence for distilling reasoned outputs on natural documents.
 
 ## Open decision
 

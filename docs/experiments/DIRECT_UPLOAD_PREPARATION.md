@@ -369,3 +369,18 @@ Ayaka의 audited 147개 core source와 준비 payload는 이 변경에서 바뀌
 따라서 위 기존 model/data·runtime archive와 CPU audit anchor는 유지된다. 새
 migration helper는 별도 utility로 제공하며 이전 169-file native archive에 포함됐다고
 주장하지 않는다. Private holdout은 training upload와 분리해서 보관한다.
+
+## 2026-10-05 실제 teacher 관측의 추가 진단
+
+저장된 12B calibration/dev 추론을 source별로 검사했다. Raw 분포는 일부
+합성 문항에서 개선되지만 자연 HelpSteer2에서 퇴보한다. 별도의 보정된 sparse
+serving router가 dev gate를 통과한 결과를 train teacher 이득으로 대체하지
+않는다. 기존 train-only/per-question nonregression 조건을 유지하고, 실제
+독립 train 관측과 student 품질 검사는 계속 필요하다.
+
+새 standalone 진단과 관련 tests83, frozen full tests2252, restored-Linux
+tests23은 통과했다. 과거 평가 원본27개의 metadata/bytes도 복원·확인했지만
+전체 이력이나 semantic decontamination까지 증명한 것은 아니다. 기존
+고정 upload의 source/data는 변경하지 않았고 새 진단은 archive에 포함되지
+않는다. 재현 anchors와 범위는
+[V2_PAIRED_TEACHER_DIAGNOSTIC_2026-10-05.md](V2_PAIRED_TEACHER_DIAGNOSTIC_2026-10-05.md)에 있다.

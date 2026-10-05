@@ -1303,3 +1303,12 @@ parity/backward/throughput과 전 lifecycle의 보유-credit admission도 계속
 Audited core 147개와 payload가 그대로여서 기존 bundle/CPU audit 및 model/data·runtime
 archive anchor는 유효하다. 새 helper는 별도 utility이며 기존 native archive의 구성
 파일에 들어갔다고 주장하지 않는다. Private holdout은 학습 upload와 분리한다.
+
+## 2026-10-05 실제 paired teacher 분포 재검증
+
+`1ab3261`은 저장된 calibration/dev 관측의 출처·유형·완료 여부와 전체 분모를
+검사하는 CPU 진단을 추가했다. Raw 추론은 합성 source에서 개선되지만
+HelpSteer2에서 NLL·Brier·RPS가 악화했다. 이는 별도의 calibration-only sparse
+serving router가 dev gate를 통과한 결과와 다른 비교다. 학습 teacher나 v2 off
+우위로 해석하지 않는다. CLI, 실제 수치·CI·anchors·검증 제한과 Cygnet 권고는
+[V2_PAIRED_TEACHER_DIAGNOSTIC_2026-10-05.md](V2_PAIRED_TEACHER_DIAGNOSTIC_2026-10-05.md)에 기록했다.
