@@ -101,7 +101,8 @@ dev에서 재검증하는 것이다. 기존 Cygnet ΔA CI는 0을 포함하며 p
 함께 바뀐다. Native v1 cell은 LoRA·head·gate·temperature를 포함한 전체
 checkpoint이고 Swift cell은 adapter-only다. LoRA/포인터 head만의 효과가 아니다.
 Native +5.2 percentage points는 p=.073이며 일반적인 .05 유의 수준을 넘는다.
-전체 base 능력 퇴보 가설의 근거는 없지만 모든 영역의 원인을 확정할 수도 없다.
+이 matched native cohort는 전반적 base 능력 퇴보를 뒷받침하지 않지만
+모든 영역의 원인을 확정할 수도 없다.
 Historical 4,096-token 192와 current 8,192-token 191의 근접성은 이 cohort에서
 큰 context 회복 이득을 보여주지 않는다. 과거 구현도 달라 context 단독
 ablation이나 모든 작업의 truncation 부정으로 해석하지 않는다.
