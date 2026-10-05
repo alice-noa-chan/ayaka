@@ -23,14 +23,37 @@ def item():
     )
 
 
-def test_r14_tail_counterexample_fails_centered_log_mass():
+def test_r14_tail_difference_is_recorded_but_below_relevance_floor():
+    # Since the 2026-10-05 revision, letters under 1e-3 probability are diagnostic only:
+    # bf16 cannot resolve them, and mass invention is prevented by the complete gather.
     result = parity.compare(
         [item()], FakeReader([{"A": 1, "B": 1e-40}]), FakeReader([{"A": 1, "B": 1e-9}]), n=1
     )
     assert result["max_abs"] < 0.02 and result["argmax_agreement"] == 1
     assert result["centered_log_mass_max_abs"] == pytest.approx(71.38013788181541 / 2)
-    assert result["centered_log_mass_max_abs_threshold_nats"] == 0.05
-    assert result["passed"] is False and result["comparison_valid"] is False
+    assert result["relevant_log_odds_max_bf16_ulps"] == 0
+    assert result["passed"] is True
+
+
+def test_relevant_log_odds_beyond_four_bf16_ulps_fails():
+    # Both letters relevant; logits near 20 have a 0.125 bf16 ulp; a 0.75-nat shift is 6 ulps.
+    import math
+
+    def probs(gap):
+        a, b = 1.0, math.exp(-gap)
+        return {"A": a / (a + b), "B": b / (a + b)}
+
+    result = parity.compare([item()], FakeReader([probs(2.0)]), FakeReader([probs(2.75)]), n=1)
+    assert result["argmax_agreement"] == 1
+    assert result["relevant_log_odds_max_bf16_ulps"] > 4
+    assert result["passed"] is False
+
+
+def test_bf16_ulp_spacing():
+    assert parity.bf16_ulp(23.5) == 0.125
+    assert parity.bf16_ulp(16.0) == 0.125
+    assert parity.bf16_ulp(15.9) == 0.0625
+    assert parity.bf16_ulp(-40.0) == 0.25
 
 
 @pytest.mark.parametrize("change", ["prompt", "ids", "missing", "nonfinite"])
@@ -222,5 +245,6 @@ def test_centered_log_mass_checks_underflowed_probabilities():
 
     result = parity.compare([item()], Reader(left), Reader(right))
     assert result["max_abs"] == 0 and result["argmax_agreement"] == 1
-    assert result["centered_log_mass_max_abs"] == 5
-    assert result["comparison_valid"] is False
+    assert result["centered_log_mass_max_abs"] == 5  # recorded diagnostic
+    assert result["relevant_log_odds_max_bf16_ulps"] == 0  # B is far below 1e-3
+    assert result["comparison_valid"] is True

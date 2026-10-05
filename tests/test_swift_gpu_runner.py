@@ -188,7 +188,7 @@ def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatc
     assert all(priority in output for priority in ("P0", "P1", "P1R", "P2", "P3", "P4"))
     assert "best TWO" in output
     assert "P4           15  False" in output
-    assert "centered log-mass <= 0.05 nats" in output
+    assert "within 4 bf16 ulps" in output
 
 
 def git_bash():

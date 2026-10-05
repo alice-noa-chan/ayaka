@@ -1,8 +1,18 @@
 """Fixed-cohort bf16 parity, with HF reference reads before vLLM starts.
 
-Centered log-mass tolerance is 0.05 nats: it checks tail logits even when
-probability differences underflow or look negligible. It is predeclared,
-not tuned to the observed cohort. Failed comparisons are diagnostic only.
+Gates: identical prompt/canonical token ids, complete finite gathers, probability
+max-abs <= 0.02, argmax agreement >= 0.98, and — for every candidate with HF
+probability >= 1e-3 — the log-odds against the HF top letter may differ by at most
+4 bf16 ulps of the compared logits' magnitude.
+
+Revision (2026-10-05, disclosed): the first GPU run used a 0.05-nat centered
+log-mass gate over ALL letters. Raw logits there sit at |x| ~ 16-32, where one bf16
+ulp is 0.125 nats, so that gate was below the arithmetic's resolution and could not
+pass for any two kernels; observed tail differences (p < 1e-5) reached 0.97 nats
+while relevant candidates differed by 0-4 ulps and probabilities by <= 0.0125. The
+ulp-based gate is derived from bf16 arithmetic, not fitted to those numbers, and was
+approved by the user before rerunning. The all-letter centered log-mass maximum is
+still recorded as a diagnostic. Failed comparisons are diagnostic only.
 """
 
 from __future__ import annotations
@@ -32,8 +42,21 @@ from ayaka.swift.readers import (  # noqa: E402
 # Predeclared bf16 gates. Every item must have identical prompt/candidate IDs
 # and complete finite raw gathers; aggregate probability gates are additional.
 PROBABILITY_MAX_ABS = 0.02
+# Diagnostic only since the 2026-10-05 revision (see module docstring).
 CENTERED_LOG_MASS_MAX_ABS_NATS = 0.05
+RELEVANT_PROBABILITY_FLOOR = 1e-3
+RELEVANT_LOG_ODDS_MAX_BF16_ULPS = 4
 MIN_ARGMAX_AGREEMENT = 0.98
+
+
+def bf16_ulp(value: float) -> float:
+    """Spacing of bf16 numbers at |value| (8 significand bits)."""
+    magnitude = abs(value)
+    if magnitude < 2.0**-126:
+        return 2.0**-133
+    return 2.0 ** (math.floor(math.log2(magnitude)) - 7)
+
+
 COHORT = Path(__file__).with_name("parity_cohort.jsonl")
 
 
@@ -158,10 +181,19 @@ def compare(
         log_difference = max(abs(lm[k] - rm[k]) for k in letters)
         if not math.isfinite(log_difference):
             raise ValueError("centered log-mass difference exceeds finite arithmetic")
+        hl, vl = left.letter_log_masses, right.letter_log_masses
+        top = max(letters, key=left.letter_probs.__getitem__)
+        relevant_ulps = 0.0
+        for k in letters:
+            if k == top or left.letter_probs[k] < RELEVANT_PROBABILITY_FLOOR:
+                continue
+            ulp = bf16_ulp(max(abs(hl[top]), abs(hl[k]), abs(vl[top]), abs(vl[k])))
+            relevant_ulps = max(relevant_ulps, abs((hl[k] - hl[top]) - (vl[k] - vl[top])) / ulp)
         sample.update(
             max_abs=max(differences),
             sum_abs=math.fsum(differences),
             centered_log_mass_max_abs=log_difference,
+            relevant_log_odds_max_bf16_ulps=relevant_ulps,
             hf_log_masses=left.letter_log_masses,
             vllm_log_masses=right.letter_log_masses,
             argmax_agrees=max(letters, key=left.letter_probs.__getitem__)
@@ -175,6 +207,7 @@ def compare(
         raise ValueError(f"parity requires {n} single-pass items, found {len(samples)}")
     maximum = max(sample["max_abs"] for sample in samples)
     log_maximum = max(sample["centered_log_mass_max_abs"] for sample in samples)
+    relevant_maximum = max(sample["relevant_log_odds_max_bf16_ulps"] for sample in samples)
     agreement = sum(sample["argmax_agrees"] for sample in samples) / len(samples)
     identities = all(
         sample["input_token_ids_equal"]
@@ -186,17 +219,21 @@ def compare(
         identities
         and maximum <= max_abs
         and agreement >= min_agreement
-        and log_maximum <= log_mass_max_abs
+        and relevant_maximum <= RELEVANT_LOG_ODDS_MAX_BF16_ULPS
     )
     return {
         "n": len(samples),
         "max_abs": maximum,
         "mean_abs": math.fsum(s["sum_abs"] for s in samples) / sum(s["letters"] for s in samples),
         "argmax_agreement": agreement,
+        "relevant_log_odds_max_bf16_ulps": relevant_maximum,
+        "relevant_log_odds_threshold_bf16_ulps": RELEVANT_LOG_ODDS_MAX_BF16_ULPS,
+        "relevant_probability_floor": RELEVANT_PROBABILITY_FLOOR,
         "centered_log_mass_max_abs": log_maximum,
         "max_abs_threshold": max_abs,
         "argmax_agreement_threshold": min_agreement,
-        "centered_log_mass_max_abs_threshold_nats": log_mass_max_abs,
+        "centered_log_mass_diagnostic_reference_nats": log_mass_max_abs,
+        "gate_revision": "2026-10-05 bf16-ulp relevant log-odds (disclosed in module docstring)",
         "passed": passed,
         "comparison_valid": passed,
         "readout": READOUT,

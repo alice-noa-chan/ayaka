@@ -39,7 +39,7 @@ from scripts.swift.matched_native import (  # noqa: E402
     CHECKPOINT_REVISION,
     native_command,
 )
-from scripts.swift.parity import CENTERED_LOG_MASS_MAX_ABS_NATS, COHORT  # noqa: E402
+from scripts.swift.parity import COHORT, RELEVANT_LOG_ODDS_MAX_BF16_ULPS  # noqa: E402
 
 VLLM_VERSION = "0.30.0"
 GEMMA_12B_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
@@ -337,7 +337,7 @@ def plan(
         f"Bulk concurrency: {concurrency}; Prompt variants: {','.join(variants)}",
         "Serve one model at a time: bf16, context=16384, GPU=0.90, prefix caching, --logprobs-mode raw_logits",
         f"Fixed parity cohort: {COHORT.name}; 2/20/26 options, skew, typed item and two permutations",
-        f"Parity: identical prompt/canonical IDs, complete finite gather; P max-abs <=0.02; argmax >=0.98; centered log-mass <= {CENTERED_LOG_MASS_MAX_ABS_NATS:g} nats",
+        f"Parity: identical prompt/canonical IDs, complete finite gather; P max-abs <=0.02; argmax >=0.98; log-odds of letters with P>=1e-3 within {RELEVANT_LOG_ODDS_MAX_BF16_ULPS} bf16 ulps (centered log-mass recorded as diagnostic)",
         "Record HF and vLLM load times; parity failure aborts bulk with comparison_valid=false diagnostic artifact",
     ]
     for model in models:
