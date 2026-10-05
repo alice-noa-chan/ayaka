@@ -62,7 +62,8 @@ def native_command(cell: str, checkpoint: Path, output: Path) -> list[str]:
 
 def swift_adapter_key(key: str, model_type: str) -> str:
     """Detached native text-model adapters need the full HF LM's module prefix."""
-    if model_type not in ("gemma4", "gemma4_text"):
+    # gemma4_unified (the pinned 12B checkpoint) keeps gemma4's model.language_model prefix.
+    if model_type not in ("gemma4", "gemma4_unified", "gemma4_text"):
         raise ValueError("unsupported matched base model type")
     if not re.fullmatch(
         r"base_model\.model\.layers\.\d+\.(?:self_attn|mlp)\."
@@ -71,7 +72,7 @@ def swift_adapter_key(key: str, model_type: str) -> str:
     ):
         raise ValueError(f"unexpected published adapter key: {key}")
     prefix = "base_model.model.model."
-    if model_type == "gemma4":
+    if model_type in ("gemma4", "gemma4_unified"):
         prefix += "language_model."
     return prefix + key.removeprefix("base_model.model.")
 

@@ -77,6 +77,8 @@ def test_adapter_conversion_preserves_payload_and_tensor_metadata(tmp_path):
     assert matched_native.swift_adapter_key(key, "gemma4_text").startswith(
         "base_model.model.model.layers."
     )
+    # The pinned 12B checkpoint is gemma4_unified, stored under model.language_model.
+    assert matched_native.swift_adapter_key(key, "gemma4_unified") == expected_key
     with pytest.raises(ValueError, match="unexpected published adapter key"):
         matched_native.swift_adapter_key("unrelated.weight", "gemma4")
 
