@@ -21,10 +21,10 @@ from ayaka.model.electra import ElectraDecisionModel
 from ayaka.swift.collect import collect, load_reads
 from ayaka.swift.readers import HFReader, logmass_probs, token_input
 from ayaka.tokenization import HFTokenizer
-from ayaka.training.direct_distillation import prepare_direct_distillation
+from ayaka.training.direct_distillation import make_teacher_read, prepare_direct_distillation
 from ayaka.training.prepare_v2 import canonical, sha256
 from ayaka.training.prompt_teachers import export_prompt_teachers
-from ayaka.training.swift_direct import encode_direct_sample
+from ayaka.training.swift_direct import direct_readout_binding, encode_direct_sample
 from ayaka.training.teacher_artifacts import teacher_dataset_items
 from ayaka.training.trainer import TrainConfig, Trainer
 
@@ -115,6 +115,14 @@ def test_actual_native_gathers_bind_both_inputs_and_short_student_stays_trace_fr
     expected_items = encode_direct_sample(samples[0], tok, cfg, input_encoding=STUDENT)
     assert prepared["prompt_context_teacher_questions"] == 3
     assert prepared["reasoning_training_tokens"] == 0
+    signals = prepared["prompt_teacher_signals"]
+    assert sum(s["observed_pairs"] for s in signals["by_source_type"]) == 3
+    assert (
+        sum(s["accepted_teacher_questions"] for s in signals["by_source_type"])
+        == prepared["accepted_teacher_questions"]
+    )
+    assert signals["reasoned_teacher_questions_excluded"] == 0
+    assert signals["promotable"] is False
     for item, original, row in zip(items, expected_items, prompt, strict=True):
         assert item.enc == original.enc
         assert item.length < row["input_tokens"]
@@ -135,6 +143,48 @@ def test_one_shot_train_iterator_is_fully_verified_and_matches_list_conversion(o
     assert sorted(calls) == sorted(q.id for sample in observations[0] for q in sample.questions)
     assert report["available_teacher_questions"] == 3
     assert report["usage"]["backend_calls"] == 6
+
+
+@pytest.mark.parametrize("with_reasoned", [False, True])
+def test_explicit_null_teacher_matches_missing_key_replay_and_signal_coverage(
+    observations, with_reasoned
+):
+    teachers, _ = exported(observations)
+    if with_reasoned:
+        original = observations[0][0]
+        direct_item = encode_direct_sample(
+            original, observations[1], observations[2], input_encoding=STUDENT
+        )[0]
+        teachers["train/pick"] = make_teacher_read(
+            original,
+            original.questions[0],
+            probs=[0.9, 0.1],
+            direct_probs=[0.5, 0.5],
+            model_sha256="a" * 64,
+            recipe_sha256="b" * 64,
+            trace_sha256="c" * 64,
+            generated_tokens=1,
+            direct_readout=direct_readout_binding(direct_item),
+        )
+    missing = {key: value for key, value in teachers.items() if key != "train/rate"}
+    explicit_null = {**missing, "train/rate": None}
+    splits = dataset()
+    splits["train"] = observations[0]
+    summaries = []
+    for values in (missing, explicit_null):
+        items, report = prepare_direct_distillation(
+            splits, observations[1], observations[2], values, verify, input_encoding=STUDENT
+        )
+        assert items[2].teacher is None
+        assert report["items"][2]["reasons"] == ["no_saved_teacher"]
+        signals = report["prompt_teacher_signals"]
+        assert signals["reasoned_teacher_questions_excluded"] == int(with_reasoned)
+        assert (
+            sum(s["no_saved_teacher_gold_replay_questions"] for s in signals["by_source_type"]) == 1
+        )
+        assert sum(s["observed_pairs"] for s in signals["by_source_type"]) == 2 - int(with_reasoned)
+        summaries.append(signals)
+    assert summaries[0] == summaries[1]
 
 
 def resign(row):
@@ -257,6 +307,18 @@ def test_external_anchors_coverage_transport_and_context_are_enforced(observatio
                 observations[0],
                 observations[1],
                 replace(observations[2], max_seq_len=32, serve_max_seq_len=32),
+                *observations[3:],
+            )
+        )
+    # The teacher would fit the serving limit; the student still must fail
+    # rather than truncate its input or silently export an incomplete cohort.
+    assert min(row["input_tokens"] for row in observations[3]) > 32
+    with pytest.raises(ValueError, match="context"):
+        exported(
+            (
+                observations[0],
+                observations[1],
+                replace(observations[2], max_seq_len=32, serve_max_seq_len=2048),
                 *observations[3:],
             )
         )

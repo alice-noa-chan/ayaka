@@ -117,6 +117,8 @@ def test_direct_items_use_original_input_preserve_soft_gold_and_do_not_mutate():
     assert report["direct_training_tokens"] == sum(it.length for it in items)
     assert set(report["split_sha256"]) == set(SPLITS)
     assert report["promotable"] is report["execution_attested"] is False
+    assert "prompt_teacher_signals" not in report
+    assert "prompt_context_teacher_questions" not in report
 
 
 def test_rejected_teachers_leave_gold_replay_and_score_uses_continuous_metrics():

@@ -246,7 +246,7 @@ def prepare_direct_distillation(
             expected[identity] = (sample, q)
     if not isinstance(teacher_reads, dict) or set(teacher_reads) - set(expected):
         raise ValueError("teacher reads must belong exclusively to this train cohort")
-    items, records = [], []
+    items, records, signal_records = [], [], []
     for sample in splits["train"]:
         if sample.metadata.get("modality", "text") != "text" or any(
             key in sample.metadata for key in ("media", "proposal_supervision")
@@ -291,6 +291,18 @@ def prepare_direct_distillation(
                 records[-1]["teacher_readout_binding"] = copy.deepcopy(
                     read["teacher_readout_binding"]
                 )
+            if read is None or read.get("route") == "prompt_context":
+                signal_records.append(
+                    {
+                        "source": sample.metadata.get("source") or "undeclared",
+                        "type": q.type,
+                        "teacher_present": read is not None,
+                        "teacher_accepted": accepted,
+                        "candidate_ids": labels,
+                        "direct_probs": direct if read is not None else None,
+                        "teacher_probs": teacher,
+                    }
+                )
     validate_direct_input_items(items)
     report = {
         "version": VERSION,
@@ -312,7 +324,13 @@ def prepare_direct_distillation(
         "scope": "CPU preparation; teacher execution, trained weights and launch cost remain unverified",
     }
     if any(r.get("teacher_kind") == "prompt_context" for r in records):
+        from .teacher_signals import prompt_teacher_signal_report
+
         report["prompt_context_teacher_questions"] = sum(
             r.get("teacher_kind") == "prompt_context" for r in records
+        )
+        report["prompt_teacher_signals"] = prompt_teacher_signal_report(signal_records)
+        report["prompt_teacher_signals"]["reasoned_teacher_questions_excluded"] = sum(
+            read is not None and read.get("route") == "reasoned" for read in teacher_reads.values()
         )
     return items, report
