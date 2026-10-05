@@ -107,7 +107,16 @@ def load_cell(
         if "type" in row and row["type"] != kind:
             raise ValueError(f"type mismatch: {item_id}")
         if "tier" in row and row["tier"].replace("original", "standard") != item["tier"]:
-            raise ValueError(f"tier mismatch: {item_id}")
+            # Swift reads collected before the infer_tier fix labelled hard.jsonl
+            # judge_hard items as "judge"; the public data's tier is authoritative.
+            legacy_judge = (
+                "raw_probs" in row
+                and row["tier"] == "judge"
+                and item["tier"] == "hard"
+                and "judge" in str(item.get("family", ""))
+            )
+            if not legacy_judge:
+                raise ValueError(f"tier mismatch: {item_id}")
         if "family" in row and row["family"] != item["family"]:
             raise ValueError(f"family mismatch: {item_id}")
         for key in ("gold", "expected"):

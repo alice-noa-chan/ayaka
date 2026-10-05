@@ -39,8 +39,27 @@ class DatasetItem:
     adapter: str = "jevbench"
 
 
+TIER_NAMES = {
+    "easy": "easy",
+    "original": "standard",
+    "standard": "standard",
+    "judge": "judge",
+    "hard": "hard",
+}
+
+
 def infer_tier(record: dict, source: str) -> str:
     metadata = record.get("metadata", {})
+    # An explicit tier or the JevBench split file decides first: hard.jsonl holds
+    # judge_hard items, which are hard-tier, not judge-tier.
+    for explicit in (
+        record.get("tier"),
+        metadata.get("tier"),
+        record.get("split"),
+        Path(source).stem,
+    ):
+        if str(explicit or "").lower() in TIER_NAMES:
+            return TIER_NAMES[str(explicit).lower()]
     hints = [str(record.get(key, "")) for key in ("tier", "family", "split", "id")]
     hints += [str(metadata.get(key, "")) for key in ("tier", "task_family", "split")]
     hints.append(Path(source).stem)

@@ -50,7 +50,9 @@ def test_private_and_noul_label_conversion():
     "record,source,tier",
     [
         ({"id": "hard-x"}, "unknown.jsonl", "hard"),
-        ({"family": "judge_policy", "id": "hard-x"}, "easy.jsonl", "judge"),
+        # The split file outranks a family-name hint (hard.jsonl holds judge_hard items).
+        ({"family": "judge_policy", "id": "hard-x"}, "easy.jsonl", "easy"),
+        ({"family": "judge_policy", "id": "x"}, "unknown.jsonl", "judge"),
         ({"split": "judge"}, "original.jsonl", "judge"),
         ({}, "original.jsonl", "standard"),
         ({}, "easy.jsonl", "easy"),
@@ -223,7 +225,7 @@ def test_all_vendored_public_items_adapt():
     items = list(iter_dataset([root]))
     assert len(items) == 231
     assert all(item.public for item in items)
-    assert {item.tier for item in items} == {"easy", "standard", "judge", "hard"}
+    assert {item.tier for item in items} == {"easy", "standard", "hard"}
     soft = [item for item in items if item.gold_distribution is not None]
     assert len(soft) == 10
     assert sum(item.question.type == "choice" for item in soft) == 7
