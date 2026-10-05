@@ -27,6 +27,8 @@
 | 연구 / 출처 | 실제 방법 | Ayaka 판단과 한계 |
 |---|---|---|
 | [Distilling Step-by-Step](https://aclanthology.org/2023.findings-acl.507/), Findings ACL 2023; [공식 구현](https://github.com/google-research/distilling-step-by-step) | 원문→label과 원문→rationale를 task prefix로 나눈 공동 학습. 판정 시 rationale 입력이 필요 없다. | 비추론 목표와 직접 맞는다. 논문은 T5 및 네 NLP 과제이며 Gemma decision head의 개선을 증명하지 않는다. 공개 PaLM rationale 자료를 가져오지 않고 검증된 자체 풀이 또는 허용된 사람 주석을 사용한다. |
+| [Plan-and-Solve Prompting](https://aclanthology.org/2023.acl-long.147/), ACL 2023; [공식 구현](https://github.com/AGI-Edgerunners/Plan-and-Solve-Prompting) | PS는 계획 후 실행, PS+는 변수·수치 추출과 중간 계산도 지시한다. 원문은 reasoning generation 이후 별도의 answer extraction prompt를 사용한다. | 제한된 예산의 teacher 풀이 형식 후보로 참고한다. 원문의 GPT-3 결과를 현재 Gemma에 적용한 성능으로 부르지 않는다. Ayaka의 typed readout을 쓰면 원문 두 단계 생성의 그대로 재현은 아니다. |
+| [An Investigation of the (In)effectiveness of Counterfactually Augmented Data](https://aclanthology.org/2022.acl-long.256/), ACL 2022 | 일부 feature만 편집한 label-flip CAD가 미편집 robust feature 학습을 제한하고 기존 spurious correlation을 악화시킬 수 있음을 분석한다. | 반사실 자료를 많이 만들면 항상 좋아진다는 근거가 아니다. 여러 원인·편집 유형을 다루는 데이터와 OOD 검사를 설계하는 근거다. Ayaka의 실패 원인을 입증한 연구는 아니다. |
 | [From Explicit CoT to Implicit CoT](https://arxiv.org/html/2405.14838v1), 2024; [공식 구현](https://github.com/da03/Internalize_CoT_Step_by_Step) | CoT 앞부분을 점진적으로 제거해 최종적으로 원문→답을 학습한다. 제거 변화에 optimizer reset과 removal smoothing을 적용한다. | 직접 판정으로 수렴하는 curriculum 후보. 여러 단계의 비용·안정성이 필요해 첫 실험보다 뒤에 둔다. 단순 무작위 trace 삭제는 이 논문의 재현이 아니다. |
 | [On-Policy Context Distillation](https://arxiv.org/html/2602.12275v2), 2026 preprint | context 없는 student가 생성한 궤적에서 context 있는 teacher와 token-level reverse KL을 학습한다. 최적화된 system prompt를 가중치로 옮기는 실험도 있다. | 긴 고정 지시문→짧은 입력이라는 동기가 유용하다. 우리 finite-candidate forward KL 실험은 OPCD 자체가 아니다. 원문의 rollout 결과·성능·시간을 Ayaka에 외삽하지 않는다. |
 | [HelpSteer2-Preference](https://arxiv.org/html/2410.01257v2), ICLR 2025 | 기존 사람 rating에 별도의 사람 preference와 justification을 추가하고 regression/Bradley–Terry 및 결합 방식을 비교한다. | 자연 Score 학습을 일반 수학 CoT와 구분할 근거. 사람의 원래 pair 주석과 criterion을 확인한 경우만 보조 preference 학습을 고려한다. 평균 rating 차이를 원래 human preference라 부르지 않는다. |
@@ -142,3 +144,67 @@ Gold-only 다음 prompt-only 증류를 가장 작은 보조 후보로 두고, ra
 동시에 넣지 않는 순서에 동의했다. Direct loss 분모/문항 방문 수와 human/synthetic
 preference provenance 지적을 위 설계에 반영했다. Claude에는 `.dev` outbox로
 동일 자료와 판단 질문을 전달했으며, 이 설계에 대한 Claude의 답변은 아직 수신하지 않았다.
+
+## 사용자 추가 논문에 대한 적용 판단
+
+사용자가 제시한 네 논문 중 DSS와 ICoT-SI는 위 검토에 이미 포함됐다.
+추가한 PS/PS+와 CAD 분석은 학습 objective를 또 하나씩 합치는 대신 **자료의 품질과
+검증 조건**에 활용할 수 있다. 다음 조합은 문헌에 근거한 Ayaka 적용 제안이다.
+
+1. **자료:** 날짜 경계·윤년 규칙·예외·증거 유무를 바꾼 뒤 독립 gold verifier로
+   답을 다시 계산한다. 한 가지 숫자나 부정어 편집만 반복하지 않고 편집 유형을
+   나눈다. 원래 자연 direct 자료도 유지한다.
+2. **풀이:** PS+의 변수→계획→중간 결과라는 형식을 짧은 offline teacher 풀이 또는
+   결정론적 authored 풀이에 참고한다. 완결된 풀이 한 개를 기존 token budget 안에서
+   비교하며, 논문의 선택적 10회 self-consistency 실험을 기본 수집에 추가하지 않는다.
+   원문처럼 계획·실행을 한 생성에서 수행한다. 같은 출력 cap도 비용 일치를 보장하지
+   않으므로 입력·생성·typed readout 토큰과 EOS/empty/truncation/거부량을 함께 기록한다.
+3. **학습:** DSS를 참고한 별도 rationale CE로 검증된 풀이를 감독하고, 원문만 보는
+   direct gold loss를 유지한다. Prompt-context KL과의 첫 비교에서는 두 보조 신호를
+   한 arm에 합치지 않는다.
+4. **서비스:** `off`는 풀이 생성 없이 typed decision을 수행한다. PS planner를 앞에
+   추가해 off의 의미·비용을 바꾸지 않는다. 기존 `on + high`의 강제 실행 계약도 유지한다.
+5. **후속:** 이 조합의 direct 이득을 확인한 뒤 ICoT-SI의 점진적 prefix 제거를
+   별도 curriculum으로 검토한다. 원문의 optimizer reset·smoothing과 비용을 고려한다.
+
+### 정답 분포와 풀이 텍스트의 승인 조건은 다르다
+
+현재 `direct_distillation.py::make_teacher_read`도 trace SHA와 정답 일치가 모든
+중간 단계의 정확성을 증명하지 않는다고 명시한다. 독립 최종 gold를 통과한
+model-generated PS 분포라도 그 텍스트를 곧바로 `verified_traces`에 넣을 수는 없다.
+Rationale CE에는 독립적으로 검증한 단계·결정론적 authored 풀이만 공급한다.
+수식뿐 아니라 변수의 원문 근거, 단위·시간대, 적용 규칙/예외와 단계 간 의존 관계도
+확인한다. 최종 답에서 상쇄된 중간 오류를 허용하지 않는다. PS+의 수치 풀이 형식을
+주관적인 human rubric Score 전체에 기계적으로 적용하지 않는다.
+임의 자연 문서의 자유로운 풀이를 검증해 주는 일반 verifier는 현재 구현돼 있지 않다.
+이 검증을 확보하지 못한 풀이 텍스트는 보조 CE에서 제외한다.
+
+### CAD에서 가져올 것은 편집의 다양성과 격리다
+
+예를 들어 윤년 질문에서 year 1900→2000은 정답을 바꾸는 편집이고, 같은 의미의
+날짜 표현 변경은 정답을 유지해야 하는 검사다. 후자는 원문의 label-flip CAD와
+구분한 우리의 추가 invariance 검사다. 관련 사실·rubric·선택지의 의미를 유지하고,
+정보 부족인 문항에 관측 사실을 발명해서는 안 된다.
+Label-changing 편집은 gold 재계산뿐 아니라 선언한 target의 실제 변화도 확인한다.
+
+원본·반사실 변형·풀이·후보 순열·표현 alias는 같은 ancestry component에 묶는다.
+전체 component closure는 split/quota 적용 전에 구한다. 원본 하나의 파생본이 많아져
+학습 가중치가 커지는 효과와 label별 편집 유형·방향·표면 단서·길이·후보 위치도 감사한다.
+Held-out 편집 유형·규칙 조합·문서 표현에서도 검사하고, 기존 verified grammar 밖의
+자유로운 문장 편집은 새 검증 없이 학습 gold로 승인하지 않는다. 인위적으로 편집한
+자연 Score 응답에 원래 human rating을 붙이지 않는다.
+원래 human provenance를 보존하고 파생 정답은 independently-verified augmentation으로
+따로 표시한다. PS+·CAD training 자료·새 loss를 한 번에 교체하지 않는다.
+
+### 저비용 비교의 순서
+
+CPU에서 자료 coverage·gold·split component와 단계별 풀이 검증을 준비한 뒤,
+같은 native readout의 gold-only 기준에 대해 **prompt-context KL**과 **DSS 보조 과제**를
+분리해 비교한다. PS+는 후자의 자료 형식 후보이며, 검증된 authored 풀이부터 시작하면
+새 teacher 추론 비용 없이 objective를 준비할 수 있다. CPU 준비가 실제 12B 학습
+처리량이나 성능을 검증한 것은 아니다. 새 teacher 수집·training·평가 총비용은 별도로
+계산해야 한다. 이 추가 검토에서도 학습·GPU·유료 모델 API는 실행하지 않았다.
+
+추가 두 논문의 원문도 기존 리뷰 에이전트가 독립 검토했다. 생성 횟수·총 사용량,
+중간 단계 검증, CAD component closure·원본별 가중치와 provenance 지적을 반영했다.
+해당 검토는 새로운 Ayaka 학습 성능 측정이 아니다.
