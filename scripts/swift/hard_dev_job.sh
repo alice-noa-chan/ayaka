@@ -6,8 +6,8 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 R=707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
 OUT=${OUT:-/workspace/hard}
-CAL_SHA=99ca2f988a770857d37eeb07b5a765979baab2d25e3cd3b3819cd199da38fd7f
-DEV_SHA=42a5a8fa1e5a5158120cc8887b108c1e4500ec3f214c337ed18d07de688aae1c
+CAL_SHA=01f17bc9a454e69f771f4afb0d3d73cf415b09609f6dded36517da36b261b58c
+DEV_SHA=8a237769ee38d51adfa89bf6c6fedb5d49e966196497f165dbf5ca2072c3f7ee
 mkdir -p "$OUT"
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$OUT/steps.log"; }
 log "start code $(git rev-parse --short HEAD)"

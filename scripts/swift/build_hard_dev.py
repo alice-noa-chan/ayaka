@@ -103,7 +103,16 @@ def build(output: Path, limit: int) -> dict:
                 if not keep_question(source, q):
                     continue
                 row = {
-                    "id": f"{source}/{cluster.split(':')[1]}/{question['id']}",
+                    # A HelpSteer2 prompt has several responses; the source example id keeps
+                    # their rows distinct inside one document cluster.
+                    "id": "/".join(
+                        (
+                            source,
+                            cluster.split(":")[1],
+                            str(record.get("metadata", {}).get("source_example_id", "")),
+                            question["id"],
+                        )
+                    ),
                     "state": record["state"],
                     "split": role,
                     "tier": TIERS[source],
@@ -131,6 +140,10 @@ def build(output: Path, limit: int) -> dict:
             if len(chosen) < target:
                 shortfall[f"{role}/{source}/{kind}"] = f"{len(chosen)}/{target}"
             outputs[role].extend(chosen)
+    for role, rows in outputs.items():
+        ids = [row["id"] for row in rows]
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{role}: duplicate row ids")
     output.mkdir(parents=True, exist_ok=True)
     files = {}
     for role, rows in outputs.items():

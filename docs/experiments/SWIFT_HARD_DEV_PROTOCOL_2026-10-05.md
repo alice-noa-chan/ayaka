@@ -24,13 +24,18 @@ data, then reruns the unchanged gate once.
 
 | File | Decisions | Clusters | sha256 |
 |---|---|---|---|
-| calibration.jsonl | 390 | 262 | `99ca2f988a770857d37eeb07b5a765979baab2d25e3cd3b3819cd199da38fd7f` |
-| dev.jsonl | 396 | 271 | `42a5a8fa1e5a5158120cc8887b108c1e4500ec3f214c337ed18d07de688aae1c` |
+| calibration.jsonl | 390 | 262 | `01f17bc9a454e69f771f4afb0d3d73cf415b09609f6dded36517da36b261b58c` |
+| dev.jsonl | 396 | 271 | `8a237769ee38d51adfa89bf6c6fedb5d49e966196497f165dbf5ca2072c3f7ee` |
 
 A rebuild reproduced both hashes. The hashes are of LF-terminated files. The first freeze recorded the Windows
 CRLF bytes of the same content, and the GPU job's hash check refused the Linux rebuild. The JSON content was
 identical row for row. The builder now always writes LF, and the hashes above replace the CRLF ones. This was
-amended before any hard read. HotpotQA noul fell short of its 120 target in both splits (calibration 110,
+amended before any hard read.
+
+A second amendment, also before any model call: the collector refused the data because several HelpSteer2 responses
+to one prompt shared a row id (19 calibration and 24 dev duplicates). Row ids now include the source example id, and
+the builder refuses duplicate ids. This changes which rows the seeded selection picks, so the hashes above are new.
+The sources, targets, clustering and seed are unchanged. HotpotQA noul fell short of its 120 target in both splits (calibration 110,
 dev 116).
 
 ## Reads
