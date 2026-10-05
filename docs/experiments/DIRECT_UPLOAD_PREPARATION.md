@@ -202,7 +202,8 @@ test commitment SHA: f0d695cc6ca226f3d2378c02ad65a880a295fd2b445ae16a383d617c001
 
 기존 private holdout manifest는 이전 development manifest SHA를 참조한다.
 Opaque commitment가 같아도 그 연결이 자동으로 바뀌지 않는다. 원본 test를
-열지 않는 metadata migration과 별도 외부 anchor가 필요하며 아직 완료하지 않았다.
+열지 않는 metadata migration과 별도 외부 anchor가 필요하다. 아래 `f2c510f`
+단계에서 실제 연결을 갱신했으며 기존 기록은 보존했다.
 
 `9fe2434`는 Linux Torch 2.8의 CPU attention dispatch 차이도 검사에 반영했다.
 FP32 GQA/반복 KV 경로 사이 rounding을 semantic 오류와 구분하기 위해 독립
@@ -270,6 +271,101 @@ failed receipt: .dev/codex-direct-runtime-full-9fe2434-20261005.json
 실제 reasoned teacher의 paired 이득, prior private evaluation inventory,
 native CUDA kernel parity와 전체 schedule의 throughput, setup/test/export/download/
 cleanup/recovery를 포함한 보유 credit 내 완주 예측, private holdout의 새
-development manifest 연결이 필요하다. 실측으로 선택한
+model/policy dev 선택 고정과 독립 평가가 필요하다. Development manifest의
+metadata 연결은 아래에서 완료했다. 실측으로 선택한
 후보만 독립 test에서 v1 reasoning과 비교한다. CPU 준비나 header 일치에서
 품질 향상, v2 off의 우위, JevBench 순위 또는 본학습 완료를 주장하지 않는다.
+
+## 2026-10-05 원문 내용을 읽지 않는 holdout 연결 갱신
+
+`f2c510f`의 [rebind_holdout.py](../../scripts/direct_v2/rebind_holdout.py)는
+서로 다른 source revision에서 full CPU audit로 재검증한 동일 frozen payload
+bundle을 연결한다. Payload selection과 preparation을 다시 수행했다는 뜻은 아니다.
+기존·새 bundle manifest와 CPU audit, 기존 holdout manifest의 SHA 다섯 개를
+외부에서 고정해야 한다. 아홉 development payload의 실제 bytes와 opaque
+commitment, source/manifest SHA를 제외한 두 complete CPU receipt가 동일해야 한다.
+Source inventory의 digest 변경·추가·삭제를 양쪽 값으로 기록한다.
+
+원문 `test.jsonl`의 내용은 읽지 않고 파일 식별자만 확인한다. 같은 filesystem의
+새 별도 holdout directory에 hard link를 만들며 기존 manifest를 덮어쓰지 않는다.
+Hard link는 동일 파일을 가리키므로 bytes의 불변 snapshot이나 접근 통제가 아니다.
+두 경로의 device/inode/size/mtime를 검증하고, metadata와 payload를 다시 확인한다.
+읽기 전에 path와 실제 열린 descriptor를 검사해 원문의 hard-link alias와 reparse
+file을 거부한다. 원문 내용을 SHA로 검증했다고 주장하지 않는다.
+Path 검사 직후 파일이 교체된 실패 경로에서는 descriptor가 먼저 열릴 수 있으나,
+내용을 읽기 전 identity 검사에서 중단한다. 외부 동시 변경을 차단하는 기능은 아니다.
+
+출력은 exclusive create·short-write 검사·flush·fsync를 거친다. Manifest를 마지막에
+쓰고, 저장된 두 metadata 파일을 안전한 reader로 다시 hash 검사한 뒤 성공 anchor를
+반환한다. 오류 시 부분 directory를 진단용으로 보존하며 자동 삭제·덮어쓰기·copy
+fallback은 없다. Atomic directory transaction이나 동시 변경에 대한 접근 통제로
+확대하지 않는다. 실패한 partial directory에 있는 manifest를 성공 receipt 없이
+사용하지 말고 새 output 경로로 진단 후 실행한다.
+
+CLI는 표준 라이브러리만 사용한다. 원문 test나 학습 모델을 준비 과정에서 열지 않는다.
+다음 경로와 anchor는 이번 local 61f3c6b → 9fe2434 갱신의 재현 예시다. 이미 생성된
+output directory에서는 재실행을 거부하므로 재현에는 별도 새 `--out`이 필요하다.
+
+```sh
+python -m scripts.direct_v2.rebind_holdout \
+  --old-bundle .dev/direct-policy-native-61f3c6b-20261005/bundle \
+  --new-bundle .dev/direct-policy-native-9fe2434-20261005/bundle \
+  --old-audit .dev/direct-policy-native-61f3c6b-20261005/cpu-audit.json \
+  --new-audit .dev/direct-policy-native-9fe2434-20261005/cpu-audit.json \
+  --holdout .dev/direct-policy-native-61f3c6b-20261005/bundle-holdout \
+  --out .dev/direct-policy-native-9fe2434-20261005/bundle-holdout \
+  --expected-old-bundle-sha256 170ece7c5e1b41dadd98051b26e1260e889c8033cc91c6658a5a087a7438a624 \
+  --expected-new-bundle-sha256 0ceeb878f60ed6877c7d15ba5eda9455f24e8289ebe39f7ec7e6948bea8f17dc \
+  --expected-old-audit-sha256 2c960994d18a20624fb8ca4854624daa24b9f9e40ed21855348d68447e3e1b7c \
+  --expected-new-audit-sha256 eb693eb47c62a52a8d8ce34d4f04841c042dd48848ed6bc22456b1a2f3900836 \
+  --expected-holdout-manifest-sha256 f86e5420047cf2916a65a3fe79989ad765c40d51bad8aed3af1b6fd034a36b5a
+```
+
+이번 실제 갱신은 Windows NTFS에서 0.418초에 통과했다. 별도 Python audit hook으로
+원문과 그 inode alias의 `open`을 금지했다. 원문 열기 시도 0, 같은 파일 식별자와
+두 저장 SHA의 일치를 확인했다. Torch를 import하거나 모델·GPU·optimizer를
+실행하지 않았다. Source 차이는 `training/native_snapshot.py` 하나다.
+
+```text
+new holdout: .dev/direct-policy-native-9fe2434-20261005/bundle-holdout
+holdout manifest SHA: 39237aaeccfea35cc9976976503c2c5ec8d1f3201ecc5f6d0e2d25b1d3fc5135
+migration SHA: e5b0c38ca99c10e5aef23b3fb22fc2cde70355722b60e6c83f8598a56da2239b
+execution receipt: .dev/direct-native-holdout-rebinding-20261005.json
+execution receipt SHA: c6f7b3bba4f39f39be4c1eacf4fee6cc5633403b7ef7b564ce649507ede7e017
+```
+
+기존 holdout-v2 manifest 계약과 `open_holdout`은 유지했다. 예전 model/policy
+selection은 복사하지 않았다. 새 development manifest에 맞춘 독립 dev 선택을
+외부 SHA로 고정한 뒤 evaluator가 원문 bytes와 membership을 검증해야 한다.
+이번 migration 자체는 새 모델 선택·품질 결과·학습 실행 증거가 아니다.
+
+Related Windows CPU tests는 **60 passed / 36.84초**다. 잘못된 anchor/payload/receipt,
+원문 alias와 descriptor race, 출력 손상·sync 실패, source 추가·삭제, 기존 selection
+거부와 나중 원문 검증을 검사했다. 독립 read-only reviewer는 남은 P1/P2를 찾지
+못했다. 복원된 Linux runtime의 같은 테스트도 **60 passed / 121.22초**로 통과했다.
+Linux wrapper의 전체 실행 시간은 128.32초이며 migration tool/test source의 전후
+hash가 같다.
+
+```text
+Linux receipt: .dev/direct-linux-holdout-rebinding-f2c510f-20261005.json
+Linux receipt SHA: 4d510338b84bf6238018152a0b3f8f4391d3ae2286f17d9b7fadd92231c15a16
+Linux log SHA: 3148a517b14632e98974edcb226e19ff82e5e5b69d729c1bfa48474e4e8be9af
+```
+
+고정 `f2c510f` 전체 CPU integration은 **2,221 passed / 2 skipped / 1 warning,
+743.84초**로 통과했다. Wrapper duration은 746.04초다. Exit 0 / stable_pass true,
+source·개발 fixture의 전후 hash 동일이다. Child CPU thread는 각각 1로 고정했다.
+Warning은 중복 ZIP member fixture의 예상 경고다. 이 elapsed time을 CUDA 학습
+속도 개선으로 해석하지 않는다. Ruff lint/format은 추적 중인 Python 파일 319개에서
+통과했다.
+
+```text
+full receipt: .dev/codex-holdout-rebinding-full-f2c510f-20261005.json
+full receipt SHA: 123d8e20368dcc567656d43fb466268e46da8c872ae708c37936743e642841d4
+full log SHA: 99cad99e7db959d9ea182a29b6708f2698996b81487246145420b178d68f4a84
+```
+
+Ayaka의 audited 147개 core source와 준비 payload는 이 변경에서 바뀌지 않았다.
+따라서 위 기존 model/data·runtime archive와 CPU audit anchor는 유지된다. 새
+migration helper는 별도 utility로 제공하며 이전 169-file native archive에 포함됐다고
+주장하지 않는다. Private holdout은 training upload와 분리해서 보관한다.

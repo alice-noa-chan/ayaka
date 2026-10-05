@@ -1253,4 +1253,53 @@ GPU 할당, paid API, production optimizer step은 0이다. 작은 random CPU fi
 optimizer 검사는 수행했다. Swift/API 소유 파일과 main은 유지했다. Claude incoming은
 section 18까지이며 새 승인이나 성능 판단을 추정하지 않는다. 실제 reasoned-teacher
 paired 이득, 원래 private inventory, CUDA parity/throughput, 전체 credit admission,
-holdout 연결과 독립 v1 reasoning 대비 v2 off의 품질 검사는 계속 필요하다.
+새 dev model/policy 선택과 독립 v1 reasoning 대비 v2 off의 품질 검사는 계속 필요하다.
+
+## 2026-10-05 holdout metadata 연결 완료
+
+`f2c510f`는 과거 bundle에 연결된 private holdout을 별도 directory에서 새
+development manifest에 연결하는 표준 라이브러리 CLI를 추가했다. 기존·새 bundle과
+complete CPU receipt, 기존 holdout의 외부 SHA 다섯 개를 검사하고 모든 development
+payload가 byte 단위로 동일할 때만 진행한다. Source 차이는 양쪽 inventory 값으로
+기록한다. 실제 이번 변경은 `training/native_snapshot.py` 하나다.
+
+원문 test를 열지 않고 같은 filesystem의 hard link와 파일 식별자를 사용했다.
+원문 alias나 교체된 descriptor를 읽기 전에 거부한다. Metadata는 exclusive write와
+flush/fsync 후 실제 저장 SHA를 재검증하고 마지막 private-file identity도 확인한다.
+기존 records는 유지하며 실패 partial directory는 진단용으로 보존한다. Hard link는
+불변 snapshot이 아니므로 원문 content hash와 membership 검증은 독립 평가로 미룬다.
+Path 검사 후 교체가 발생한 실패 경로는 열린 descriptor의 identity를 검사한 뒤
+내용을 읽기 전에 중단한다. 외부 동시 변경 자체를 차단하는 접근 통제는 아니다.
+
+실제 NTFS migration은 0.418초에 통과했다. 별도 audit hook에서도 원문 `open`은
+0회였고 Torch import·GPU·optimizer 실행은 없었다. 새 holdout manifest SHA는
+`39237aaeccfea35cc9976976503c2c5ec8d1f3201ecc5f6d0e2d25b1d3fc5135`,
+migration SHA는 `e5b0c38ca99c10e5aef23b3fb22fc2cde70355722b60e6c83f8598a56da2239b`다.
+Receipt는 `.dev/direct-native-holdout-rebinding-20261005.json`, SHA는
+`c6f7b3bba4f39f39be4c1eacf4fee6cc5633403b7ef7b564ce649507ede7e017`다.
+
+Related CPU tests는 60 passed / 36.84초이며 독립 read-only reviewer는 남은 P1/P2를
+찾지 못했다. 복원된 Linux runtime에서도 60 passed / 121.22초, source 전후 hash
+동일로 통과했다. Linux receipt SHA는
+`4d510338b84bf6238018152a0b3f8f4391d3ae2286f17d9b7fadd92231c15a16`다.
+고정 commit의 전체 CPU 검사는 **2,221 passed / 2 skipped / 1 warning, 743.84초**로
+통과했다. Exit 0 / stable_pass true이며 source·개발 fixture의 전후 hash가 같다.
+추적 Python 파일 319개의 Ruff lint/format도 통과했다. CPU suite duration을 CUDA
+학습 throughput 근거로 사용하지 않는다. 재현 CLI와 제한은
+[DIRECT_UPLOAD_PREPARATION.md](DIRECT_UPLOAD_PREPARATION.md)에 기록했다.
+
+```text
+full receipt: .dev/codex-holdout-rebinding-full-f2c510f-20261005.json
+full receipt SHA: 123d8e20368dcc567656d43fb466268e46da8c872ae708c37936743e642841d4
+full log SHA: 99cad99e7db959d9ea182a29b6708f2698996b81487246145420b178d68f4a84
+```
+
+새 learned-model/policy 선택을 고정한 것은 아니며 기존 selection을 옮기지 않았다.
+새 manifest에 연결된 외부 dev-selection SHA가 있어야 기존 `open_holdout` 계약으로
+test를 열 수 있다. 이 metadata 갱신은 v2 off의 품질이나 실제 teacher의 paired
+이득을 증명하지 않는다. Prior private evaluation inventory, 실제 CUDA kernel
+parity/backward/throughput과 전 lifecycle의 보유-credit admission도 계속 필요하다.
+
+Audited core 147개와 payload가 그대로여서 기존 bundle/CPU audit 및 model/data·runtime
+archive anchor는 유효하다. 새 helper는 별도 utility이며 기존 native archive의 구성
+파일에 들어갔다고 주장하지 않는다. Private holdout은 학습 upload와 분리한다.
