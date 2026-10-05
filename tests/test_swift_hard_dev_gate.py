@@ -53,3 +53,10 @@ def test_public_reads_are_refused(dirs):
 def test_misaligned_variants_are_refused():
     with pytest.raises(ValueError, match="aligned"):
         gate.aligned([read("a"), read("b")], [read("b"), read("a")])
+
+
+def test_duplicate_hard_row_ids_are_refused(tmp_path):
+    path = tmp_path / "dev.jsonl"
+    write(path, [{"id": "doc/1", "questions": [{"id": "q"}]}] * 2)
+    with pytest.raises(ValueError, match="duplicate"):
+        gate.hard_ids(path)

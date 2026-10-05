@@ -50,7 +50,11 @@ def hard_ids(path: Path) -> set[str]:
         if not line:
             continue
         record = json.loads(line)
-        ids |= {f"{record['id']}/{q['id']}" for q in record["questions"]}
+        for question in record["questions"]:
+            identifier = f"{record['id']}/{question['id']}"
+            if identifier in ids:
+                raise ValueError(f"duplicate hard row id: {identifier}")
+            ids.add(identifier)
     return ids
 
 
@@ -161,6 +165,9 @@ def run(v2_dir: Path, hard_dir: Path, manifest_path: Path, variants) -> dict:
         "calibration_A": cal_A,
         "selected_on_calibration": selected,
         "decision": decision,
+        # Expanded-union, assumed-Speed result: never a shippable promotion by itself.
+        "scope": "expanded_union_conditional_assumed_speed",
+        "promotable": False,
         "diagnostics_not_gating": diagnostics,
         "policies": {variant: policy.__dict__ for variant, policy in policies.items()},
     }

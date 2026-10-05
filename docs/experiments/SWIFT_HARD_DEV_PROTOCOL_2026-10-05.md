@@ -102,3 +102,30 @@ slice overstates the effect. That is why the slice is a diagnostic and does not 
 - The current policy stays: `min`, the fitted policy and the adopted reasoning route.
 - `cygnet` is closed on v2/hard data.
 - The public-item advantage (201 vs 193) is not used to override this.
+
+## Limits found in review (Codex, 2026-10-05), measured after the run
+
+None of these changes the outcome. The concluded run rejected cygnet, and every limit below can only make an
+adoption look better than it is, never a rejection.
+
+- **Scope of the decision.** The gate decides on known v2 dev plus fresh hard dev. It is an *expanded-union
+  conditional* result, not an independent fresh-hard confirmation: a v2 gain can offset a hard-only loss. It is also
+  *resource-conditional*: Speed is the assumed 91 for both prompts, not a bound serial measurement. Even a pass would
+  only have made the variant a candidate (`promotable: false`). Promotion would need serial latency on the same
+  cohort.
+- **HotpotQA document independence is limited.** Clustering hashed each row's whole context string. Paragraphs
+  shared by different questions were therefore not grouped. Matching paragraph titles shows that 11 of 156 dev
+  HotpotQA rows share at least one paragraph (28 titles in all) with calibration rows. Calibration fits only
+  per-type temperatures and the Noul/Score policy, so this leaks no labels into the dev decision. Still, the claim
+  of document-level independence holds for QuALITY and HelpSteer2 only, not for HotpotQA. A future protocol must
+  build title components first (union-find over shared paragraphs) and then assign roles.
+- **HelpSteer2 targets.** The shared loader floored fractional ratings to integers (fixed by Codex in `2fa760e`).
+  HelpSteer2 validation has 0 fractional helpfulness or correctness values among 2,076, so this data is unaffected.
+- **Quotas.** Only targets were declared, not enforced minima; the shortfall was recorded (noul 110 and 116 of 120).
+  A future builder must refuse to emit a split below declared per-source/type minima.
+- **Binding.** The job rebuilt the corpus on the GPU host from mutable Hugging Face revisions and checked file
+  hashes. Both matched the local build byte for byte. Reads are checked against row ids, not against each row's
+  state, question and gold. A future job should consume a corpus verified offline, by external anchors.
+- **First paragraph of this document.** It cites the stored `adoption.json`: ΔA +0.8026 [−0.2400, 2.2428],
+  ΔI +4.80. The +4.54 / +0.56 figures shared earlier came from a local recomputation over 1,440 decisions that
+  included grouped rows. `SWIFT_GPU_RESULTS_2026-10-05.md` now carries the stored values and the correction.

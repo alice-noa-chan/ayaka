@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import ctypes.util
 import datetime as dt
+import hashlib
 import importlib.metadata
 import json
 import math
@@ -614,6 +615,12 @@ def select_model_results(directory: Path) -> dict:
     return selection
 
 
+def load_bound_json(path: Path) -> tuple[dict, str]:
+    """Parse and hash the same bytes, so the recorded sha256 is of what was consumed."""
+    data = path.read_bytes()
+    return json.loads(data), hashlib.sha256(data).hexdigest()
+
+
 def reasoning_results(directory: Path, *, gate=False):
     """Separate calibration fit from the single dev gate after the serial probe."""
     from dataclasses import replace
@@ -653,6 +660,7 @@ def reasoning_results(directory: Path, *, gate=False):
     if not baseline.adoption:
         # With no earlier lever accepted, this is the original min baseline.
         baseline = replace(current, adoption=None)
+    fitted_router, fitted_router_sha256 = load_bound_json(directory / "reasoning_fit.json")
     report = adopt_levers(
         cal,
         dev,
@@ -663,8 +671,8 @@ def reasoning_results(directory: Path, *, gate=False):
         direct_system_latency=[json.loads((directory / "direct_system.latency.json").read_text())],
         routed_latency=[json.loads((directory / "routed_system.latency.json").read_text())],
         # Gate the exact router that was served and probed, not a fresh float refit.
-        fitted_router=json.loads((directory / "reasoning_fit.json").read_text()),
-        fitted_router_sha256=sha256(directory / "reasoning_fit.json"),
+        fitted_router=fitted_router,
+        fitted_router_sha256=fitted_router_sha256,
     )
     final = Policy(**report["final_policy"])
     write_json(directory / "reasoning_adoption.json", report)

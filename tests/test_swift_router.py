@@ -457,3 +457,31 @@ def test_saved_router_artifact_is_used_when_refit_agrees_within_tolerance(tmp_pa
     moved["threshold"] = min(2, moved["threshold"] + 0.5)
     with pytest.raises(ValueError, match="threshold"):
         router_refit_difference(moved, fitted["router"])
+
+
+def test_saved_artifact_contributes_only_its_router(tmp_path):
+    cal, dev, cp, dp = route_roles(tmp_path)
+    reference = adopt_levers(
+        cal, dev, Policy(), levers=("reasoning_route",), reasoning_calibration=cp, reasoning_dev=dp
+    )
+    fitted = reference["levers"][2]["fitted_params"]
+    contradictory = copy.deepcopy(fitted)
+    # Identical router, contradictory metadata: it must not switch the route off or
+    # enter the receipt.
+    contradictory["calibration"]["route_rate"] = 0
+    contradictory["fit_n"] = -1
+    report = adopt_levers(
+        cal,
+        dev,
+        Policy(),
+        levers=("reasoning_route",),
+        reasoning_calibration=cp,
+        reasoning_dev=dp,
+        fitted_router=contradictory,
+        fitted_router_sha256="b" * 64,
+    )
+    entry = report["levers"][2]
+    assert entry["gate"]["adopted"] == reference["levers"][2]["gate"]["adopted"]
+    assert entry["fitted_params"]["calibration"] == fitted["calibration"]
+    assert entry["fitted_params"].get("fit_n") == fitted.get("fit_n")
+    assert entry["fitted_params"]["router"] == fitted["router"]

@@ -26,18 +26,28 @@ E4B (P3) was not measured.
 The parity gate passed for all four prompt variants after these fixes: identical prompt and canonical token ids,
 argmax agreement 1.0, probability max-abs ≤ 0.0125.
 
-## Prompt variants on non-public dev (1,440 decisions, 12B frozen, fitted policy)
+## Prompt variants on non-public dev (1,312 single-pass decisions, 12B frozen, fitted policy)
 
-| Variant | I | C | Noul CC | Mean input tokens | Local A |
+Values from the stored `variant_selection.json`. The 128 grouped MASSIVE rows are excluded, as in the gate.
+
+| Variant | I | C | Mean input tokens | Cost | Local A |
 |---|---:|---:|---:|---:|---:|
-| min | 64.1 | 85.6 | 70.5 | 231 | 76.37 |
-| cygnet | 68.6 | 86.0 | 81.8 | 300 | 76.92 |
-| labeled | 64.2 | 85.5 | 70.5 | 233 | 76.38 |
-| rules | 63.7 | 84.0 | 73.3 | 284 | 75.11 |
+| min | 64.41 | 85.34 | 231 | 70.93 | 76.44 |
+| cygnet | 69.21 | 86.64 | 300 | 67.52 | 77.24 |
+| labeled | 64.61 | 84.95 | 233 | 70.82 | 76.40 |
+| rules | 63.35 | 83.70 | 284 | 68.24 | 74.94 |
 
-**Gate decision:** cygnet versus min gave ΔI +4.54 [1.84, 7.33] and ΔA +0.56 [−0.46, 2.14]. The higher token
-cost lowers the Cost axis, so the composite lower bound does not exceed 0. Under the predeclared rule cygnet was
-**not adopted**, and the policy stays on `min`.
+**Gate decision:** the stored `adoption.json` (variant lever) gives cygnet versus min:
+- ΔA +0.803, 95% CI [−0.240, 2.243]
+- ΔI +4.80, 95% CI [1.99, 7.63]
+
+The selection report's own bootstrap agrees: ΔA +0.800, CI [−0.243, 2.241]. The higher token cost lowers the Cost
+axis, so the composite lower bound does not exceed 0. Under the predeclared rule cygnet was **not adopted**, and
+the policy stays on `min`.
+
+*Correction (2026-10-05):* an earlier version of this table reported 1,440 decisions, ΔI +4.54 [1.84, 7.33] and
+ΔA +0.56 [−0.46, 2.14]. Those figures came from a local recomputation that included the 128 grouped rows. That
+script was not kept, and the figures were not a stored gate artifact. The decision is the same either way.
 
 ## Gated reasoning route
 

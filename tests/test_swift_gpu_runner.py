@@ -1127,3 +1127,23 @@ def test_system_latency_probe_non_public_standard_judge_only(tmp_path, monkeypat
             non_public=True,
         )
     assert len([c for c in calls if c.get("state") != "warm-up"]) == 2
+
+
+def test_bound_json_hash_is_of_the_parsed_bytes(tmp_path, monkeypatch):
+    import hashlib
+    from pathlib import Path
+
+    path = tmp_path / "reasoning_fit.json"
+    path.write_bytes(b'{"router": 1}')
+    original = Path.read_bytes
+
+    def read_then_replace(self):
+        data = original(self)
+        # A concurrent writer replaces the file after the single read.
+        self.write_bytes(b'{"router": 2}')
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_replace)
+    value, digest = gpu_runner.load_bound_json(path)
+    assert value == {"router": 1}
+    assert digest == hashlib.sha256(b'{"router": 1}').hexdigest()

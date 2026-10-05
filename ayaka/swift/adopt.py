@@ -455,8 +455,11 @@ def adopt_levers(
                     raise ValueError(
                         f"saved router differs from the calibration refit by {difference:.3g}"
                     )
+                # Only the verified router bytes are substituted; every other fitted field
+                # (role, counts, calibration statistics) stays the independent recomputation.
                 params = {
-                    **fitted_router,
+                    **params,
+                    "router": fitted_router["router"],
                     "artifact": {
                         "sha256": fitted_router_sha256,
                         "refit_max_abs_difference": difference,
