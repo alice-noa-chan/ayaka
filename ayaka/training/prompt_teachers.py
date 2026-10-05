@@ -235,6 +235,7 @@ def export_prompt_teachers(
     mechanics_only=False,
 ):
     """Convert one complete non-public train pair, keeping benefit filtering separate."""
+    samples = list(samples)  # cohort validation and construction must see the same iterable
     if not callable(verify_gold):
         raise ValueError("an independent gold verifier is required")
     _identity(teacher_identity, cfg, mechanics_only)
@@ -275,6 +276,8 @@ def export_prompt_teachers(
                 teacher_artifact_sha256=expected_prompt_sha256,
                 mechanics_only=mechanics_only,
             )
+    if set(teachers) != expected_ids:
+        raise ValueError("prompt teacher construction did not cover the declared train cohort")
     report = {
         "version": VERSION,
         "teacher_kind": "prompt_context",

@@ -122,6 +122,21 @@ def test_actual_native_gathers_bind_both_inputs_and_short_student_stays_trace_fr
     assert [samples, direct, prompt] == before
 
 
+def test_one_shot_train_iterator_is_fully_verified_and_matches_list_conversion(observations):
+    expected, expected_report = exported(observations)
+    calls = []
+
+    def checked_gold(sample, question):
+        calls.append(question.id)
+        return verify(sample, question)
+
+    actual, report = exported((iter(observations[0]), *observations[1:]), verify_gold=checked_gold)
+    assert actual == expected and report == expected_report
+    assert sorted(calls) == sorted(q.id for sample in observations[0] for q in sample.questions)
+    assert report["available_teacher_questions"] == 3
+    assert report["usage"]["backend_calls"] == 6
+
+
 def resign(row):
     bound = row["binding"]
     bound["runtime_sha256"] = fingerprint(bound["runtime"])
