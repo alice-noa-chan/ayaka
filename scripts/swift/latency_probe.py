@@ -18,6 +18,8 @@ from ayaka.swift.collect import iter_dataset  # noqa: E402
 from ayaka.swift.policy import Policy  # noqa: E402
 from ayaka.swift.prompt import PROMPT_VARIANTS, validate_prompt_variant  # noqa: E402
 
+WARMUP_REQUESTS = 3
+
 
 def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -87,20 +89,48 @@ def probe(
         else None,
         "policy_sha256": policy_fingerprint(policy) if policy else None,
     }
+    result["warmup_requests"] = WARMUP_REQUESTS
     write_json(output, result)
-    for item in items[:reads]:
+
+    def body_for(item):
         question = item.question
-        body = {
+        # Jev API wire shapes: Score criteria are an ordered array of level descriptions;
+        # Choice/Noul criteria map option/label to description.
+        criteria = (
+            list(question.descriptions)
+            if question.type == "score"
+            else dict(zip(question.labels, question.descriptions, strict=True))
+        )
+        return {
             "model": model,
             "state": item.state,
             "questions": {
                 "probe": {
                     "type": question.type,
                     "instructions": question.instruction,
-                    "criteria": dict(zip(question.labels, question.descriptions, strict=True)),
+                    "criteria": criteria,
                 }
             },
         }
+
+    # Unmeasured warm-up requests, as JevBench warms a self-hosted endpoint before timing.
+    # A fixed synthetic Noul keeps measured prompts out of the prefix cache.
+    warmup = {
+        "model": model,
+        "state": "warm-up",
+        "questions": {"probe": {"type": "noul", "instructions": "Is this a warm-up?"}},
+    }
+    for _ in range(WARMUP_REQUESTS):
+        request = urllib.request.Request(
+            result["endpoint"],
+            data=json.dumps(warmup).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read()
+    for item in items[:reads]:
+        body = body_for(item)
         request = urllib.request.Request(
             result["endpoint"],
             data=json.dumps(body).encode("utf-8"),
