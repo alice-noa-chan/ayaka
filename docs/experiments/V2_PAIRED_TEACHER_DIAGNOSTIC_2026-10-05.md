@@ -52,8 +52,9 @@ Hard argmax 진단은 공식 Noul 기권 credit이나 Score 기대값 metric을 
 전체 direct는 각각 1,440행, canonical은 1,312행이다. Calibration paired
 1,198행 중 EOS 1,064 / cap 134, dev paired 1,203행 중 EOS 1,079 / cap 124다.
 빈 풀이 0이며 생성 토큰은 각각 246,239 / 246,015다. Canonical 미관측은
-114 / 109다. 이전 공유 문서의 dev 961은 전체 paired나 EOS와 맞지 않아
-cohort 설명을 Claude에게 요청했다. Coverage는 generation eligibility에 따라
+114 / 109다. Claude section 20에서 dev 961은 시간 초과로 끝난 attempt 6의
+부분 수집 수였다고 정정했다. 이 문서의 final attempt 7은 1,203행이다.
+Coverage는 generation eligibility에 따라
 선택된 subset이며 source마다 다르다. ContractNLI 관측은 없다. 자연 정책
 문서 전체·ko/ja·26개 초과 후보·미관측 문항으로 일반화하지 않는다.
 
@@ -93,7 +94,18 @@ calibration-only fitted router는 dev ΔA +.45694, CI [.32891, .64882]로
 serving gate를 통과했다. 전체 observed subset을 reasoned로 바꾼 이 문서와
 다른 비교다. 라우팅 비율 약 1.2%이며 .7960 → .8087초 p95는 수집 지연
 분포 기반 projection이다. 별도 serial HTTP probe 통계와 구분한다.
-Router 채택은 train 증류 이득을 증명하지 않는다.
+Router 채택은 train 증류 이득을 증명하지 않는다. 이미 fitting한 policy를
+고정 `1ab3261` 구현에 읽혀 재학습 없이 세면 canonical dev 1,312문항 중
+16문항(Choice 6 / Noul 7 / Score 3)을 route한다. 모두 ayaka-v2-verified이며
+HelpSteer2·CQA·repository-authored는 0이다. 이 dev에서 자연 source 퇴보를
+회피하는 선택적 이득이며 새로운 자연 hard 문항에서도 회피한다는 보장은 없다.
+이 분모에는 추론 자체를 관측하지 않은 grouped MASSIVE 128행이 없다.
+
+```text
+stored-policy route-count receipt: .dev/codex-frozen-adopted-route-source-diagnostic-20261005.json
+receipt SHA: 690e07fa783c31d57976f10d442b8cdf618018465cb3949ad4cc41001d52b02c
+fitted router fingerprint: 82b699eb5f267e9ac3999947584036b125d26ad60a1f80a87330c3598c1f98da
+```
 
 권고는 검증된 `min + selective reasoning`을 유지하고 Cygnet을 독립 hard
 dev에서 재검증하는 것이다. 기존 Cygnet ΔA CI는 0을 포함하며 public은 원인
