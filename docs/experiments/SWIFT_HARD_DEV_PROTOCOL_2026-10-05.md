@@ -24,10 +24,13 @@ data, then reruns the unchanged gate once.
 
 | File | Decisions | Clusters | sha256 |
 |---|---|---|---|
-| calibration.jsonl | 390 | 262 | `05c61cde6132ffa28ede9933dcdcb1cc7a0c2a3f34c6ced9fad679daf81875d8` |
-| dev.jsonl | 396 | 271 | `8a0e5b8a1f2f03b2f25d5492d311d88c56d2d6d8dd4a8cc9c24c9b955508f4e3` |
+| calibration.jsonl | 390 | 262 | `99ca2f988a770857d37eeb07b5a765979baab2d25e3cd3b3819cd199da38fd7f` |
+| dev.jsonl | 396 | 271 | `42a5a8fa1e5a5158120cc8887b108c1e4500ec3f214c337ed18d07de688aae1c` |
 
-A rebuild reproduced both hashes. HotpotQA noul fell short of its 120 target in both splits (calibration 110,
+A rebuild reproduced both hashes. The hashes are of LF-terminated files. The first freeze recorded the Windows
+CRLF bytes of the same content, and the GPU job's hash check refused the Linux rebuild. The JSON content was
+identical row for row. The builder now always writes LF, and the hashes above replace the CRLF ones. This was
+amended before any hard read. HotpotQA noul fell short of its 120 target in both splits (calibration 110,
 dev 116).
 
 ## Reads

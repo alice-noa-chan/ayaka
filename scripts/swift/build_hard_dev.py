@@ -139,6 +139,7 @@ def build(output: Path, limit: int) -> dict:
         path.write_text(
             "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows),
             encoding="utf-8",
+            newline="\n",  # LF on every platform, so the frozen hashes reproduce anywhere
         )
         files[role] = {
             "path": path.name,
@@ -164,7 +165,9 @@ def build(output: Path, limit: int) -> dict:
         "jevbench_public_13gram_decontaminated": True,
         "note": "Non-public hard/judge protocol for Swift prompt gating; never used for training.",
     }
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (output / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
     return manifest
 
 
