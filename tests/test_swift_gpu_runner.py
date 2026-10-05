@@ -19,7 +19,7 @@ from ayaka.swift.readers import FakeReader
 from ayaka.swift.server import DecisionService, serve
 from scripts.swift import gpu_runner
 from scripts.swift.inputs import DEFAULT_MANIFEST, PACKED_MANIFEST, REPO, inventory, sha256
-from scripts.swift.latency_probe import probe, quantile
+from scripts.swift.latency_probe import WARMUP_REQUESTS, probe, quantile
 from scripts.swift.pack_inputs import pack_inputs
 
 
@@ -99,12 +99,12 @@ def test_default_inventory_and_real_pack_never_open_test(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "open", guarded_open)
     resolved = pack_inputs(REPO, DEFAULT_MANIFEST, tmp_path / "inputs.tar.gz")
     assert [(d["name"], d["items"], d["reads"]) for d in resolved["datasets"]] == [
-        ("v2_calibration", 1824, 2208),
-        ("v2_dev", 1824, 2208),
+        ("v2_calibration", 1440, 1824),
+        ("v2_dev", 1440, 1824),
         ("cygnet_calibration", 241, 241),
         ("jevbench_public", 231, 231),
     ]
-    assert sum(d["reads"] for d in resolved["datasets"]) == 4888
+    assert sum(d["reads"] for d in resolved["datasets"]) == 4120
     cygnet = REPO / "ayaka/swift/data/cygnet_calibration_items.jsonl"
     assert sha256(cygnet) == "73292f2416cc54991b39e7046b954396bfb4199bae7a082da1bca4306e3e1ea4"
     with tarfile.open(tmp_path / "inputs.tar.gz") as archive:
@@ -174,15 +174,15 @@ def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatc
     assert gpu_runner.main(["--dry-run", "--manifest", str(DEFAULT_MANIFEST)]) == 0
     output = capsys.readouterr().out
     assert "vllm==0.30.0" in output
-    assert "32960 bulk decisions, 39104 bulk model reads + 800 serial HTTP requests" in output
-    assert "P1R upper bound: 3648 candidate decisions, 7296 additional model calls" in output
+    assert "26816 bulk decisions, 32960 bulk model reads + 800 serial HTTP requests" in output
+    assert "P1R upper bound: 2880 candidate decisions, 5760 additional model calls" in output
     assert "Prompt variants: min,cygnet,rules,labeled" in output
     assert "Qwen/Qwen3.5-4B" not in output
     assert "<set revision via env/--model>" in output
     assert "75 minutes" in output
     assert "Time budget table" in output
     assert "pre-launch admission" in output
-    assert "Enabled plan total: 105 minutes" in output
+    assert "Enabled plan total: 125 minutes" in output
     assert "Admission: REFUSED" in output
     assert "Cleanup/pack reserve: 120s inside the cap" in output
     assert all(priority in output for priority in ("P0", "P1", "P1R", "P2", "P3", "P4"))
@@ -218,14 +218,14 @@ def test_shell_entrypoint_dry_run_and_syntax():
             [bash, *arguments], env=environment, capture_output=True, text=True, timeout=30
         )
         assert result.returncode == 0, result.stderr
-    assert "4888 model reads" in result.stdout
+    assert "4120 model reads" in result.stdout
 
 
 def test_dry_run_fixed_variants_and_optional_lora(capsys):
     assert gpu_runner.main(["--dry-run", "--with-lora-arm"]) == 0
     output = capsys.readouterr().out
     assert "P4           15  True" in output
-    assert "Enabled plan total: 125 minutes" in output
+    assert "Enabled plan total: 145 minutes" in output
     for invalid in ("", "min,min", "min,unknown", "min,", "min,rules"):
         with pytest.raises(SystemExit):
             gpu_runner.main(["--dry-run", "--prompt-variants", invalid])
@@ -346,7 +346,7 @@ def test_serial_200_probe_uses_swift_http_and_raw_quantiles(tmp_path):
         service.close()
     assert result == json.loads(output.read_text())
     assert result["complete"] and result["completed_reads"] == 200
-    assert result["concurrency"] == 1 and len(reader.calls) == 200
+    assert result["concurrency"] == 1 and len(reader.calls) == 200 + WARMUP_REQUESTS
     assert result["prompt_variant"] == "cygnet"
     assert all("calibration engine" in messages[0]["content"] for messages, _ in reader.calls)
     assert len({sample["id"] for sample in result["samples"]}) == 200
@@ -363,7 +363,7 @@ def test_probe_preserves_partial_samples_after_failure(tmp_path, monkeypatch):
 
     def urlopen(request, timeout):
         requests.append(request)
-        if len(requests) == 2:
+        if len(requests) == 2 + WARMUP_REQUESTS:
             raise TimeoutError("backend timed out")
         return io.BytesIO(b'{"answers":{"probe": {}}}')
 
@@ -440,7 +440,7 @@ def runner_fixture(
     with_lora_arm=False,
     with_matched_2x2=False,
     native_seconds=0,
-    max_minutes=125,
+    max_minutes=145,
     allow_partial=False,
     started=100.0,
     cleanup_seconds=0,
@@ -819,7 +819,7 @@ def test_optional_lora_arm_only_runs_with_flag_and_records_adapter_hash(tmp_path
 
 def test_matched_p4_selected_public_variant_then_sequential_native_cells(tmp_path, monkeypatch):
     code, args, events, commands = runner_fixture(
-        tmp_path, monkeypatch, with_matched_2x2=True, max_minutes=144
+        tmp_path, monkeypatch, with_matched_2x2=True, max_minutes=164
     )
     assert code == 0
     state = json.loads((args.output / "progress.json").read_text())
@@ -839,12 +839,12 @@ def test_matched_p4_selected_public_variant_then_sequential_native_cells(tmp_pat
 
 def test_p5_timeout_retains_diagnostic_inputs_and_respects_absolute_cap(tmp_path, monkeypatch):
     code, args, events, _ = runner_fixture(
-        tmp_path, monkeypatch, with_matched_2x2=True, max_minutes=144, native_seconds=19 * 60
+        tmp_path, monkeypatch, with_matched_2x2=True, max_minutes=164, native_seconds=19 * 60
     )
     assert code == 124
     state = json.loads((args.output / "progress.json").read_text())
     assert state["priorities"][-1]["status"] == "timeout"
-    assert state["priorities"][-1]["work_deadline_elapsed_s"] <= 144 * 60 - 120
+    assert state["priorities"][-1]["work_deadline_elapsed_s"] <= 164 * 60 - 120
     assert [e for e in events if e[0] == "native"] == [("native", "frozen_native")]
     receipt = json.loads((args.output / "matched_2x2/input_files.json").read_text())
     assert receipt["complete"] is False and receipt["used_for_fit_or_selection"] is False
@@ -863,12 +863,12 @@ def test_reference_failure_keeps_invalid_artifact_and_never_starts_vllm(tmp_path
 def test_admission_includes_environment_all_enabled_work_loads_and_cleanup():
     models = gpu_runner.model_specs(["first@pin", "second@pin"], dry_run=False)
     admission = gpu_runner.admission_plan(models, 75)
-    assert admission["planned_minutes"] == 105
+    assert admission["planned_minutes"] == 125
     assert admission["environment_prep_minutes"] == 3
     assert admission["cleanup_reserve_seconds"] == 120
     assert [p["load_minutes"] for p in admission["priorities"]] == [5, 0, 0, 0, 5, 5, 4]
     assert admission["refused"] and not any(p["admitted"] for p in admission["priorities"])
-    assert gpu_runner.admission_plan(models, 125, with_lora_arm=True)["planned_minutes"] == 125
+    assert gpu_runner.admission_plan(models, 145, with_lora_arm=True)["planned_minutes"] == 145
 
 
 @pytest.mark.parametrize(
@@ -879,9 +879,9 @@ def test_admission_includes_environment_all_enabled_work_loads_and_cleanup():
         (45, ["P0"]),
         (55, ["P0", "P1"]),
         (60, ["P0", "P1"]),
-        (75, ["P0", "P1", "P1R"]),
-        (80, ["P0", "P1", "P1R", "P2"]),
-        (105, ["P0", "P1", "P1R", "P2", "P3"]),
+        (95, ["P0", "P1", "P1R"]),
+        (100, ["P0", "P1", "P1R", "P2"]),
+        (125, ["P0", "P1", "P1R", "P2", "P3"]),
     ],
 )
 def test_allow_partial_admits_a_prefix_including_exact_fit(minutes, admitted_ids):
@@ -907,7 +907,7 @@ def test_overbudget_execute_refuses_before_any_environment_or_model_work(tmp_pat
     monkeypatch.setattr(gpu_runner, "require_free_ports", forbidden)
     monkeypatch.setattr(gpu_runner.importlib.metadata, "version", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
-    with pytest.raises(ValueError, match="planned total 105 minutes exceeds --max-minutes 1"):
+    with pytest.raises(ValueError, match="planned total 125 minutes exceeds --max-minutes 1"):
         gpu_runner.execute(
             args, models, {"datasets": []}, 0.0, gpu_runner.model_options(None, models)
         )
@@ -960,7 +960,7 @@ def test_partial_execution_marks_excluded_priorities_up_front(tmp_path, monkeypa
 
 def test_priority_timeout_stops_work_and_preserves_partial_archive(tmp_path, monkeypatch):
     code, args, events, commands = runner_fixture(
-        tmp_path, monkeypatch, priority_seconds=901, max_minutes=105
+        tmp_path, monkeypatch, priority_seconds=901, max_minutes=125
     )
     assert code == 124
     state = json.loads((args.output / "progress.json").read_text())
@@ -970,7 +970,7 @@ def test_priority_timeout_stops_work_and_preserves_partial_archive(tmp_path, mon
     assert not any(e[0] in ("serve", "collect", "probe") for e in events)
     assert not any(command[0] == "vllm" for command in commands)
     assert args.archive.is_file()
-    assert all(e[1] <= 105 * 60 for e in events if e[0] in ("deadline", "work_deadline"))
+    assert all(e[1] <= 125 * 60 for e in events if e[0] in ("deadline", "work_deadline"))
 
 
 def test_environment_deadline_is_capped_and_timeout_skips_all_priorities(tmp_path, monkeypatch):
@@ -996,7 +996,7 @@ def test_cleanup_after_hard_deadline_cannot_launch_pack_or_extend_cap(tmp_path, 
 
 
 def test_pack_timeout_cannot_report_complete(tmp_path, monkeypatch):
-    code, args, _, _ = runner_fixture(tmp_path, monkeypatch, max_minutes=105, pack_seconds=105 * 60)
+    code, args, _, _ = runner_fixture(tmp_path, monkeypatch, max_minutes=125, pack_seconds=125 * 60)
     assert code == 124
     state = json.loads((args.output / "progress.json").read_text())
     assert state["status"] == "partial" and state["archive_status"] == "timeout"
@@ -1023,22 +1023,22 @@ def test_next_priority_deadline_is_clamped_to_global_work_limit(tmp_path, monkey
         nonlocal advanced
         if path.name == "progress.json" and "P1" in data["finished_steps"] and not advanced:
             # Simulate time between priorities: just one second of work remains.
-            now[0] = 75 * 60 - gpu_runner.CLEANUP_RESERVE_SECONDS - 1
+            now[0] = 95 * 60 - gpu_runner.CLEANUP_RESERVE_SECONDS - 1
             advanced = True
         real_write(path, data)
 
     monkeypatch.setattr(gpu_runner, "write_json", slow_checkpoint)
     code, args, events, _ = runner_fixture(
-        tmp_path, monkeypatch, max_minutes=75, allow_partial=True, started=0, clock=now
+        tmp_path, monkeypatch, max_minutes=95, allow_partial=True, started=0, clock=now
     )
     assert code == 0
     state = json.loads((args.output / "progress.json").read_text())
     priority = state["priorities"][2]
-    assert priority["started_elapsed_s"] == 4379
-    assert priority["work_deadline_elapsed_s"] == 4380
-    assert priority["work_deadline_elapsed_s"] < priority["started_elapsed_s"] + 20 * 60
-    assert all(p.get("work_deadline_elapsed_s", 0) <= 4380 for p in state["priorities"])
-    assert all(e[1] <= 4500 for e in events if e[0] in ("deadline", "work_deadline"))
+    assert priority["started_elapsed_s"] == 5579
+    assert priority["work_deadline_elapsed_s"] == 5580
+    assert priority["work_deadline_elapsed_s"] < priority["started_elapsed_s"] + 40 * 60
+    assert all(p.get("work_deadline_elapsed_s", 0) <= 5580 for p in state["priorities"])
+    assert all(e[1] <= 95 * 60 for e in events if e[0] in ("deadline", "work_deadline"))
     root = args.output / "first"
     assert json.loads((root / "policy.json").read_text()).get("reasoning_route") is None
     assert (root / "reasoning_candidate.policy.json").exists()
@@ -1114,7 +1114,7 @@ def test_system_latency_probe_non_public_standard_judge_only(tmp_path, monkeypat
     assert result["public"] is False and result["split"] == "dev"
     assert result["system"] == "reasoning_route"
     assert result["router_sha256"] == fingerprint(policy.reasoning_route)
-    assert len(calls) == 2
+    assert len([c for c in calls if c.get("state") != "warm-up"]) == 2
     path.write_text(json.dumps({**rows[1], "public": True}) + "\n")
     with pytest.raises(ValueError, match="non-public dev"):
         probe(
@@ -1126,4 +1126,4 @@ def test_system_latency_probe_non_public_standard_judge_only(tmp_path, monkeypat
             reads=1,
             non_public=True,
         )
-    assert len(calls) == 2
+    assert len([c for c in calls if c.get("state") != "warm-up"]) == 2

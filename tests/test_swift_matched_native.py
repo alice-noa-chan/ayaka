@@ -11,14 +11,14 @@ from scripts.swift import gpu_runner, matched_2x2, matched_native
 
 def test_p5_admission_implies_p4_exact_fit_and_prefix():
     models = gpu_runner.model_specs(None, dry_run=True)
-    full = gpu_runner.admission_plan(models, 144, with_matched_2x2=True)
-    assert full["planned_minutes"] == full["admitted_minutes"] == 144
+    full = gpu_runner.admission_plan(models, 164, with_matched_2x2=True)
+    assert full["planned_minutes"] == full["admitted_minutes"] == 164
     assert all(p["admitted"] for p in full["priorities"])
     p5 = full["priorities"][-1]
     assert (p5["id"], p5["minutes"], p5["load_minutes"], p5["total_minutes"]) == ("P5", 15, 4, 19)
     refused = gpu_runner.admission_plan(models, 143.99, with_matched_2x2=True)
     assert refused["refused"] and not any(p["admitted"] for p in refused["priorities"])
-    for cap, last in [(124, "P3"), (125, "P4"), (143.99, "P4"), (144, "P5")]:
+    for cap, last in [(144, "P3"), (145, "P4"), (163.99, "P4"), (164, "P5")]:
         partial = gpu_runner.admission_plan(models, cap, with_matched_2x2=True, allow_partial=True)
         assert partial["admitted_minutes"] <= cap
         assert [p["id"] for p in partial["priorities"] if p["admitted"]][-1] == last
@@ -31,9 +31,9 @@ def test_p5_dry_run_no_download_and_commands(capsys, monkeypatch):
 
     monkeypatch.setattr(gpu_runner.subprocess, "Popen", forbidden)
     monkeypatch.setattr(matched_native, "prepare_checkpoint", forbidden)
-    assert gpu_runner.main(["--dry-run", "--with-matched-2x2", "--max-minutes", "144"]) == 0
+    assert gpu_runner.main(["--dry-run", "--with-matched-2x2", "--max-minutes", "164"]) == 0
     text = capsys.readouterr().out
-    assert "Enabled plan total: 144 minutes; admitted total: 144 minutes" in text
+    assert "Enabled plan total: 164 minutes; admitted total: 164 minutes" in text
     assert "P4           15  True" in text and "P5           15  True" in text
     assert "--max-seq-len 8192" in text and "--zero-shot electra-large" in text
     assert matched_native.CHECKPOINT_REVISION in text and "selects nothing" in text
