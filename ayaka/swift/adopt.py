@@ -31,9 +31,11 @@ from .router import (
     ROUTE_RATE_CAP,
     ROUTER_ITERATIONS,
     ROUTER_L2,
+    ROUTER_REFIT_TOLERANCE,
     fit_router,
     projected_latency,
     routed_rows,
+    router_refit_difference,
     validate_pairs,
 )
 from .score import (
@@ -318,8 +320,16 @@ def adopt_levers(
     assumed_cost=56.4,
     usd_in_per_m=0.0403,
     usd_out_per_m=0.0403,
+    fitted_router=None,
+    fitted_router_sha256=None,
 ) -> dict:
-    """Default requests no levers. No exploratory/public/test escape hatch."""
+    """Default requests no levers. No exploratory/public/test escape hatch.
+
+    ``fitted_router`` is the saved ``reasoning_fit.json`` content from the fit step.
+    When given, the gate still refits on the same calibration reads, but only to verify
+    the artifact within ``ROUTER_REFIT_TOLERANCE``; the saved router is then used byte
+    for byte, so platform float differences cannot change the gated policy.
+    """
     requested = set(levers)
     if requested - set(GATE_CONSTANTS["lever_order"]) or len(requested) != len(levers):
         raise ValueError("supported unique levers are variant, bias and reasoning_route")
@@ -437,6 +447,22 @@ def adopt_levers(
                 usd_out_per_m=usd_out_per_m,
                 assumed_cost=assumed_cost,
             )
+            if fitted_router is not None:
+                if not isinstance(fitted_router_sha256, str) or len(fitted_router_sha256) != 64:
+                    raise ValueError("a saved router artifact needs its exact byte sha256")
+                difference = router_refit_difference(fitted_router["router"], params["router"])
+                if difference > ROUTER_REFIT_TOLERANCE:
+                    raise ValueError(
+                        f"saved router differs from the calibration refit by {difference:.3g}"
+                    )
+                params = {
+                    **fitted_router,
+                    "artifact": {
+                        "sha256": fitted_router_sha256,
+                        "refit_max_abs_difference": difference,
+                        "tolerance": ROUTER_REFIT_TOLERANCE,
+                    },
+                }
             proposal = replace(current, reasoning_route=params["router"], promotable=False)
             entry["fitted_params"] = params
             if params["calibration"]["route_rate"] == 0:

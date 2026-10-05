@@ -124,6 +124,24 @@ def validate_router(router):
     reasoning_recipe(router.get("max_tokens"))
 
 
+# Refits on another platform differ at ~1e-16 (float summation order); a saved
+# artifact is accepted when an independent refit agrees within this tolerance.
+ROUTER_REFIT_TOLERANCE = 1e-9
+
+
+def router_refit_difference(saved, refit):
+    """Max absolute difference between two routers; discrete fields must match exactly."""
+    validate_router(saved)
+    validate_router(refit)
+    for key in ("features", "threshold", "rate_cap", "max_tokens"):
+        if saved.get(key) != refit.get(key):
+            raise ValueError(f"router refit disagrees on {key}")
+    pairs = [(saved["intercept"], refit["intercept"])]
+    for key in ("means", "scales", "weights"):
+        pairs += list(zip(saved[key], refit[key], strict=True))
+    return max(abs(a - b) for a, b in pairs)
+
+
 def validate_pairs(direct, paired, *, require_candidates=True):
     """Sparse reasoned artifacts retain the exact direct record and recipe."""
     validate_bound_reads(paired)

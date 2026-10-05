@@ -401,3 +401,59 @@ def test_no_candidates_emits_disabled_fit_for_runner(tmp_path):
     assert result["fit_n"] == 0 and result["router"]["threshold"] == 2
     assert result["calibration"]["route_rate"] == 0
     assert not reader.trace_calls
+
+
+def test_saved_router_artifact_is_used_when_refit_agrees_within_tolerance(tmp_path):
+    from ayaka.swift.router import ROUTER_REFIT_TOLERANCE, router_refit_difference
+
+    cal, dev, cp, dp = route_roles(tmp_path)
+    reference = adopt_levers(
+        cal, dev, Policy(), levers=("reasoning_route",), reasoning_calibration=cp, reasoning_dev=dp
+    )
+    fitted = reference["levers"][2]["fitted_params"]
+    saved = copy.deepcopy(fitted)
+    # A cross-platform refit differs only in the last float bits.
+    saved["router"]["weights"][0] += 1e-16
+    report = adopt_levers(
+        cal,
+        dev,
+        Policy(),
+        levers=("reasoning_route",),
+        reasoning_calibration=cp,
+        reasoning_dev=dp,
+        fitted_router=saved,
+        fitted_router_sha256="a" * 64,
+    )
+    entry = report["levers"][2]
+    assert entry["fitted_params"]["router"] == saved["router"]
+    assert entry["fitted_params"]["artifact"]["sha256"] == "a" * 64
+    assert entry["fitted_params"]["artifact"]["refit_max_abs_difference"] <= ROUTER_REFIT_TOLERANCE
+    assert Policy(**report["final_policy"]).reasoning_route == saved["router"]
+
+    drifted = copy.deepcopy(fitted)
+    drifted["router"]["weights"][0] += 1e-6
+    with pytest.raises(ValueError, match="differs from the calibration refit"):
+        adopt_levers(
+            cal,
+            dev,
+            Policy(),
+            levers=("reasoning_route",),
+            reasoning_calibration=cp,
+            reasoning_dev=dp,
+            fitted_router=drifted,
+            fitted_router_sha256="a" * 64,
+        )
+    with pytest.raises(ValueError, match="exact byte sha256"):
+        adopt_levers(
+            cal,
+            dev,
+            Policy(),
+            levers=("reasoning_route",),
+            reasoning_calibration=cp,
+            reasoning_dev=dp,
+            fitted_router=saved,
+        )
+    moved = copy.deepcopy(fitted["router"])
+    moved["threshold"] = min(2, moved["threshold"] + 0.5)
+    with pytest.raises(ValueError, match="threshold"):
+        router_refit_difference(moved, fitted["router"])

@@ -662,6 +662,9 @@ def reasoning_results(directory: Path, *, gate=False):
         reasoning_dev=dev_reasoned,
         direct_system_latency=[json.loads((directory / "direct_system.latency.json").read_text())],
         routed_latency=[json.loads((directory / "routed_system.latency.json").read_text())],
+        # Gate the exact router that was served and probed, not a fresh float refit.
+        fitted_router=json.loads((directory / "reasoning_fit.json").read_text()),
+        fitted_router_sha256=sha256(directory / "reasoning_fit.json"),
     )
     final = Policy(**report["final_policy"])
     write_json(directory / "reasoning_adoption.json", report)
