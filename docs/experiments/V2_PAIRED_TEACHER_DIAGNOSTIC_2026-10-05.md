@@ -5,6 +5,10 @@
 보정된 serving router의 이득과 전체 raw teacher 분포의 이득은 별도로
 판단해야 한다.** 이 문서는 학습 성능이나 JevBench 공식 순위 보고가 아니다.
 
+후속 [calibration-only 온도 진단](V2_PAIRED_CALIBRATION_DIAGNOSTIC_2026-10-05.md)은
+과신을 크게 줄여도 HelpSteer2에서 보정한 직접 경로 대비 상대 퇴보가 남음을 확인한다.
+원본 raw 수치를 수정하거나 학습·serving 정책을 자동 변경하지 않는다.
+
 ## 도구와 관측 범위
 
 모델은 `google/gemma-4-12B-it`, revision
