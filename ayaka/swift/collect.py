@@ -150,6 +150,11 @@ def adapt_canonical(
 ) -> list[DatasetItem]:
     _recorded_split(record)
     metadata = record.get("metadata", {})
+    if is_image_record(record):
+        # Swift reads text only; an image row's text is just a placeholder such as
+        # "Use only the attached document.", so its read would measure nothing and can
+        # collide with other image rows across calibration/dev.
+        return []
     base_id = str(
         record.get("id") or metadata.get("source_example_id") or f"{source}:{line_number}"
     )
@@ -229,6 +234,15 @@ def adapt_canonical(
             )
         )
     return items
+
+
+def is_image_record(record: dict) -> bool:
+    metadata = record.get("metadata") or {}
+    return (
+        metadata.get("modality") == "image"
+        or bool(metadata.get("media"))
+        or bool(record.get("media"))
+    )
 
 
 def _recorded_split(record):

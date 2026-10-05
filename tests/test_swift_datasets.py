@@ -149,6 +149,32 @@ def test_canonical_uses_only_explicit_tier(record_tier, metadata_tier, question_
     assert item.family == "judge_probability"
 
 
+@pytest.mark.parametrize(
+    "marker",
+    [
+        {"metadata": {"modality": "image", "split": "dev"}},
+        {"metadata": {"media": [{"type": "image"}], "split": "dev"}},
+        {"media": [{"type": "image"}], "metadata": {"split": "dev"}},
+    ],
+)
+def test_canonical_skips_image_rows_for_text_only_reads(marker):
+    record = {
+        "state": "Use only the attached document.",
+        "questions": [
+            {
+                "type": "choice",
+                "candidates": [{"id": "a"}, {"id": "b"}],
+                "target_distribution": {"a": 1.0, "b": 0.0},
+            }
+        ],
+        **marker,
+    }
+    assert adapt_canonical(record) == []
+    text = {**record, "metadata": {"modality": "text", "split": "dev"}}
+    text.pop("media", None)
+    assert len(adapt_canonical(text)) == 1
+
+
 def test_public_path_prevents_unmarked_public_fit():
     record = public_record()
     del record["split"]
