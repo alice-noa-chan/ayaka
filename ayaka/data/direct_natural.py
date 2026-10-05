@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import math
 from dataclasses import asdict
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from .contract_nli import ContractGoldRegistry
 from .natural_training_v2 import SOURCES, digest, evidence, valid_provenance
 from .schema import Candidate, Question, Sample
 from .transforms import HELPSTEER_LEVELS
+from .transforms import helpsteer2_target as _ordinal_target
 
 VERSION = "ayaka-raw-human-direct-gold-1"
 POLICY_VERSION = "ayaka-raw-human-policy-direct-gold-2"
@@ -73,18 +73,6 @@ def local_raw_sources():
         if file_digest(data["local_path"]) != PINNED_RAW_SHA256[source]:
             raise ValueError(f"raw human source changed during collection: {source}")
     return result
-
-
-def _ordinal_target(value):
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 4:
-        raise ValueError("human ordinal rating must be finite in 0..4")
-    low, high = math.floor(value), math.ceil(value)
-    return {
-        f"s{i}": float(i == low)
-        if low == high
-        else (high - value if i == low else value - low if i == high else 0.0)
-        for i in range(5)
-    }
 
 
 def verify_raw_binding(binding, *, registry=None):

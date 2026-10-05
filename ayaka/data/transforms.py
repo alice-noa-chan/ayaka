@@ -14,6 +14,8 @@ Mapping summary (sec 29):
 
 from __future__ import annotations
 
+import math
+
 from .schema import Candidate, Question, Sample, one_hot
 
 # ---------------------------------------------------------------- Choice
@@ -533,15 +535,29 @@ HELPSTEER_LEVELS = {
 }
 
 
+def helpsteer2_target(value: int | float) -> dict[str, float]:
+    """Encode a 0..4 rating mean on adjacent levels, not as human vote counts."""
+    if type(value) not in (int, float) or not 0 <= value <= 4 or not math.isfinite(value):
+        raise ValueError("human ordinal rating must be finite in 0..4")
+    low, high = math.floor(value), math.ceil(value)
+    return {
+        f"s{i}": float(i == low)
+        if low == high
+        else (high - value if i == low else value - low if i == high else 0.0)
+        for i in range(5)
+    }
+
+
 def helpsteer2_scores(row: dict, *, metadata: dict | None = None) -> list[Sample]:
-    """nvidia/HelpSteer2: one prompt/response, five human 0-4 ratings."""
+    """Keep human 0..4 rating means; skip absent attributes, reject invalid values."""
     questions = []
     for attr, (instruction, levels) in HELPSTEER_LEVELS.items():
         v = row.get(attr)
-        if v is None or not 0 <= int(v) <= 4:
+        if v is None:
             continue
+        target = helpsteer2_target(v)
         cands = [Candidate(f"s{i}", f"{i}: {d}", ordinal=i) for i, d in enumerate(levels)]
-        questions.append(Question(attr, "score", instruction, cands, one_hot(cands, f"s{int(v)}")))
+        questions.append(Question(attr, "score", instruction, cands, target))
     if not questions:
         return []
     state = {"prompt": row["prompt"], "response": row["response"]}
