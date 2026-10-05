@@ -505,10 +505,14 @@ def main(argv=None):
         "input-encoding",
         "teacher-identity",
         "direct-reads",
-        "paired-reads",
         "out",
     ):
         parser.add_argument("--" + name, required=True, type=Path)
+    parser.add_argument("--paired-reads", "--prompt-reads", required=True, type=Path)
+    parser.add_argument(
+        "--teacher-kind", choices=("reasoned", "prompt_context"), default="reasoned"
+    )
+    parser.add_argument("--teacher-input-encoding", type=Path)
     parser.add_argument("--expected-train-sha256", required=True)
     parser.add_argument(
         "--expected-direct-sha256",
@@ -517,6 +521,7 @@ def main(argv=None):
     )
     parser.add_argument(
         "--expected-paired-sha256",
+        "--expected-prompt-sha256",
         required=True,
         help="fingerprint of the ordered JSON read contents",
     )
@@ -531,6 +536,8 @@ def main(argv=None):
         help="saved local fast tokenizer, required only for random tiny mechanics; never a model override",
     )
     args = parser.parse_args(argv)
+    if (args.teacher_kind == "prompt_context") != (args.teacher_input_encoding is not None):
+        raise ValueError("teacher-input-encoding is required only for prompt_context teachers")
     if args.out.exists():
         raise ValueError("teacher export requires a fresh directory")
     raw = args.train.read_bytes()
@@ -585,7 +592,14 @@ def main(argv=None):
     def reads(path):
         return [json.loads(line) for line in path.read_bytes().splitlines() if line.strip()]
 
-    teachers, report = export_swift_teachers(
+    converter, second_anchor = export_swift_teachers, "expected_paired_sha256"
+    extra = {}
+    if args.teacher_kind == "prompt_context":
+        from .prompt_teachers import export_prompt_teachers
+
+        converter, second_anchor = export_prompt_teachers, "expected_prompt_sha256"
+        extra["teacher_input_encoding"] = json.loads(args.teacher_input_encoding.read_bytes())
+    teachers, report = converter(
         samples,
         tok,
         cfg,
@@ -594,9 +608,9 @@ def main(argv=None):
         input_encoding=json.loads(args.input_encoding.read_bytes()),
         teacher_identity=json.loads(args.teacher_identity.read_bytes()),
         expected_direct_sha256=args.expected_direct_sha256,
-        expected_paired_sha256=args.expected_paired_sha256,
         verify_gold=verify,
         mechanics_only=args.mechanics_only,
+        **{second_anchor: args.expected_paired_sha256, **extra},
     )
     report.update(
         train_corpus_sha256=args.expected_train_sha256,

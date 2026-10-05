@@ -1,4 +1,4 @@
-"""CPU preparation of gold-anchored direct items from saved reasoned reads.
+"""Prepare gold-anchored direct items from saved reasoned or prompt-only reads.
 
 This module never loads a model or generates a trace. The caller must supply
 an independent gold verifier and saved teacher outputs. Hashes bind declared
@@ -135,13 +135,21 @@ def make_teacher_read(
     return result
 
 
-def _check_read(read, sample, q, item):
+def _check_read(read, sample, q, item, tok, cfg):
+    if isinstance(read, dict) and read.get("version") == "ayaka-prompt-context-teacher-1":
+        from .prompt_teachers import check_prompt_read
+
+        return check_prompt_read(read, sample, q, item, tok, cfg)
     if (
         not isinstance(read, dict)
         or read.get("version") != VERSION
         or read.get("route") != "reasoned"
     ):
         raise ValueError("a versioned reasoned teacher read is required")
+    if any(
+        key in read for key in ("teacher_input_encoding", "teacher_readout_binding", "observations")
+    ):
+        raise ValueError("a reasoned teacher cannot contain prompt-only teacher fields")
     if read.get("question_sha256") != question_fingerprint(sample, q):
         raise ValueError("teacher content, candidate order, gold or lineage binding mismatch")
     if read.get("candidate_ids") != [c.id for c in q.candidates]:
@@ -261,7 +269,7 @@ def prepare_direct_distillation(
             read = teacher_reads.get(identity)
             teacher, reasons = None, ["no_saved_teacher"]
             if read is not None:
-                teacher, direct = _check_read(read, sample, q, item)
+                teacher, direct = _check_read(read, sample, q, item, tok, cfg)
                 reasons = _teacher_filter(q, teacher, direct, target)
             accepted = not reasons
             items.append(
@@ -278,8 +286,13 @@ def prepare_direct_distillation(
                     "direct_readout_binding": direct_readout_binding(item),
                 }
             )
+            if read is not None and read.get("route") == "prompt_context":
+                records[-1]["teacher_kind"] = "prompt_context"
+                records[-1]["teacher_readout_binding"] = copy.deepcopy(
+                    read["teacher_readout_binding"]
+                )
     validate_direct_input_items(items)
-    return items, {
+    report = {
         "version": VERSION,
         "input_encoding": input_encoding,
         "promotable": False,
@@ -298,3 +311,8 @@ def prepare_direct_distillation(
         "reasoning_training_tokens": 0,
         "scope": "CPU preparation; teacher execution, trained weights and launch cost remain unverified",
     }
+    if any(r.get("teacher_kind") == "prompt_context" for r in records):
+        report["prompt_context_teacher_questions"] = sum(
+            r.get("teacher_kind") == "prompt_context" for r in records
+        )
+    return items, report
