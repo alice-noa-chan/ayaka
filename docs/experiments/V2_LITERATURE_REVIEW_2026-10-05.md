@@ -208,3 +208,18 @@ CPU에서 자료 coverage·gold·split component와 단계별 풀이 검증을 �
 추가 두 논문의 원문도 기존 리뷰 에이전트가 독립 검토했다. 생성 횟수·총 사용량,
 중간 단계 검증, CAD component closure·원본별 가중치와 provenance 지적을 반영했다.
 해당 검토는 새로운 Ayaka 학습 성능 측정이 아니다.
+
+### CPU 분해 수신 후 실행 순서 조정
+
+Claude의 [저장된 Noul 분해](SWIFT_NOUL_DECOMPOSITION_2026-10-05.md)를 수신했다.
+cygnet의 이득이 주로 repository-authored Noul에 집중됐다는 진단을 반영해 자연 문서의
+**gold-only direct 기준선을 먼저** 비교한다. 위 문헌 후보의 순위는 설계 제안이며
+prompt-context KL의 GPU 실행 근거로 승격하지 않는다. 이 관측만으로 과거 v2 퇴보의
+원인을 확정하거나 AUC/accuracy 차이를 인과 기여도 비율로 해석하지 않는다.
+
+무료 준비 구현은 `fef115e`의 controlled authored edit/gold/closure audit와 `cbb0525`의
+별도 prompt-context teacher/native dual binding/direct bundle 연결까지 진행했다.
+`bea1a08`에서는 one-shot iterator가 teacher 검증 입력을 소모하던 후속 결함을 수정했다.
+[구현·검증·남은 조건](V2_OFFLINE_AUGMENTATION_AND_PROMPT_TEACHERS_2026-10-05.md)에
+범위를 기록한다. DSS task mask/단계 검증과 ICoT 다단계 학습은 아직 구현한 것으로
+표현하지 않는다. 실제 train teacher 관측과 새 학습 성능은 아직 없다.
