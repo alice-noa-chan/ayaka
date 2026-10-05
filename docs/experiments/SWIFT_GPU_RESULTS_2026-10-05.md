@@ -107,6 +107,6 @@ therefore a user decision, to be made with this caveat recorded.
 
 ## Cost
 
-Credit fell from $49.60 to $40.28 during the session. That includes an unrelated instance
-(`nuri-fbb34b7-20261004-v3`, $0.844/h) running on the same account throughout. The Swift instances themselves were
-roughly 4.6 h at $0.62–0.64/h, plus bandwidth and storage.
+The Swift instances ran about 4.6 GPU-hours at $0.62–0.64/h, about $3. Bandwidth (about 70 GB of model and image
+downloads at $0.004–0.01/GB) and storage add well under $1. The account balance is not a direct measure of this
+work: another project's instance ran on the same account during the session.
