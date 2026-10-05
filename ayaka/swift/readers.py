@@ -48,6 +48,10 @@ def token_input(tokenizer, messages, letters, kwargs):
     actual = tokenizer.apply_chat_template(
         messages, tokenize=True, add_generation_prompt=True, **kwargs
     )
+    # transformers 5 returns a BatchEncoding (dict-like) by default; older versions a list.
+    if hasattr(actual, "keys"):
+        actual = actual["input_ids"]
+    actual = list(actual)
     if actual != prefix or not prefix:
         raise ValueError("chat-template token ids differ from the canonical answer prefix")
     ids = canonical_letter_ids(tokenizer, prompt, letters)

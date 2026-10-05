@@ -178,6 +178,21 @@ class StubTokenizer:
         return [7, 8] + ([] if text == "assistant:" else [ord(text[-1])])
 
 
+class BatchEncodingStubTokenizer(StubTokenizer):
+    """transformers 5 returns a dict-like BatchEncoding from tokenize=True by default."""
+
+    def apply_chat_template(self, messages, tokenize, **kwargs):
+        return {"input_ids": [7, 8], "attention_mask": [1, 1]} if tokenize else "assistant:"
+
+
+@pytest.mark.parametrize("tokenizer", [StubTokenizer(), BatchEncodingStubTokenizer()])
+def test_token_input_accepts_list_and_batch_encoding(tokenizer):
+    from ayaka.swift.readers import token_input
+
+    result = token_input(tokenizer, [], ["A", "B"], {})
+    assert result["input_token_ids"] == [7, 8]
+
+
 @pytest.mark.parametrize(
     "entries,error",
     [
