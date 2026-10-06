@@ -56,10 +56,10 @@ log "swift min procedural 479 reads"
 kill "$VP"; wait "$VP" 2>/dev/null || true; VP=""
 
 python3 scripts/swift/matched_native.py --prepare-checkpoint --output "$OUT/v1_checkpoint" > "$OUT/v1_prepare.log" 2>&1
-CK=$(python3 -c "import json;print(json.load(open('$OUT/v1_checkpoint/checkpoint.json'))['checkpoint_path'])")
 log "v1 checkpoint ready"
 for name in procedural hard_calibration hard_dev; do
-  python3 scripts/swift/v1_on_runner.py "$IN/$name.jsonl" --checkpoint "$CK" \
+  python3 scripts/swift/v1_on_runner.py "$IN/$name.jsonl" \
+    --checkpoint-receipt "$OUT/v1_checkpoint/checkpoint.json" \
     --output "$OUT/v1_$name.rows.jsonl" --max-seq-len 8192 > "$OUT/v1_$name.log" 2>&1
   n=$(count_unique "$OUT/v1_$name.rows.jsonl")
   [ "$n" -eq "${EXPECTED[$name]}" ] || { log "v1 $name has $n unique rows, expected ${EXPECTED[$name]}"; exit 1; }
