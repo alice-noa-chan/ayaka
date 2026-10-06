@@ -9,8 +9,10 @@ from ayaka.swift.readers import (
     VLLMChatReader,
     aggregate_letter_logits,
     cached_tokenizer,
+    canonical_letter_ids,
     gather_token_logits,
     letter_token_ids,
+    token_input,
     top_letter_probs,
 )
 
@@ -228,6 +230,70 @@ def test_token_input_accepts_list_and_batch_encoding(tokenizer):
 
     result = token_input(tokenizer, [], ["A", "B"], {})
     assert result["input_token_ids"] == [7, 8]
+
+
+class FastBatchTokenizer(StubTokenizer):
+    is_fast = True
+
+    def __init__(self):
+        self.encodes = []
+        self.batches = []
+
+    def encode(self, text, add_special_tokens):
+        self.encodes.append(text)
+        return super().encode(text, add_special_tokens)
+
+    def __call__(self, texts, *, add_special_tokens):
+        self.batches.append(texts)
+        return {
+            "input_ids": [StubTokenizer.encode(self, text, add_special_tokens) for text in texts]
+        }
+
+
+def test_token_input_batches_full_continuations_and_reuses_the_verified_prefix():
+    tokenizer = FastBatchTokenizer()
+    letters = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    actual = token_input(tokenizer, [], letters, {})
+    assert actual == token_input(StubTokenizer(), [], letters, {})
+    assert tokenizer.encodes == ["assistant:"]
+    assert tokenizer.batches == [["assistant:" + letter for letter in letters]]
+
+
+@pytest.mark.parametrize(
+    "rows,error",
+    [
+        ([[7, 8, 65]], "one row per letter"),
+        ([[7, 9, 65], [7, 8, 66]], "answer position"),
+        ([[7, 8, 65, 99], [7, 8, 66]], "answer position"),
+        ([[7, 8, 65], []], "answer position"),
+        ([[7, 8, 65], [7, 8, 65]], "distinct token ids"),
+        ([[7, 8, 65], [7, 8, -1]], "vocabulary integers"),
+    ],
+)
+def test_batched_canonical_ids_reject_missing_rows_and_invalid_continuations(rows, error):
+    class Tokenizer(FastBatchTokenizer):
+        def __call__(self, texts, *, add_special_tokens):
+            return {"input_ids": rows}
+
+    with pytest.raises(ValueError, match=error):
+        canonical_letter_ids(Tokenizer(), "assistant:", ["A", "B"])
+
+
+def test_fast_bpe_rejects_a_letter_that_merges_into_the_answer_prefix():
+    from tokenizers import Tokenizer, models
+    from transformers import PreTrainedTokenizerFast
+
+    backend = Tokenizer(
+        models.BPE(
+            vocab={"[UNK]": 0, "x": 1, "A": 2, "B": 3, "xA": 4},
+            merges=[("x", "A")],
+            unk_token="[UNK]",
+        )
+    )
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=backend, unk_token="[UNK]")
+    assert tokenizer.encode("A", add_special_tokens=False) == [2]
+    with pytest.raises(ValueError, match="letter A.*answer position"):
+        canonical_letter_ids(tokenizer, "x", ["A", "B"])
 
 
 @pytest.mark.parametrize(

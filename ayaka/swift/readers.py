@@ -55,7 +55,7 @@ def token_input(tokenizer, messages, letters, kwargs):
     actual = list(actual)
     if actual != prefix or not prefix:
         raise ValueError("chat-template token ids differ from the canonical answer prefix")
-    ids = canonical_letter_ids(tokenizer, prompt, letters)
+    ids = _canonical_letter_ids(tokenizer, prompt, letters, prefix)
     return {
         "input_token_ids": prefix,
         "input_token_ids_sha256": fingerprint(prefix),
@@ -273,6 +273,11 @@ def letter_token_ids(tokenizer: Any) -> dict[str, list[int]]:
 
 def canonical_letter_ids(tokenizer: Any, prompt: str, letters: list[str]) -> dict[str, list[int]]:
     """Find the one appended token at the actual assistant answer position."""
+    return _canonical_letter_ids(tokenizer, prompt, letters)
+
+
+def _canonical_letter_ids(tokenizer, prompt, letters, prefix=None):
+    """Batch full prompt continuations while preserving exact prefix validation."""
     if (
         not letters
         or len(letters) > 26
@@ -280,10 +285,20 @@ def canonical_letter_ids(tokenizer: Any, prompt: str, letters: list[str]) -> dic
         or len(set(letters)) != len(letters)
     ):
         raise ValueError("canonical read needs 1..26 distinct letters")
-    prefix = tokenizer.encode(prompt, add_special_tokens=False)
+    if prefix is None:
+        prefix = tokenizer.encode(prompt, add_special_tokens=False)
+    if getattr(tokenizer, "is_fast", False) and callable(tokenizer):
+        completed_rows = tokenizer(
+            [prompt + letter for letter in letters], add_special_tokens=False
+        )["input_ids"]
+    else:
+        completed_rows = [
+            tokenizer.encode(prompt + letter, add_special_tokens=False) for letter in letters
+        ]
+    if len(completed_rows) != len(letters):
+        raise ValueError("canonical tokenization must return one row per letter")
     ids = {}
-    for letter in letters:
-        completed = tokenizer.encode(prompt + letter, add_special_tokens=False)
+    for letter, completed in zip(letters, completed_rows, strict=True):
         if completed[:-1] != prefix or len(completed) != len(prefix) + 1:
             raise ValueError(f"letter {letter} is not one canonical token at the answer position")
         ids[letter] = [completed[-1]]
@@ -401,11 +416,6 @@ class HFReader:
             prompt = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True, **self.chat_template_kwargs
             )
-            ids = (
-                canonical_letter_ids(self.tokenizer, prompt, letters)
-                if self.readout == READOUT
-                else self._letter_ids
-            )
             encoded = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=True,
@@ -417,6 +427,11 @@ class HFReader:
             input_token_ids = encoded["input_ids"][0].tolist()
             if input_token_ids != self.tokenizer.encode(prompt, add_special_tokens=False):
                 raise ValueError("chat-template token ids differ from the canonical answer prefix")
+            ids = (
+                _canonical_letter_ids(self.tokenizer, prompt, letters, input_token_ids)
+                if self.readout == READOUT
+                else self._letter_ids
+            )
             encoded = {key: value.to(self.device) for key, value in encoded.items()}
             logits = self.model(**encoded, **_read_forward_kwargs(self.model)).logits[0, -1]
             required = [token_id for letter in letters for token_id in ids[letter]]
