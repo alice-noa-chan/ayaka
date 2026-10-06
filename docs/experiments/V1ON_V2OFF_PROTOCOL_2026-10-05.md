@@ -61,6 +61,16 @@ All four must hold on the full cohort. Δ means v2 off minus v1 on.
 
 ## Execution
 
+**Current entrypoints (2026-10-07):** prepare externally pinned inputs with
+`scripts/direct_v2/prepare_matched.py`, execute `scripts/direct_v2/matched_job.sh`,
+and score with `python -m scripts.direct_v2.matched_compare`. The checked path
+requires the protocol and complete execution receipt with their external hashes.
+The legacy comparator command delegates to this path; the legacy GPU job exits
+before model work. The original execution description below is historical.
+The four success conditions and frozen source hashes remain unchanged. Use the
+original pinned source archive for this experiment; current optimizations need a
+separate protocol and new receipts.
+
 - Script: `scripts/swift/v1v2_job.sh`. The host gets offline-verified input files, which are hash-checked again
   before use.
 - The host first collects Swift `min` reads on the procedural file with the attempt 7 recipe. The implementation

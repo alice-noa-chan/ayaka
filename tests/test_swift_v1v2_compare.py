@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -142,3 +143,52 @@ def test_cohort_files_must_match_frozen_hashes(tmp_path):
         path.write_text("", encoding="utf-8")
     with pytest.raises(ValueError, match="frozen cohort hash"):
         compare.load_cohort(paths)
+
+
+def test_legacy_cli_requires_external_pins_before_reading_or_writing(tmp_path):
+    output = tmp_path / "comparison.json"
+    argv = []
+    for name in ("procedural", "hard-calibration", "hard-dev", "v2-reads", "v1-rows", "policy"):
+        argv.extend([f"--{name}", str(tmp_path / "missing.jsonl")])
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/swift/v1v2_compare.py"),
+            *argv,
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    for flag in ("--protocol-sha256", "--v1-execution-receipt-sha256"):
+        assert flag in result.stderr
+    assert "FileNotFoundError" not in result.stderr
+    assert not output.exists()
+
+
+def test_legacy_cli_delegates_validated_publication(monkeypatch):
+    from scripts.direct_v2 import matched_compare
+
+    calls = []
+    monkeypatch.setattr(matched_compare, "main", lambda argv: calls.append(argv) or 0)
+    argv = ["--protocol", "pinned-protocol.json"]
+    assert compare.main(argv) == 0
+    assert calls == [argv]
+
+
+def test_retired_job_fails_before_model_work(tmp_path):
+    from test_swift_gpu_runner import git_bash
+
+    result = subprocess.run(
+        [git_bash(), str(ROOT / "scripts/swift/v1v2_job.sh")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "scripts/direct_v2/matched_job.sh" in result.stderr
+    assert not list(tmp_path.iterdir())

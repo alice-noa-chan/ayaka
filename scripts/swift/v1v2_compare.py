@@ -10,9 +10,9 @@ Systems, all scored by the same Swift scorer on the same ids:
   probabilities, unmodified.
 - v1_off: v1's own single pass (diagnostic).
 
-Every row of both systems is checked against the pinned cohort files: state, full question,
-gold, soft gold, source, tier and case/cluster, plus each system's run recipe. Missing,
-extra, duplicate or mismatched rows are refused.
+The CLI delegates to scripts.direct_v2.matched_compare, which validates native receipts,
+canonical scoring fields and the pinned execution protocol before calling this scoring
+kernel. The kernel alone is not a provenance validator.
 
 Success for "v2 off beats v1 on" (from V2_DIRECT_OVER_V1_REASONING_2026-10-04.md), all on
 the full cohort:
@@ -29,13 +29,10 @@ not compared: v1 ran on HF eager and v2 on vLLM.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
-import json
 import random
 import sys
 import tempfile
-from dataclasses import replace
 from pathlib import Path
 from statistics import mean
 
@@ -50,7 +47,7 @@ from v1_on_runner import (  # noqa: E402
 )
 
 from ayaka.eval.read_artifact import fingerprint  # noqa: E402
-from ayaka.swift.collect import iter_dataset, load_reads  # noqa: E402
+from ayaka.swift.collect import iter_dataset  # noqa: E402
 from ayaka.swift.evaluate import percentile  # noqa: E402
 from ayaka.swift.policy import Policy  # noqa: E402
 from ayaka.swift.score import (  # noqa: E402
@@ -278,36 +275,15 @@ def compare(v2_rows, v1_rows, policy: Policy, expected: dict) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--procedural", type=Path, required=True)
-    parser.add_argument("--hard-calibration", type=Path, required=True)
-    parser.add_argument("--hard-dev", type=Path, required=True)
-    parser.add_argument("--v2-reads", nargs="+", required=True, type=Path)
-    parser.add_argument("--v1-rows", nargs="+", required=True, type=Path)
-    parser.add_argument("--policy", type=Path, required=True, help="saved production policy.json")
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args(argv)
-    expected = load_cohort(
-        {
-            "procedural": args.procedural,
-            "hard_calibration": args.hard_calibration,
-            "hard_dev": args.hard_dev,
-        }
+    """Keep the old command name without permitting unchecked report publication."""
+    from scripts.direct_v2.matched_compare import main as checked_main
+
+    print(
+        "Use python -m scripts.direct_v2.matched_compare; "
+        "the legacy command now requires the same pinned protocol and execution receipt.",
+        file=sys.stderr,
     )
-    policy = replace(Policy.load(args.policy), reasoning_route=None)
-    report = compare(load_reads(args.v2_reads), load_reads(args.v1_rows), policy, expected)
-    if args.output.exists():
-        raise SystemExit(f"{args.output} exists; reports are written once")
-    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
-    s, d, c = report["systems"], report["delta_v2off_minus_v1on"], report["ci_95"]
-    for name in s:
-        print(
-            f"{name:7s} I {s[name]['I']:.2f} typedCC {s[name]['typed_cc']:.2f}"
-            f" credit {s[name]['credit']:.2f}"
-        )
-    print(f"delta typedCC {d['typed_cc']:+.2f} CI {c['typed_cc']} credit {d['credit']:+.2f}")
-    print("v2_off_beats_v1_on_on_this_cohort:", report["v2_off_beats_v1_on_on_this_cohort"])
-    return 0
+    return checked_main(argv)
 
 
 if __name__ == "__main__":
