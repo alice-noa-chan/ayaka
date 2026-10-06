@@ -194,11 +194,44 @@ def bind_paragraph_sample(index, row_id, sample):
     return result
 
 
-def audit_paragraph_roles(index, selections, *, minimum_counts):
+def _component_report(index, selections, minimum_counts, minimum_components):
+    if not isinstance(minimum_components, dict) or set(minimum_components) != set(minimum_counts):
+        raise ValueError("paragraph component minima must cover every declared decision cell")
+    if any(type(n) is not int or n < 1 for n in minimum_components.values()):
+        raise ValueError("paragraph component minima require positive int counts")
+    cells = defaultdict(set)
+    membership = {}
+    for role, selected in sorted(selections.items()):
+        membership[role] = {}
+        for row_id in sorted(selected):
+            row = index._rows_by_id[row_id]
+            cells[role, row.source, row.type].add(row.component_id)
+            membership[role][row_id] = row.component_id
+    counts = {cell: len(groups) for cell, groups in cells.items()}
+    if any(counts.get(cell, 0) < n for cell, n in minimum_components.items()):
+        raise ValueError("paragraph selection falls below a declared component minimum")
+    return {
+        "unit": "transitive supplied paragraph component",
+        "counts": {"/".join(cell): n for cell, n in sorted(counts.items())},
+        "minimum_counts": {"/".join(cell): n for cell, n in sorted(minimum_components.items())},
+        "components_per_role": {
+            role: len(set(mapping.values())) for role, mapping in membership.items()
+        },
+        "membership": membership,
+        "membership_sha256": fingerprint(membership),
+        "independence_attested": False,
+        "effective_sample_size_estimated": False,
+    }
+
+
+def audit_paragraph_roles(index, selections, *, minimum_counts, minimum_components=None):
     """Reject cross-role components and missing predeclared decision minima.
 
     Selections map roles to row IDs; omitted rows still bridge the full index.
     Every observed source/type/role cell needs an explicit positive minimum.
+    Optional component minima must cover the same predeclared cells, and count
+    distinct dependency groups rather than questions. Passing these minima is
+    not an attestation of statistical independence or effective sample size.
     No files, raw corpus, model or scoring policy are opened or changed here.
     """
     if (
@@ -246,7 +279,7 @@ def audit_paragraph_roles(index, selections, *, minimum_counts):
         raise ValueError("paragraph observed source/type/role lacks a declared minimum")
     if any(counts[cell] < minimum for cell, minimum in minimum_counts.items()):
         raise ValueError("paragraph selection falls below a declared minimum")
-    return {
+    report = {
         "version": VERSION,
         "inventory_sha256": index.inventory_sha256,
         "namespace": index.namespace,
@@ -262,3 +295,8 @@ def audit_paragraph_roles(index, selections, *, minimum_counts):
         "historical_or_public_decontamination_attested": False,
         "promotable": False,
     }
+    if minimum_components is not None:
+        report["component_audit"] = _component_report(
+            index, selections, minimum_counts, minimum_components
+        )
+    return report

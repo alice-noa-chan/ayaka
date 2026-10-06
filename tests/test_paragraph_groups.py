@@ -14,6 +14,7 @@ from ayaka.data.paragraph_groups import (
 )
 from ayaka.data.source_groups import connected_groups
 from ayaka.data.transforms import hotpot_decision
+from ayaka.eval.read_artifact import fingerprint
 
 NAMESPACE = "hotpotqa/article"
 
@@ -250,3 +251,145 @@ def test_role_and_minimum_contract_fails_closed(selections, minima, match):
     components = index([row("a", ["A"]), row("bridge", ["B"], kind=None)])
     with pytest.raises(ValueError, match=match):
         audit_paragraph_roles(components, selections, minimum_counts=minima)
+
+
+def test_many_questions_from_one_component_cannot_fill_a_component_minimum():
+    rows = [row(str(i), ["Shared", f"Article {i}"]) for i in range(8)]
+    selections = {"dev": [r["id"] for r in rows]}
+    minima = {("dev", "hotpot_val", "noul"): 8}
+    report = audit_paragraph_roles(index(rows), selections, minimum_counts=minima)
+    assert report["selected_decisions"] == 8 and report["selected_components"] == 1
+    with pytest.raises(ValueError, match="below a declared component minimum"):
+        audit_paragraph_roles(
+            index(rows),
+            selections,
+            minimum_counts=minima,
+            minimum_components={("dev", "hotpot_val", "noul"): 2},
+        )
+
+
+def test_component_mapping_preserves_omitted_bridges_and_counts_distinct_groups():
+    rows = [
+        row("a", ["A", "B"]),
+        row("bridge", ["B", "C"], kind=None),
+        row("c", ["C", "D"]),
+        row("other", ["Other"]),
+    ]
+    selected = {"dev": ["a", "c", "other"]}
+    minima = {("dev", "hotpot_val", "noul"): 3}
+    report = audit_paragraph_roles(
+        index(rows),
+        selected,
+        minimum_counts=minima,
+        minimum_components={("dev", "hotpot_val", "noul"): 2},
+    )
+    audit = report["component_audit"]
+    mapping = audit["membership"]["dev"]
+    assert mapping["a"] == mapping["c"] != mapping["other"]
+    assert "bridge" not in mapping
+    assert audit["counts"] == {"dev/hotpot_val/noul": 2}
+    assert audit["minimum_counts"] == {"dev/hotpot_val/noul": 2}
+    assert audit["components_per_role"] == {"dev": 2}
+    assert audit["membership_sha256"] == fingerprint(audit["membership"])
+    assert audit["independence_attested"] is False
+    assert audit["effective_sample_size_estimated"] is False
+    with pytest.raises(ValueError, match="component minimum"):
+        audit_paragraph_roles(
+            index(rows),
+            selected,
+            minimum_counts=minima,
+            minimum_components={("dev", "hotpot_val", "noul"): 3},
+        )
+
+
+def test_component_cell_counts_are_not_added_up_as_independent_role_counts():
+    rows = [
+        row("noul", ["Shared"]),
+        row("choice", ["Shared"], kind="choice"),
+        row("other_source", ["Shared"], source="other"),
+    ]
+    minima = {("dev", r["source"], r["type"]): 1 for r in rows}
+    report = audit_paragraph_roles(
+        index(rows),
+        {"dev": [r["id"] for r in rows]},
+        minimum_counts=minima,
+        minimum_components=minima,
+    )
+    audit = report["component_audit"]
+    assert len(audit["counts"]) == 3 and set(audit["counts"].values()) == {1}
+    assert audit["components_per_role"] == {"dev": 1}
+    assert report["selected_components"] == 1
+
+
+def test_component_minima_are_opt_in_and_preserve_legacy_receipt_shape():
+    components = index([row("a", ["A"])])
+    kwargs = {"minimum_counts": {("dev", "hotpot_val", "noul"): 1}}
+    original = audit_paragraph_roles(components, {"dev": ["a"]}, **kwargs)
+    assert "component_audit" not in original
+    assert (
+        audit_paragraph_roles(components, {"dev": ["a"]}, minimum_components=None, **kwargs)
+        == original
+    )
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, 1.5, "2", None])
+def test_component_minima_require_positive_integer_counts(value):
+    with pytest.raises(ValueError, match="positive int"):
+        audit_paragraph_roles(
+            index([row("a", ["A"])]),
+            {"dev": ["a"]},
+            minimum_counts={("dev", "hotpot_val", "noul"): 1},
+            minimum_components={("dev", "hotpot_val", "noul"): value},
+        )
+
+
+@pytest.mark.parametrize(
+    "minima",
+    [
+        {},
+        [],
+        {("dev", "other", "noul"): 1},
+        {("dev", "hotpot_val", "noul"): 1, ("dev", "hotpot_val", "choice"): 1},
+    ],
+)
+def test_component_minima_cover_exactly_the_declared_decision_cells(minima):
+    with pytest.raises(ValueError, match="every declared decision cell"):
+        audit_paragraph_roles(
+            index([row("a", ["A"])]),
+            {"dev": ["a"]},
+            minimum_counts={("dev", "hotpot_val", "noul"): 1},
+            minimum_components=minima,
+        )
+
+
+def test_component_membership_and_anchor_are_order_stable_and_isolated():
+    rows = [row("a", ["A"]), row("b", ["B"]), row("c", ["C"], kind="choice")]
+    minima = {("dev", "hotpot_val", "noul"): 2, ("test", "hotpot_val", "choice"): 1}
+
+    def audit(components, selections):
+        return audit_paragraph_roles(
+            components,
+            selections,
+            minimum_counts=minima,
+            minimum_components=minima,
+        )
+
+    components = index(rows)
+    original = audit(components, {"dev": ["a", "b"], "test": ["c"]})
+    reversed_order = audit(index(list(reversed(rows))), {"test": ["c"], "dev": ["b", "a"]})
+    assert original == reversed_order
+    snapshot = copy.deepcopy(original)
+    original["component_audit"]["membership"]["dev"].clear()
+    assert audit(components, {"dev": ["a", "b"], "test": ["c"]}) == snapshot
+
+
+def test_component_minima_cannot_bypass_existing_cross_role_rejection():
+    rows = [row("a", ["A", "B"]), row("bridge", ["B", "C"], kind=None), row("c", ["C"])]
+    minima = {(role, "hotpot_val", "noul"): 1 for role in ("dev", "test")}
+    with pytest.raises(ValueError, match="transitive paragraph component"):
+        audit_paragraph_roles(
+            index(rows),
+            {"dev": ["a"], "test": ["c"]},
+            minimum_counts=minima,
+            minimum_components=minima,
+        )
