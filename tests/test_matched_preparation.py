@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -10,6 +9,7 @@ from pathlib import Path
 import pytest
 from test_matched_contract import matched as matched
 from test_matched_execution import assets as assets
+from test_swift_gpu_runner import git_bash
 
 from ayaka.eval.matched_contract import digest
 from scripts.direct_v2 import matched_preflight, prepare_matched
@@ -193,9 +193,9 @@ def test_collection_source_bytes_are_fixed_before_any_service(monkeypatch, tmp_p
 
 @pytest.mark.parametrize("failure", ["old_output", "occupied_endpoint"])
 def test_job_refuses_stale_results_or_server_before_gpu_command(tmp_path, failure):
-    bash = shutil.which("bash")
+    bash = git_bash()
     if not bash:
-        pytest.skip("existing bash unavailable")
+        pytest.skip("native Bash is unavailable; Windows tests require Git Bash")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     python = sys.executable.replace("\\", "/")
@@ -231,7 +231,7 @@ def test_job_refuses_stale_results_or_server_before_gpu_command(tmp_path, failur
         }
         script = Path(__file__).resolve().parents[1] / "scripts/direct_v2/matched_job.sh"
         result = subprocess.run(
-            [bash, str(script)],
+            [bash, script.as_posix()],
             env=env,
             capture_output=True,
             text=True,
