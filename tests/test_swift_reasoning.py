@@ -11,7 +11,13 @@ from ayaka.swift.collect import adapt_jevbench, collect, load_reads
 from ayaka.swift.policy import Policy
 from ayaka.swift.prompt import parse_question, render_question
 from ayaka.swift.readers import FakeReader, VLLMChatReader
-from ayaka.swift.reasoning import FINAL_INSTRUCTION, TRACE_INSTRUCTION, TraceResult, reasoned_read
+from ayaka.swift.reasoning import (
+    FINAL_INSTRUCTION,
+    TRACE_INSTRUCTION,
+    ReasoningFailure,
+    TraceResult,
+    reasoned_read,
+)
 from ayaka.swift.router import FEATURES, validate_pairs
 from ayaka.swift.server import DecisionService
 
@@ -77,6 +83,102 @@ class TraceReader(FakeReader):
         )
 
 
+class FailingTraceReader(TraceReader):
+    def __init__(self, failure):
+        super().__init__(lambda messages, letters: {"A": 0.9, "B": 0.1})
+        self.failure = failure
+
+    def generate_trace(self, messages, max_tokens):
+        if self.failure == "generation_error":
+            raise RuntimeError("PRIVATE backend trace must not be returned")
+        trace = super().generate_trace(messages, max_tokens)
+        return replace(trace, text=" \n\t") if self.failure == "empty_trace" else trace
+
+    def read(self, messages, letters):
+        if self.failure == "readout_error" and any(m["role"] == "assistant" for m in messages):
+            raise RuntimeError("PRIVATE readout details must not be returned")
+        return super().read(messages, letters)
+
+
+@pytest.mark.parametrize("failure", ["generation_error", "empty_trace", "readout_error"])
+@pytest.mark.parametrize("mode", ["on", "auto"])
+def test_failed_reasoning_returns_direct_answer_and_preserves_observed_usage(failure, mode):
+    reader = FailingTraceReader(failure)
+    service = DecisionService(
+        reader, "fake", Policy(reasoning_route=always_router()), diagnostic=True
+    )
+    try:
+        output = service.handle(
+            {
+                "state": "12",
+                "options": {"reasoning": {"mode": mode, "effort": "high"}},
+                "questions": {"q": {"type": "noul"}},
+            }
+        )
+        extra = output["answers"]["q"]["ayaka"]
+        diagnostics = extra["diagnostics"]
+        assert extra["route"] == diagnostics["route"] == "fallback"
+        assert diagnostics["finish_reason"] == failure
+        assert diagnostics["settings"]["effort"] == "high"
+        assert diagnostics["budget"] == 1024
+        assert diagnostics["effective_budget"] == (1024 if mode == "on" else 384)
+        assert diagnostics["error"] in ("RuntimeError", "ValueError")
+        observed = 0 if failure == "generation_error" else 3
+        assert diagnostics["trace_tokens"] == observed
+        assert diagnostics["usage_complete"] is (failure == "empty_trace")
+        assert output["usage"] == {
+            "input_tokens": 10 + (11 if observed else 0),
+            "output_tokens": 1 + observed,
+        }
+        assert len(reader.calls) == 1
+        assert "PRIVATE" not in json.dumps(output)
+    finally:
+        service.close()
+
+
+def test_empty_reasoned_teacher_is_rejected_instead_of_becoming_a_direct_fallback():
+    reader = FailingTraceReader("empty_trace")
+    with pytest.raises(ReasoningFailure, match="empty_trace") as failure:
+        reasoned_read(reader, "12", parse_question({"type": "noul"}))
+    assert failure.value.diagnostics["trace_tokens"] == 3
+    assert not reader.calls
+
+
+def test_one_failed_trace_does_not_discard_other_question_answers():
+    reader = FailingTraceReader("generation_error")
+    service = DecisionService(reader, "fake", diagnostic=True, max_parallel=1)
+    try:
+        output = service.handle(
+            {
+                "questions": {
+                    "reasoned": {"type": "noul", "reasoning": {"mode": "on"}},
+                    "direct": {"type": "noul", "reasoning": {"mode": "off"}},
+                }
+            }
+        )
+        assert set(output["answers"]) == {"reasoned", "direct"}
+        assert output["answers"]["reasoned"]["ayaka"]["route"] == "fallback"
+        assert output["answers"]["direct"]["ayaka"]["route"] == "direct"
+        assert len(reader.calls) == 2
+    finally:
+        service.close()
+
+
+def test_saved_router_keeps_grouped_questions_direct_without_explicit_reasoning():
+    reader = TraceReader()
+    service = DecisionService(
+        reader, "fake", Policy(reasoning_route=always_router()), diagnostic=True
+    )
+    try:
+        output = service.handle(
+            {"questions": {"q": {"type": "choice", "criteria": [str(i) for i in range(27)]}}}
+        )
+        assert output["answers"]["q"]["ayaka"]["route"] == "grouped"
+        assert not reader.trace_calls
+    finally:
+        service.close()
+
+
 def always_router():
     return {
         "features": FEATURES.copy(),
@@ -129,6 +231,9 @@ def test_http_default_routing_explicit_off_and_forced_high():
         ) as response:
             payload = json.load(response)
         assert payload["answers"]["q"]["ayaka"]["route"] == "reasoned"
+        diagnostics = payload["answers"]["q"]["ayaka"]["diagnostics"]
+        assert diagnostics["budget"] == 1024 and diagnostics["finish_reason"] == "eos"
+        assert diagnostics["trace_tokens"] == 3 and diagnostics["usage_complete"] is True
         assert payload["usage"] == {"input_tokens": 21, "output_tokens": 4}
         assert reader.trace_calls[-1][1] == 1024
         assert "PRIVATE" not in json.dumps(payload)

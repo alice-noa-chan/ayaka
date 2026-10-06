@@ -12,7 +12,7 @@ import json
 import math
 import time
 import urllib.request
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from ayaka.eval.read_artifact import fingerprint
@@ -53,6 +53,27 @@ class TraceResult:
     output_tokens: int
     finish_reason: str
     latency_s: float
+
+
+class ReasoningFailure(ValueError):
+    """Keep observed usage when offline reasoning fails; never conceal a failed read."""
+
+    def __init__(self, diagnostics):
+        super().__init__(diagnostics["finish_reason"])
+        self.diagnostics = diagnostics
+
+
+@dataclass(frozen=True)
+class ReasoningRead(QuestionRead):
+    reasoning: dict = field(default_factory=dict)
+
+
+def _served_read(read, diagnostics):
+    values = {item.name: getattr(read, item.name) for item in fields(QuestionRead)}
+    values["input_tokens"] += diagnostics["trace_input_tokens"]
+    values["output_tokens"] += diagnostics["trace_tokens"]
+    values["latency_s"] += diagnostics["trace_latency_s"] + diagnostics["read_latency_s"]
+    return ReasoningRead(**values, reasoning=diagnostics)
 
 
 def generate_trace(reader, messages, max_tokens):
@@ -142,25 +163,59 @@ def reasoned_read(
     # Only the original user turn is needed. Its option rendering is unchanged;
     # the direct system instruction would contradict the worked-steps request.
     messages = [{"role": "user", "content": original[-1]["content"] + "\n\n" + TRACE_INSTRUCTION}]
-    generation_input = reader.describe(messages, list(mapping))
-    trace = generate_trace(reader, messages, max_tokens)
-    if (
-        not isinstance(trace.text, str)
-        or type(trace.input_tokens) is not int
-        or trace.input_tokens < 1
-        or type(trace.output_tokens) is not int
-        or not 0 <= trace.output_tokens <= max_tokens
-        or trace.finish_reason not in ("eos", "length")
-        or not math.isfinite(trace.latency_s)
-        or trace.latency_s <= 0
-    ):
-        raise ValueError("invalid trace generation result")
-    final_messages = [
-        *messages,
-        {"role": "assistant", "content": trace.text},
-        {"role": "user", "content": FINAL_INSTRUCTION},
-    ]
-    result = reader.read(final_messages, list(mapping))
+    diagnostics = {
+        "trace_input_tokens": 0,
+        "trace_tokens": 0,
+        "trace_latency_s": 0.0,
+        "read_latency_s": 0.0,
+        "finish_reason": "generation_error",
+        "error": None,
+        "usage_complete": False,
+    }
+    start = time.perf_counter()
+    try:
+        generation_input = reader.describe(messages, list(mapping))
+        trace = generate_trace(reader, messages, max_tokens)
+        diagnostics["finish_reason"] = "invalid_trace"
+        if (
+            not isinstance(trace.text, str)
+            or type(trace.input_tokens) is not int
+            or trace.input_tokens < 1
+            or type(trace.output_tokens) is not int
+            or not 0 <= trace.output_tokens <= max_tokens
+            or trace.finish_reason not in ("eos", "length")
+            or not math.isfinite(trace.latency_s)
+            or trace.latency_s <= 0
+        ):
+            raise ValueError("invalid trace generation result")
+        diagnostics.update(
+            trace_input_tokens=trace.input_tokens,
+            trace_tokens=trace.output_tokens,
+            trace_latency_s=trace.latency_s,
+            finish_reason="empty_trace",
+            usage_complete=True,
+        )
+        if not trace.text.strip():
+            raise ValueError("empty worked steps")
+        final_messages = [
+            *messages,
+            {"role": "assistant", "content": trace.text},
+            {"role": "user", "content": FINAL_INSTRUCTION},
+        ]
+        diagnostics.update(finish_reason="readout_error", usage_complete=False)
+        read_start = time.perf_counter()
+        result = reader.read(final_messages, list(mapping))
+        diagnostics.update(finish_reason=trace.finish_reason, usage_complete=True)
+    except Exception as exc:
+        # Backend messages can contain private trace text. Expose only the error type.
+        diagnostics["error"] = type(exc).__name__
+        if diagnostics["finish_reason"] == "readout_error":
+            diagnostics["read_latency_s"] = time.perf_counter() - read_start
+        else:
+            diagnostics["trace_latency_s"] = (
+                diagnostics["trace_latency_s"] or time.perf_counter() - start
+            )
+        raise ReasoningFailure(diagnostics) from exc
     read = QuestionRead(
         {mapping[k]: v for k, v in result.letter_probs.items()},
         trace.input_tokens + result.input_tokens,
@@ -191,6 +246,7 @@ def reasoned_read(
         "read_latency_s": result.latency_s,
         "read_input_tokens": result.input_tokens,
         "read_output_tokens": result.output_tokens,
+        "usage_complete": True,
     }
     return read, metadata
 
@@ -216,41 +272,66 @@ def system_read(
     reader, state, question, *, policy, reasoning: ReasoningSettings | None = None, **kwargs
 ):
     """Honor explicit controls; omitted controls retain the saved routing policy."""
-    if reasoning is not None:
-        validate_reasoning(reader, question, reasoning)
-        if reasoning.budget == 0:
-            return read_question(reader, state, question, **kwargs)
-        if reasoning.mode == "on":
-            result, _ = reasoned_read(
-                reader,
-                state,
-                question,
-                prompt_variant=kwargs.get("prompt_variant", "min"),
-                state_format=kwargs.get("state_format", "pretty"),
-                max_tokens=reasoning.budget,
-            )
-            return result
-    direct = read_question(reader, state, question, **kwargs)
-    if policy.reasoning_route:
+    if reasoning is None and (not policy.reasoning_route or len(question.labels) > 26):
+        return read_question(reader, state, question, **kwargs)
+    settings = reasoning or ReasoningSettings()
+    validate_reasoning(reader, question, settings)
+    diagnostics = {
+        "settings": settings.as_dict(),
+        "budget": settings.budget,
+        "route": "direct",
+        "finish_reason": "disabled" if settings.budget == 0 else "not_selected",
+        "error": None,
+        "trace_input_tokens": 0,
+        "trace_tokens": 0,
+        "trace_latency_s": 0.0,
+        "read_latency_s": 0.0,
+        "usage_complete": True,
+    }
+    direct = None
+    use_reasoning = settings.mode == "on" and settings.budget > 0
+    if not use_reasoning:
+        direct = read_question(reader, state, question, **kwargs)
+    budget = settings.budget
+    if settings.mode == "auto" and budget > 0 and policy.reasoning_route:
         from .router import should_route
 
-        if should_route(
+        use_reasoning = should_route(
             policy.reasoning_route, question.type, direct.raw_probs, state, question.instruction
-        ):
-            result, _ = reasoned_read(
-                reader,
-                state,
-                question,
-                prompt_variant=kwargs.get("prompt_variant", "min"),
-                state_format=kwargs.get("state_format", "pretty"),
-                max_tokens=min(reasoning.budget, policy.reasoning_route["max_tokens"])
-                if reasoning is not None
-                else policy.reasoning_route["max_tokens"],
-            )
-            return replace(
-                result,
-                input_tokens=direct.input_tokens + result.input_tokens,
-                output_tokens=direct.output_tokens + result.output_tokens,
-                latency_s=direct.latency_s + result.latency_s,
-            )
-    return direct
+        )
+        budget = (
+            min(budget, policy.reasoning_route["max_tokens"])
+            if reasoning is not None
+            else policy.reasoning_route["max_tokens"]
+        )
+    diagnostics["effective_budget"] = budget if use_reasoning else 0
+    if not use_reasoning:
+        return _served_read(direct, diagnostics)
+    try:
+        result, metadata = reasoned_read(
+            reader,
+            state,
+            question,
+            prompt_variant=kwargs.get("prompt_variant", "min"),
+            state_format=kwargs.get("state_format", "pretty"),
+            max_tokens=budget,
+        )
+    except ReasoningFailure as exc:
+        diagnostics.update(exc.diagnostics, route="fallback")
+        if direct is None:
+            direct = read_question(reader, state, question, **kwargs)
+        return _served_read(direct, diagnostics)
+    diagnostics.update(
+        route="reasoned",
+        finish_reason=metadata["finish_reason"],
+        trace_tokens=metadata["trace_tokens"],
+        trace_input_tokens=metadata["trace_input_tokens"],
+        trace_latency_s=metadata["trace_latency_s"],
+        read_latency_s=metadata["read_latency_s"],
+    )
+    # Successful reasoned reads already include trace usage; add only the auto baseline.
+    values = {item.name: getattr(result, item.name) for item in fields(QuestionRead)}
+    if direct is not None:
+        for key in ("input_tokens", "output_tokens", "latency_s"):
+            values[key] += getattr(direct, key)
+    return ReasoningRead(**values, reasoning=diagnostics)

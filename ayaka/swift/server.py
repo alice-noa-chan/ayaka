@@ -108,6 +108,9 @@ class DecisionService:
             if read.passes > 1
             else "direct"
         }
+        diagnostics = getattr(read, "reasoning", None)
+        if diagnostics:
+            answer["ayaka"].update(route=diagnostics["route"], diagnostics=diagnostics)
         return answer
 
     def handle(self, body: object) -> dict:
