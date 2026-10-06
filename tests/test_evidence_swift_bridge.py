@@ -89,6 +89,47 @@ QUESTIONS = [
 
 
 @pytest.mark.parametrize("family", ["gemma", "granite"])
+def test_hf_reader_projects_only_the_answer_position_without_changing_raw_logits(family):
+    tok = tokenizer()
+    lm, _ = native_model(family)
+    messages, mapping = render_question("Finance approved the request.", QUESTIONS[1])
+    reader = HFReader("offline-random-fixture")
+    reader.model, reader.tokenizer = lm, tok
+    projected_shapes = []
+    forward_options = []
+    head_hook = lm.lm_head.register_forward_pre_hook(
+        lambda module, args: projected_shapes.append(tuple(args[0].shape))
+    )
+    model_hook = lm.register_forward_hook(
+        lambda module, args, kwargs, output: forward_options.append(kwargs), with_kwargs=True
+    )
+    try:
+        actual = reader.read(messages, list(mapping))
+        encoded = tok.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            return_dict=True,
+            enable_thinking=False,
+        )
+        with torch.inference_mode():
+            baseline = lm(**encoded, use_cache=False).logits[0, -1]
+    finally:
+        head_hook.remove()
+        model_hook.remove()
+    assert projected_shapes[0][1] == 1 and projected_shapes[1][1] == actual.input_tokens > 1
+    assert forward_options[0]["logits_to_keep"] == 1
+    assert forward_options[0]["use_cache"] is False
+    ids = [actual.canonical_token_ids[letter][0] for letter in mapping]
+    assert list(actual.token_logits.values()) == pytest.approx(baseline[ids].tolist(), abs=2e-6)
+    assert list(actual.letter_probs.values()) == pytest.approx(
+        baseline[ids].softmax(-1).tolist(), abs=2e-6
+    )
+    assert actual.input_token_ids == encoded["input_ids"][0].tolist()
+
+
+@pytest.mark.parametrize("family", ["gemma", "granite"])
 @pytest.mark.parametrize("variant", PROMPT_VARIANTS)
 @pytest.mark.parametrize("state_format", ["pretty", "compact"])
 @pytest.mark.parametrize("mode", ["full_rows", "prefix_cache", "copy_on_write"])

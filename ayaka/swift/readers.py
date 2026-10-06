@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import re
@@ -308,6 +309,23 @@ def aggregate_letter_logits(
     return normalize({letter: math.exp(value - peak) for letter, value in sums.items()})
 
 
+def _read_forward_kwargs(model) -> dict[str, Any]:
+    """Use inference options explicitly supported by the underlying native model."""
+    get_base_model = getattr(model, "get_base_model", None)
+    native = get_base_model() if callable(get_base_model) else model
+    try:
+        parameters = inspect.signature(native.forward).parameters
+    except (AttributeError, TypeError, ValueError):
+        return {}
+    return {
+        name: value
+        for name, value in {"logits_to_keep": 1, "use_cache": False}.items()
+        if name in parameters
+        and parameters[name].kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+
+
 class HFReader:
     def __init__(
         self,
@@ -396,12 +414,11 @@ class HFReader:
                 return_tensors="pt",
                 return_dict=True,
             )
-            encoded = {key: value.to(self.device) for key, value in encoded.items()}
-            if encoded["input_ids"][0].tolist() != self.tokenizer.encode(
-                prompt, add_special_tokens=False
-            ):
+            input_token_ids = encoded["input_ids"][0].tolist()
+            if input_token_ids != self.tokenizer.encode(prompt, add_special_tokens=False):
                 raise ValueError("chat-template token ids differ from the canonical answer prefix")
-            logits = self.model(**encoded).logits[0, -1]
+            encoded = {key: value.to(self.device) for key, value in encoded.items()}
+            logits = self.model(**encoded, **_read_forward_kwargs(self.model)).logits[0, -1]
             required = [token_id for letter in letters for token_id in ids[letter]]
             gathered = logits[required].float().cpu().tolist()
             selected = dict(zip(required, gathered, strict=True))
@@ -421,7 +438,7 @@ class HFReader:
                 1,
                 time.perf_counter() - start,
                 masses,
-                encoded["input_ids"][0].tolist(),
+                input_token_ids,
                 ids,
                 selected,
             )

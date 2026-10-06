@@ -158,6 +158,43 @@ def test_hf_tiny_model_constructed_offline(tmp_path):
     assert diagnostic._letter_ids["A"] == [1]
 
 
+def test_hf_forward_options_do_not_guess_support_from_arbitrary_kwargs():
+    from ayaka.swift.readers import _read_forward_kwargs
+
+    class Model:
+        def forward(self, input_ids, **kwargs):
+            pass
+
+    assert _read_forward_kwargs(Model()) == {}
+    assert _read_forward_kwargs(SimpleNamespace()) == {}
+
+
+def test_hf_forward_failure_propagates_without_retrying_inference():
+    import torch
+
+    class Tokenizer(StubTokenizer):
+        def apply_chat_template(self, messages, tokenize, **kwargs):
+            if kwargs.get("return_tensors"):
+                return {"input_ids": torch.tensor([[7, 8]])}
+            return super().apply_chat_template(messages, tokenize, **kwargs)
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def forward(self, input_ids, logits_to_keep=0, use_cache=True):
+            self.calls += 1
+            assert logits_to_keep == 1 and use_cache is False
+            raise TypeError("backend execution failed")
+
+    reader = HFReader("offline-failure-fixture")
+    reader.tokenizer, reader.model = Tokenizer(), Model()
+    with pytest.raises(TypeError, match="backend execution failed"):
+        reader.read([], ["A", "B"])
+    assert reader.model.calls == 1
+
+
 def test_vllm_rejects_decoded_strings(monkeypatch):
     import io
 

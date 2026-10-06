@@ -53,6 +53,9 @@ def test_real_full_hf_reader_loads_every_lora_and_matches_trainer_raw(tmp_path, 
         for w in caught
     )
     loaded = get_peft_model_state_dict(reader.model, save_embedding_layers=False)
+    from ayaka.swift.readers import _read_forward_kwargs
+
+    assert _read_forward_kwargs(reader.model) == {"logits_to_keep": 1, "use_cache": False}
     assert set(loaded) == set(weights)
     for key in weights:
         assert torch.equal(loaded[key].cpu(), weights[key])
