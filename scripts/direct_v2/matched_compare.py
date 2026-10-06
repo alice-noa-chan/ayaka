@@ -28,17 +28,26 @@ from ayaka.swift.collect import iter_dataset, load_reads  # noqa: E402
 from scripts.swift import v1v2_compare  # noqa: E402
 
 
-def cohort_items(paths, protocol):
+def cohort_parts(paths, protocol):
     if set(paths) != set(protocol["cohort_sha256"]):
         raise ValueError("all pinned cohort files are required")
-    items = []
+    parts = {}
     with tempfile.TemporaryDirectory() as scratch:
         for name, path in sorted(paths.items()):
             data = pinned_bytes(path, protocol["cohort_sha256"][name])
             copy = Path(scratch) / f"{name}.jsonl"
             copy.write_bytes(data)
-            items.extend(iter_dataset([copy]))
-    return items
+            parts[name] = list(iter_dataset([copy]))
+    items = [item for values in parts.values() for item in values]
+    if len({item.id for item in items}) != len(items) or any(
+        item.public is not False for item in items
+    ):
+        raise ValueError("pinned cohort repeats IDs or contains public inputs")
+    return parts
+
+
+def cohort_items(paths, protocol):
+    return [item for values in cohort_parts(paths, protocol).values() for item in values]
 
 
 def checked_compare(v2_rows, v1_rows, items, protocol, policy_bytes, execution_receipt):
