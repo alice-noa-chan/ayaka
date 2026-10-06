@@ -368,6 +368,29 @@ def test_proposal_budget_independent_of_reasoning(services, settings):
     assert result["ayaka"]["usage"]["proposal_output_tokens"] == 1
 
 
+@pytest.mark.parametrize("mode,trace_count", [("off", 0), ("on", 1)])
+def test_mixed_generated_and_fixed_questions_honor_each_reasoning_override(
+    services, mode, trace_count
+):
+    from test_swift_reasoning import TraceReader, always_router
+
+    reader = TraceReader()
+    service, _, generator = services(
+        reader, policy=Policy(reasoning_route=always_router()), diagnostic=True
+    )
+    body = request()
+    body["options"] = {"reasoning": {"mode": mode, "effort": "high"}}
+    body["questions"]["q"]["reasoning"] = {"mode": "off"}
+    body["questions"]["fixed"] = {"type": "noul"}
+    result = service.handle(body)
+    assert result["answers"]["fixed"]["ayaka"]["route"] == ("reasoned" if trace_count else "direct")
+    assert len(reader.trace_calls) == trace_count
+    if trace_count:
+        assert reader.trace_calls[0][1] == 1024
+    assert len(reader.calls) == 2 and len(generator.calls) == 1
+    assert service.policy.reasoning_route == always_router()
+
+
 def test_alias_agreement_and_conflict_are_atomic(services):
     service, reader, generator = services()
     body = request()

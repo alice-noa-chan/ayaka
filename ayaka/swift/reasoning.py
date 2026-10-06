@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ayaka.eval.read_artifact import fingerprint
+from ayaka.reasoning import ReasoningSettings
 
 from .grouping import QuestionRead, read_question
 from .prompt import render_question
@@ -194,7 +195,41 @@ def reasoned_read(
     return read, metadata
 
 
-def system_read(reader, state, question, *, policy, **kwargs):
+def validate_reasoning(reader, question, settings):
+    """Reject unsupported positive budgets before any request starts inference."""
+    if settings.budget == 0:
+        return
+    if (
+        question is None
+        or len(question.labels) > 26
+        or getattr(reader, "readout", None) != READOUT
+        or getattr(reader, "chat_template_kwargs", {}).get("enable_thinking", False)
+        or not (
+            isinstance(reader, (HFReader, VLLMChatReader))
+            or callable(getattr(reader, "generate_trace", None))
+        )
+    ):
+        raise ValueError("reasoning not supported by this readout")
+
+
+def system_read(
+    reader, state, question, *, policy, reasoning: ReasoningSettings | None = None, **kwargs
+):
+    """Honor explicit controls; omitted controls retain the saved routing policy."""
+    if reasoning is not None:
+        validate_reasoning(reader, question, reasoning)
+        if reasoning.budget == 0:
+            return read_question(reader, state, question, **kwargs)
+        if reasoning.mode == "on":
+            result, _ = reasoned_read(
+                reader,
+                state,
+                question,
+                prompt_variant=kwargs.get("prompt_variant", "min"),
+                state_format=kwargs.get("state_format", "pretty"),
+                max_tokens=reasoning.budget,
+            )
+            return result
     direct = read_question(reader, state, question, **kwargs)
     if policy.reasoning_route:
         from .router import should_route
@@ -208,7 +243,9 @@ def system_read(reader, state, question, *, policy, **kwargs):
                 question,
                 prompt_variant=kwargs.get("prompt_variant", "min"),
                 state_format=kwargs.get("state_format", "pretty"),
-                max_tokens=policy.reasoning_route["max_tokens"],
+                max_tokens=min(reasoning.budget, policy.reasoning_route["max_tokens"])
+                if reasoning is not None
+                else policy.reasoning_route["max_tokens"],
             )
             return replace(
                 result,

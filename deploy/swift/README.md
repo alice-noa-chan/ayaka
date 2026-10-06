@@ -56,6 +56,25 @@ full request admission returns 429 with `retry-after`; backend queue overload re
 backend failures return 502; deadlines return 504. Every response includes a fresh
 `x-typesafe-request-id` UUID.
 
+## Reasoning controls
+
+Fixed text questions with at most 26 candidates accept `options.reasoning` and
+per-question `reasoning` overrides. Fields follow checkpoint, request, then
+question precedence; each override replaces only its supplied fields.
+
+- `mode: "off"` or `max_tokens: 0` makes a direct read and disables the saved router.
+- `mode: "on"` forces worked steps, even without a router. `effort: "high"` reserves
+  1,024 generated tokens; low and medium reserve 128 and 384. An explicit
+  `max_tokens` overrides effort. Forced reads skip the redundant baseline read.
+- `mode: "auto"` uses the saved router, if present. Its trace budget is bounded
+  by both the requested budget and the saved router's budget.
+- Omitting reasoning controls preserves the saved policy's existing behavior.
+
+Unsupported readers, image inputs, generated candidate lists, and grouped lists
+reject positive reasoning requests with 422 before any question starts inference.
+Generated tokens remain in usage; worked steps stay private. Measurements of the
+saved router apply to its frozen budget, not to explicit budget overrides.
+
 ## Experimental Choice candidate generation
 
 **Generation quality and calibration are unmeasured. This is not part of JevBench;
@@ -123,8 +142,8 @@ Both modes make one bounded proposal attempt per question, without recursion.
 384). Swift uses the same frozen model through vLLM chat, with temperature 0,
 `enable_thinking=false`, and EOS stopping. HF serving does not support this
 extension. The proposal has its own budget and **does not require a reasoning
-mode**; reasoning off/zero does not disable proposals. Explicit positive client
-reasoning requests still return 422. Noul/Score generation and media input are
+mode**; reasoning off/zero does not disable proposals. Positive client reasoning
+requests for generated lists return 422. Noul/Score generation and media input are
 also rejected with 422 before inference.
 
 Proposals must be a JSON array of objects containing exactly `id`, `description`,

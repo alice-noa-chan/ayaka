@@ -90,9 +90,8 @@ def always_router():
     }
 
 
-def test_http_internal_route_and_explicit_request_still_422():
+def test_http_default_routing_explicit_off_and_forced_high():
     import threading
-    import urllib.error
     import urllib.request
 
     from ayaka.swift.server import serve
@@ -118,13 +117,21 @@ def test_http_internal_route_and_explicit_request_still_422():
             payload = json.load(response)
         assert payload["usage"] == {"input_tokens": 31, "output_tokens": 5}
         assert "PRIVATE" not in json.dumps(payload)
-        with pytest.raises(urllib.error.HTTPError) as caught:
-            urllib.request.urlopen(
-                request({**body, "options": {"reasoning": {"mode": "on"}}}), timeout=5
-            )
-        assert caught.value.code == 422
-        caught.value.close()
+        with urllib.request.urlopen(
+            request({**body, "options": {"reasoning": {"mode": "off"}}}), timeout=5
+        ) as response:
+            payload = json.load(response)
+        assert payload["answers"]["q"]["ayaka"]["route"] == "direct"
         assert len(reader.trace_calls) == 1
+        with urllib.request.urlopen(
+            request({**body, "options": {"reasoning": {"mode": "on", "effort": "high"}}}),
+            timeout=5,
+        ) as response:
+            payload = json.load(response)
+        assert payload["answers"]["q"]["ayaka"]["route"] == "reasoned"
+        assert payload["usage"] == {"input_tokens": 21, "output_tokens": 4}
+        assert reader.trace_calls[-1][1] == 1024
+        assert "PRIVATE" not in json.dumps(payload)
     finally:
         server.shutdown()
         server.server_close()
@@ -171,11 +178,96 @@ def test_internal_service_route_usage_and_trace_never_leaks():
         assert result["usage"] == {"input_tokens": 31, "output_tokens": 5}
         assert "PRIVATE" not in json.dumps(result)
         assert len(reader.calls) == 2 and len(reader.trace_calls) == 1
-        from ayaka.swift.prompt import InvalidQuestion
+    finally:
+        service.close()
 
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"mode": "off"}, {"mode": "on", "max_tokens": 0}, {"mode": "auto", "max_tokens": 0}],
+)
+@pytest.mark.parametrize("placement", ["request", "question"])
+def test_explicit_zero_budget_disables_saved_router_without_mutation(settings, placement):
+    reader = TraceReader()
+    policy = Policy(reasoning_route=always_router())
+    service = DecisionService(reader, "fake", policy, diagnostic=True)
+    body = {"state": "12", "questions": {"q": {"type": "noul"}}}
+    if placement == "request":
+        body["options"] = {"reasoning": settings}
+    else:
+        body["questions"]["q"]["reasoning"] = settings
+    try:
+        result = service.handle(body)
+        assert result["answers"]["q"]["ayaka"]["route"] == "direct"
+        assert len(reader.calls) == 1 and not reader.trace_calls
+        assert service.policy.reasoning_route == always_router()
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("router", [None, {**always_router(), "threshold": 2.0}])
+@pytest.mark.parametrize(
+    "settings,budget",
+    [({"mode": "on", "effort": "high"}, 1024), ({"mode": "on", "max_tokens": 20}, 20)],
+)
+def test_forced_reasoning_bypasses_router_and_redundant_direct_read(router, settings, budget):
+    reader = TraceReader()
+    service = DecisionService(reader, "fake", Policy(reasoning_route=router), diagnostic=True)
+    try:
+        result = service.handle(
+            {
+                "state": "plain text",
+                "options": {"reasoning": settings},
+                "questions": {"q": {"type": "noul"}},
+            }
+        )
+        assert result["answers"]["q"]["ayaka"]["route"] == "reasoned"
+        assert reader.trace_calls[0][1] == budget
+        assert len(reader.calls) == len(reader.trace_calls) == 1
+    finally:
+        service.close()
+
+
+def test_per_question_override_and_auto_budget_remain_isolated():
+    reader = TraceReader()
+    service = DecisionService(
+        reader, "fake", Policy(reasoning_route=always_router()), diagnostic=True
+    )
+    try:
+        result = service.handle(
+            {
+                "state": "12",
+                "options": {"reasoning": {"mode": "on", "effort": "high"}},
+                "questions": {
+                    "off": {"type": "noul", "reasoning": {"mode": "off"}},
+                    "auto": {"type": "noul", "reasoning": {"mode": "auto", "max_tokens": 128}},
+                },
+            }
+        )
+        assert result["answers"]["off"]["ayaka"]["route"] == "direct"
+        assert result["answers"]["auto"]["ayaka"]["route"] == "reasoned"
+        assert [budget for _, budget in reader.trace_calls] == [128]
+    finally:
+        service.close()
+
+
+def test_unsupported_grouped_reasoning_is_atomic():
+    from ayaka.swift.prompt import InvalidQuestion
+
+    reader = TraceReader()
+    service = DecisionService(reader, "fake", diagnostic=True)
+    try:
         with pytest.raises(InvalidQuestion, match="reasoning not supported"):
-            service.handle({**body, "options": {"reasoning": {"mode": "on", "max_tokens": 20}}})
-        assert len(reader.calls) == 2
+            service.handle(
+                {
+                    "options": {"reasoning": {"mode": "on"}},
+                    "questions": {
+                        "valid": {"type": "noul"},
+                        "grouped": {"type": "choice", "criteria": [str(i) for i in range(27)]},
+                    },
+                }
+            )
+        assert not reader.calls and not reader.trace_calls
     finally:
         service.close()
 

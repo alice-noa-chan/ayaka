@@ -29,7 +29,7 @@ from .grouping import read_question, validate_option_count
 from .policy import Policy
 from .prompt import InvalidQuestion, parse_question, validate_prompt_variant
 from .readers import LetterReader, VLLMChatReader, add_reader_arguments, reader_from_args
-from .reasoning import system_read
+from .reasoning import system_read, validate_reasoning
 
 MAX_HTTP_BYTES = 24 * 1024 * 1024
 
@@ -159,19 +159,27 @@ class DecisionService:
         options = body.get("options", {})
         if not isinstance(options, dict):
             raise InvalidQuestion("options must be an object")
+        reasoning = {}
         try:
-            for question in questions.values():
+            for (name, question), parsed_question in zip(questions.items(), parsed, strict=True):
                 if ("reasoning" in options and options["reasoning"] is None) or (
                     "reasoning" in question and question["reasoning"] is None
                 ):
                     raise ValueError("reasoning settings must be an object")
-                settings = resolve_settings(
-                    checkpoint={"mode": "off"},
-                    request=options.get("reasoning"),
-                    question=question.get("reasoning"),
+                settings = (
+                    resolve_settings(
+                        checkpoint={"mode": "auto" if policy.reasoning_route else "off"},
+                        request=options.get("reasoning"),
+                        question=question.get("reasoning"),
+                    )
+                    if "reasoning" in options or "reasoning" in question
+                    else None
                 )
-                if settings.budget > 0:
-                    raise ValueError("reasoning not supported by this readout")
+                if settings is not None:
+                    if settings.budget > 0 and policies[name]["mode"] != "fixed":
+                        raise ValueError("reasoning not supported with candidate generation")
+                    validate_reasoning(reader, parsed_question, settings)
+                reasoning[name] = settings
         except ValueError as exc:
             raise InvalidQuestion(str(exc)) from exc
         for question in parsed:
@@ -188,7 +196,7 @@ class DecisionService:
                 if not isinstance(self.reader, VLLMChatReader):
                     raise InvalidQuestion("candidate generation needs the frozen vLLM chat backend")
                 generator = VLLMCandidateGenerator(self.reader)
-            return self._handle_candidates(body, policies, parsed, generator)
+            return self._handle_candidates(body, policies, parsed, generator, reasoning)
         futures = [
             self._pool.submit(
                 system_read,
@@ -196,11 +204,12 @@ class DecisionService:
                 body.get("state", ""),
                 question,
                 policy=policy,
+                reasoning=reasoning[name],
                 group_size=self.group_size,
                 state_format=self.state_format,
                 prompt_variant=self.prompt_variant,
             )
-            for question in parsed
+            for name, question in zip(questions, parsed, strict=True)
         ]
         try:
             reads = [future.result() for future in futures]
@@ -220,17 +229,17 @@ class DecisionService:
             },
         }
 
-    def _handle_candidates(self, body, policies, parsed, generator):
+    def _handle_candidates(self, body, policies, parsed, generator, reasoning):
         """Experimental generated partitions; fixed JevBench never enters here."""
         generated_policy = replace(self.policy, letter_bias=None, reasoning_route=None)
 
-        def score(question, *, generated=False):
+        def score(name, question, *, generated=False):
             policy = generated_policy if generated else self.policy
             read = (read_question if generated else system_read)(
                 self.reader,
                 body.get("state", ""),
                 question,
-                **({} if generated else {"policy": policy}),
+                **({} if generated else {"policy": policy, "reasoning": reasoning[name]}),
                 group_size=self.group_size,
                 state_format=self.state_format,
                 prompt_variant=self.prompt_variant,
@@ -240,9 +249,13 @@ class DecisionService:
         def evaluate(name, question):
             if policies[name]["mode"] != "fixed":
                 return evaluate_candidates(
-                    body.get("state", ""), body["questions"][name], policies[name], score, generator
+                    body.get("state", ""),
+                    body["questions"][name],
+                    policies[name],
+                    lambda question, **kwargs: score(name, question, **kwargs),
+                    generator,
                 )
-            answer, read = score(question)
+            answer, read = score(name, question)
             return CandidateEvaluation(
                 answer,
                 {"input_tokens": read.input_tokens, "output_tokens": read.output_tokens},
