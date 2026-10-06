@@ -16,12 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ayaka.eval.matched_contract import (  # noqa: E402
     digest,
+    fingerprint,
     item_binding,
     load_protocol,
     pinned_bytes,
     policy_from_bytes,
     validate_rows,
 )
+from ayaka.eval.matched_execution import validate_context_rows  # noqa: E402
 from ayaka.swift.collect import iter_dataset, load_reads  # noqa: E402
 from scripts.swift import v1v2_compare  # noqa: E402
 
@@ -39,11 +41,20 @@ def cohort_items(paths, protocol):
     return items
 
 
-def checked_compare(v2_rows, v1_rows, items, protocol, policy_bytes):
+def checked_compare(v2_rows, v1_rows, items, protocol, policy_bytes, execution_receipt):
     policy = policy_from_bytes(policy_bytes, protocol)
     items = list(items)
     v2_rows = validate_rows(v2_rows, items, protocol, system="v2")
     v1_rows = validate_rows(v1_rows, items, protocol, system="v1")
+    if (
+        execution_receipt.get("version") != "ayaka-checked-v1-execution-1"
+        or execution_receipt.get("complete") is not True
+        or execution_receipt.get("preflight_only") is not False
+        or execution_receipt.get("output_sha256") != fingerprint(v1_rows)
+        or fingerprint(execution_receipt.get("protocol")) != fingerprint(protocol)
+    ):
+        raise ValueError("scoring requires the complete checked execution receipt for these rows")
+    validate_context_rows(v1_rows, execution_receipt.get("context_preflight") or {})
     report = v1v2_compare.compare(
         v2_rows, v1_rows, policy, {item.id: item_binding(item) for item in items}
     )
@@ -60,6 +71,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--protocol", type=Path, required=True)
     p.add_argument("--protocol-sha256", required=True)
+    p.add_argument("--v1-execution-receipt", type=Path, required=True)
+    p.add_argument("--v1-execution-receipt-sha256", required=True)
     for name in ("procedural", "hard-calibration", "hard-dev", "policy", "output"):
         p.add_argument(f"--{name}", type=Path, required=True)
     p.add_argument("--v2-reads", nargs="+", type=Path, required=True)
@@ -69,6 +82,11 @@ def main(argv=None):
         raise ValueError("comparison reports are written once")
     protocol = load_protocol(args.protocol, args.protocol_sha256)
     policy_bytes = pinned_bytes(args.policy, protocol["policy_sha256"])
+    execution_receipt = json.loads(
+        pinned_bytes(args.v1_execution_receipt, args.v1_execution_receipt_sha256)
+    )
+    if execution_receipt.get("protocol_file_sha256") != args.protocol_sha256:
+        raise ValueError("execution receipt does not bind the pinned protocol bytes")
     items = cohort_items(
         {
             "procedural": args.procedural,
@@ -78,9 +96,15 @@ def main(argv=None):
         protocol,
     )
     report = checked_compare(
-        load_reads(args.v2_reads), load_reads(args.v1_rows), items, protocol, policy_bytes
+        load_reads(args.v2_reads),
+        load_reads(args.v1_rows),
+        items,
+        protocol,
+        policy_bytes,
+        execution_receipt,
     )
     report["protocol_file_sha256"] = args.protocol_sha256
+    report["v1_execution_receipt_sha256"] = args.v1_execution_receipt_sha256
     data = (json.dumps(report, indent=2, allow_nan=False) + "\n").encode()
     with args.output.open("xb") as stream:
         stream.write(data)

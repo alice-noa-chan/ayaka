@@ -6,11 +6,14 @@ from dataclasses import asdict, replace
 
 import pytest
 
+from ayaka.config import model_config
 from ayaka.eval import matched_contract as contract
+from ayaka.eval import matched_execution as execution
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.swift.collect import adapt_jevbench, collect, load_reads
 from ayaka.swift.policy import Policy
 from ayaka.swift.readers import FakeReader, logmass_probs
+from ayaka.tokenization import ToyTokenizer
 from scripts.direct_v2.matched_compare import checked_compare
 
 
@@ -134,8 +137,9 @@ def test_checked_comparison_uses_native_receipts_and_complete_exact_scoring_fiel
 
     monkeypatch.setattr(matched_compare.v1v2_compare, "B", 20)
     items, v2, v1, protocol, path = matched
+    receipt = execution_fixture(items, v1, protocol)
     original = copy.deepcopy((v2, v1, protocol))
-    report = checked_compare(v2, v1, items, protocol, path.read_bytes())
+    report = checked_compare(v2, v1, items, protocol, path.read_bytes(), receipt)
     assert report["validation"]["native_reads_validated"] is True
     assert report["validation"]["fresh_independence_attested"] is False
     assert report["systems"]["v2_off"]["n"] == 3
@@ -283,7 +287,7 @@ def test_protocol_cannot_silently_change_frozen_recipe(matched, field):
 def test_comparison_api_cannot_substitute_an_unpinned_policy(matched):
     items, v2, v1, protocol, _ = matched
     with pytest.raises(ValueError, match="external anchor"):
-        checked_compare(v2, v1, items, protocol, b"{}")
+        checked_compare(v2, v1, items, protocol, b"{}", {})
 
 
 def test_exact_policy_contract_distinguishes_boolean_from_float(matched):
@@ -313,3 +317,60 @@ def test_resigned_reversed_token_map_cannot_swap_scored_candidate_coordinates(ma
     resign(row)
     with pytest.raises(ValueError, match="candidate coordinates"):
         contract.validate_rows(rows, items, protocol, system="v2")
+
+
+def execution_fixture(items, rows, protocol):
+    counts = execution.context_preflight(items, ToyTokenizer(), model_config("electra-large"))
+    for row in rows:
+        c = {
+            "version": execution.CONTEXT_VERSION,
+            "decisions": [copy.deepcopy(counts[row["id"]]["direct"])],
+            "extraction_input_tokens": counts[row["id"]]["extraction_input_tokens"],
+        }
+        c["sha256"] = fingerprint(c)
+        row["checked_context"] = c
+    return {
+        "version": "ayaka-checked-v1-execution-1",
+        "complete": True,
+        "preflight_only": False,
+        "output_sha256": fingerprint(rows),
+        "protocol": protocol,
+        "context_preflight": counts,
+    }
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "wrong_question",
+        "wrong_tokens",
+        "clipped_count",
+        "wrong_extraction",
+        "wrong_rows",
+        "preflight_only",
+    ],
+)
+def test_actual_scoring_cannot_bypass_checked_execution_context(matched, damage):
+    items, v2, v1, protocol, path = matched
+    receipt = execution_fixture(items, v1, protocol)
+    c = v1[0]["checked_context"]
+    if damage == "missing":
+        v1[0].pop("checked_context")
+    elif damage == "wrong_question":
+        c["decisions"][0]["questions_sha256"] = "a" * 64
+    elif damage == "wrong_tokens":
+        c["decisions"][0]["input_token_ids_sha256"] = ["b" * 64]
+    elif damage == "clipped_count":
+        c["decisions"][0]["input_tokens"] = [1]
+    elif damage == "wrong_extraction":
+        c["extraction_input_tokens"] = 1
+    elif damage == "wrong_rows":
+        receipt["output_sha256"] = "c" * 64
+    else:
+        receipt["preflight_only"] = True
+    c["sha256"] = fingerprint({k: v for k, v in c.items() if k != "sha256"})
+    if damage != "wrong_rows":
+        receipt["output_sha256"] = fingerprint(v1)
+    with pytest.raises(ValueError):
+        checked_compare(v2, v1, items, protocol, path.read_bytes(), receipt)
