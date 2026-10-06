@@ -150,3 +150,66 @@ def test_invalid_diagnostic_contract_is_rejected(change):
     change(row)
     with pytest.raises(ValueError, match="teacher signal|missing teacher"):
         prompt_teacher_signal_report([row])
+
+
+def test_extreme_finite_probability_is_visible_without_dominating_the_median_or_clipping():
+    records = [pair([0.5, 0.5], [0.5, 0.5]) for _ in range(10)]
+    records.append(pair([1 - 1e-20, 1e-20], [0.5, 0.5], accepted=False))
+    before = copy.deepcopy(records)
+    report = prompt_teacher_signal_report(records)
+    result = report["by_source_type"][0]
+    logits = result["noul_true_logit"]
+    extreme = -math.log(1e-20)
+    assert logits["mean_teacher_minus_student"] == pytest.approx(extreme / 11)
+    assert logits["teacher_minus_student"]["median"] == 0
+    assert logits["teacher_minus_student"]["p90"] == 0
+    assert logits["teacher_minus_student"]["max"] == pytest.approx(extreme)
+    assert logits["student"]["min"] == pytest.approx(-extreme)
+    assert logits["finite_pairs"] == 11 and logits["endpoint_pairs"] == 0
+    assert result["forward_kl_finite_nats"]["median"] == 0
+    assert result["forward_kl_finite_nats"]["max"] > 20
+    assert (
+        result["accepted_pair_statistics"]["noul_true_logit"]["teacher_minus_student"]["max"] == 0
+    )
+    rejected = result["rejected_pair_statistics"]["noul_true_logit"]["teacher_minus_student"]
+    assert rejected["finite_pairs"] == 1 and rejected["median"] == pytest.approx(extreme)
+    assert records == before
+    assert report["probability_clipping_applied"] is False
+    assert report["eligibility_or_authored_cap_applied"] is False
+    assert report["version"] == "ayaka-prompt-teacher-signals-2"
+    json.dumps(report, allow_nan=False)
+
+
+def test_linear_quantiles_are_explicit_for_even_small_and_reordered_populations():
+    records = [pair([0.5, 0.5], probabilities(x)) for x in (-3, -1, 1, 3)]
+    result = prompt_teacher_signal_report(records)["by_source_type"][0]
+    summary = result["noul_true_logit"]["teacher_minus_student"]
+    assert summary == pytest.approx(
+        {
+            "finite_pairs": 4,
+            "min": -3,
+            "p10": -2.4,
+            "median": 0,
+            "p90": 2.4,
+            "max": 3,
+        },
+        abs=1e-12,
+    )
+    assert prompt_teacher_signal_report(records) == prompt_teacher_signal_report(
+        list(reversed(records))
+    )
+    single = prompt_teacher_signal_report(records[:1])["by_source_type"][0]
+    assert single["entropy_change_nats"]["finite_pairs"] == 1
+    assert len({v for k, v in single["entropy_change_nats"].items() if k != "finite_pairs"}) == 1
+
+
+def test_robust_finite_only_population_keeps_nonfinite_and_endpoint_counts_separate():
+    result = prompt_teacher_signal_report([pair([0, 1], [1, 0])])["by_source_type"][0]
+    for summary in (
+        result["forward_kl_finite_nats"],
+        result["noul_true_logit"]["teacher_minus_student"],
+    ):
+        assert summary["finite_pairs"] == 0
+        assert all(value is None for key, value in summary.items() if key != "finite_pairs")
+    assert result["forward_kl_nonfinite_pairs"] == result["noul_true_logit"]["endpoint_pairs"] == 1
+    assert result["entropy_change_nats"]["finite_pairs"] == 1

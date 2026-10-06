@@ -10,11 +10,33 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 
-VERSION = "ayaka-prompt-teacher-signals-1"
+VERSION = "ayaka-prompt-teacher-signals-2"
 
 
 def _mean(values):
     return math.fsum(values) / len(values) if values else None
+
+
+def _robust(values):
+    """Unclipped linear quantiles at (n-1)q; finite-only populations are explicit."""
+    ordered = sorted(values)
+
+    def quantile(q):
+        if not ordered:
+            return None
+        position = (len(ordered) - 1) * q
+        left = math.floor(position)
+        right = math.ceil(position)
+        return ordered[left] + (ordered[right] - ordered[left]) * (position - left)
+
+    return {
+        "finite_pairs": len(ordered),
+        "min": ordered[0] if ordered else None,
+        "p10": quantile(0.1),
+        "median": quantile(0.5),
+        "p90": quantile(0.9),
+        "max": ordered[-1] if ordered else None,
+    }
 
 
 def _entropy(probs):
@@ -85,6 +107,8 @@ def _slice(rows):
         "mean_teacher_entropy_nats": _mean(teacher_entropies),
         "mean_entropy_change_nats": _mean(entropy_changes),
         "mean_forward_kl_finite_nats": _mean(finite_kl),
+        "forward_kl_finite_nats": _robust(finite_kl),
+        "entropy_change_nats": _robust(entropy_changes),
         "forward_kl_finite_pairs": len(finite_kl),
         "forward_kl_nonfinite_pairs": kl_nonfinite,
         "argmax_tied_pairs": ties,
@@ -108,6 +132,9 @@ def _slice(rows):
             "finite_pairs": len(delta),
             "endpoint_pairs": logit_endpoints,
             "mean_teacher_minus_student": center,
+            "student": _robust(student_logits),
+            "teacher": _robust(teacher_logits),
+            "teacher_minus_student": _robust(delta),
             "residual_rmse_after_slice_constant": residual_rmse,
             "teacher_on_student_ols_slope": xy / xx if xx > 0 else None,
             "pearson_correlation": xy / math.sqrt(xx * yy) if xx > 0 and yy > 0 else None,
@@ -194,6 +221,8 @@ def prompt_teacher_signal_report(records):
         ],
         "weighting": "unweighted questions; not component weights or training exposure",
         "probability_space": "raw candidate probabilities before fitted serving policy",
+        "probability_clipping_applied": False,
+        "robust_summary_method": "unclipped linear quantiles at (n-1)q; means and OLS retained",
         "scope": "diagnostic only; centered residuals do not establish gold improvement",
         "policy_refit_required_before_trained_comparison": True,
         "eligibility_or_authored_cap_applied": False,
