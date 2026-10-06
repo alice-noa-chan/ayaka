@@ -65,7 +65,19 @@ def test_full_credit_rejection_precedes_any_weight_load_or_output(tmp_path, monk
     assert not (tmp_path / "absent").exists()
 
 
-def test_zero_update_profile_then_complete_train_calibrate_test_export_and_resume(tmp_path):
+def test_zero_update_profile_then_complete_train_calibrate_test_export_and_resume(
+    tmp_path, monkeypatch
+):
+    from ayaka.training import run_direct
+
+    fitted_logits = []
+    original_fit = run_direct.fit_temperatures
+
+    def capture_fit(logits, *args, **kwargs):
+        fitted_logits.append(copy.deepcopy(logits))
+        return original_fit(logits, *args, **kwargs)
+
+    monkeypatch.setattr(run_direct, "fit_temperatures", capture_fit)
     root = bundle(tmp_path)
     training = {"bf16": False, "log_every": 0, "micro_batch_tokens": 8192}
     profile = run_pipeline(
@@ -88,6 +100,9 @@ def test_zero_update_profile_then_complete_train_calibrate_test_export_and_resum
         assert result["summary"]["reasoning_tokens"] == 0
         assert result["summary"]["official_composite"] is None
         assert all(row["route"] == "direct" for row in result["rows"])
+        assert all(row["nll_source"] == "logits" for row in result["rows"])
+        if split == "calibration_raw":
+            assert fitted_logits[0] == [row["logits"] for row in result["rows"]]
     assert not (tmp_path / "full" / "test.json").exists()
     assert completed["independent_test_required"] is True
     resumed = run_pipeline(
@@ -134,9 +149,9 @@ def test_calibration_and_test_inputs_cannot_inject_trace_or_teacher_metadata(tmp
     captured = []
     original = trainer.predict
 
-    def inspect(items):
+    def inspect(items, **kwargs):
         captured.extend(copy.deepcopy(items))
-        return original(items)
+        return original(items, **kwargs)
 
     trainer.predict = inspect
     rows = evaluate_direct(trainer, [sample], "test")["rows"]
@@ -146,6 +161,37 @@ def test_calibration_and_test_inputs_cannot_inject_trace_or_teacher_metadata(tmp
     )
     with pytest.raises(ValueError, match="reserved split"):
         evaluate_direct(trainer, [sample], "dev")
+
+
+def test_direct_evaluation_retains_logits_after_probability_underflow():
+    from types import SimpleNamespace
+
+    from ayaka.data.schema import Question, Sample
+
+    sample = Sample(
+        "Original evidence",
+        [Question.noul("q", "Approved?", 1)],
+        {
+            "split": "calibration",
+            "source_example_id": "case",
+            "source_lineage": "case",
+            "language": "en",
+        },
+    )
+
+    def predict(items, *, apply_temperature, return_logits):
+        assert len(items) == 1 and apply_temperature is False and return_logits is True
+        return [[1.0, 0.0]], [[0.0, -1000.0]]
+
+    trainer = SimpleNamespace(
+        device=torch.device("cpu"),
+        tok=ToyTokenizer(),
+        model=SimpleNamespace(cfg=tiny_config(readout="lm", max_seq_len=2048)),
+        predict=predict,
+    )
+    row = evaluate_direct(trainer, [sample], "calibration", apply_temperature=False)["rows"][0]
+    assert row["probs"] == [1.0, 0.0] and row["logits"] == [0.0, -1000.0]
+    assert row["nll"] == 1000.0 and row["nll_source"] == "logits"
 
 
 def test_unapproved_native_execution_and_tiny_cuda_are_rejected_before_weights(tmp_path):

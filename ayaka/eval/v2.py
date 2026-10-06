@@ -14,7 +14,26 @@ def nll(probs, target):
     return -sum(y * math.log(max(p, 1e-12)) for p, y in zip(probs, target, strict=True))
 
 
-def typed_row(spec, probs, target):
+def _logit_nll(probs, target, logits):
+    """Keep finite logit tails even when the emitted probabilities underflow."""
+    if len(logits) != len(probs) or any(not math.isfinite(z) for z in logits):
+        raise ValueError("logits must be finite and aligned with probabilities")
+    peak = max(logits)
+    shifted = [z - peak for z in logits]
+    if any(not math.isfinite(z) for z in shifted):
+        raise ValueError("logit span must be finite")
+    mass = math.fsum(math.exp(z) for z in shifted)
+    if any(
+        not math.isclose(p, math.exp(z) / mass, rel_tol=1e-5, abs_tol=1e-6)
+        for p, z in zip(probs, shifted, strict=True)
+    ):
+        raise ValueError("logits and probabilities describe different distributions")
+    normalizer = math.log(mass)
+    return math.fsum(y * (normalizer - z) for y, z in zip(target, shifted, strict=True) if y)
+
+
+def typed_row(spec, probs, target, *, logits=None):
+    """Use exact log-space NLL when logits are supplied; retain legacy diagnostics otherwise."""
     if (
         len(probs) != len(target)
         or any(not math.isfinite(p) or p < 0 for p in probs)
@@ -32,12 +51,14 @@ def typed_row(spec, probs, target):
     pred = max(range(len(probs)), key=probs.__getitem__)
     row = {
         "type": spec.type,
-        "nll": nll(probs, target),
+        "nll": nll(probs, target) if logits is None else _logit_nll(probs, target, logits),
         "brier": sum((p - y) ** 2 for p, y in zip(probs, target, strict=True)),
         "confidence": probs[pred],
         "correct": target[pred],
         "chance": 1 / len(probs),
     }
+    if logits is not None:
+        row["nll_source"] = "logits"
     if spec.type == "noul":
         selected = 0 if probs[1] <= 0.2 else (1 if probs[1] >= 0.8 else None)
         row.update(

@@ -11,7 +11,6 @@ import argparse
 import gc
 import itertools
 import json
-import math
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -92,7 +91,7 @@ def read_splits(root):
     }
 
 
-def evaluate_direct(trainer, samples, split, *, input_encoding=None):
+def evaluate_direct(trainer, samples, split, *, input_encoding=None, apply_temperature=True):
     """Serial, isolated original-input reads. No gradients or trace generation."""
     rows = []
     for sample in samples:
@@ -117,7 +116,10 @@ def evaluate_direct(trainer, samples, split, *, input_encoding=None):
                     trainer.model.cfg.max_seq_len, trainer.model.cfg.serve_max_seq_len
                 ),
             )[0]
-            probs = trainer.predict([item])[0]
+            probabilities, candidate_logits = trainer.predict(
+                [item], apply_temperature=apply_temperature, return_logits=True
+            )
+            probs, logits = probabilities[0], candidate_logits[0]
             if trainer.device.type == "cuda":
                 torch.cuda.synchronize(trainer.device)
             latency = time.perf_counter() - start
@@ -129,7 +131,7 @@ def evaluate_direct(trainer, samples, split, *, input_encoding=None):
             )
             rows.append(
                 {
-                    **typed_row(spec, probs, item.target),
+                    **typed_row(spec, probs, item.target, logits=logits),
                     "id": sample.metadata["source_example_id"] + "/" + q.id,
                     "cluster_id": sample.metadata["source_lineage"],
                     "split": split,
@@ -139,6 +141,7 @@ def evaluate_direct(trainer, samples, split, *, input_encoding=None):
                     "tier": sample.metadata.get("tier", "standard"),
                     "candidate_ids": [c.id for c in q.candidates],
                     "probs": probs,
+                    "logits": logits,
                     "target": item.target,
                     "tokens": item.length,
                     "latency_s": latency,
@@ -384,11 +387,15 @@ def run_pipeline(
     _write(root, "history.json", history)
     application.rollback()  # calibration/export use portable native inference kernels
     raw_calibration = evaluate_direct(
-        trainer, splits["calibration"], "calibration", input_encoding=recipe["input_encoding"]
+        trainer,
+        splits["calibration"],
+        "calibration",
+        input_encoding=recipe["input_encoding"],
+        apply_temperature=False,
     )
     rows = raw_calibration["rows"]
     temperatures = fit_temperatures(
-        [[math.log(max(p, 1e-12)) for p in row["probs"]] for row in rows],
+        [row["logits"] for row in rows],
         [row["target"] for row in rows],
         [row["type"] for row in rows],
         [row["tokens"] for row in rows],

@@ -1,9 +1,46 @@
+import math
+
 import pytest
 
 from ayaka.data.reasoning_v2 import SPLITS, curriculum
 from ayaka.eval.v2 import assert_isolated, paired_report, select_candidates, summarize, typed_row
 from ayaka.primitives import QuestionSpec
 from ayaka.training.path_calibration import PathCalibration, path_key
+
+
+def test_logit_nll_preserves_underflow_and_soft_targets_without_changing_legacy_rows():
+    spec = QuestionSpec("choice", "Pick?", ["a", "b"])
+    row = typed_row(spec, [1, 0], [0.5, 0.5], logits=[0, -1000])
+    assert row["nll"] == 500 and row["nll_source"] == "logits"
+    legacy = typed_row(spec, [1, 0], [0.5, 0.5])
+    assert legacy["nll"] == pytest.approx(-0.5 * math.log(1e-12))
+    assert "nll_source" not in legacy
+    assert {k: v for k, v in row.items() if k not in {"nll", "nll_source"}} == {
+        k: v for k, v in legacy.items() if k != "nll"
+    }
+
+
+def test_logit_nll_shifts_before_normalizing_large_equal_values():
+    spec = QuestionSpec("choice", "Pick?", ["a", "b"])
+    assert typed_row(spec, [0.5, 0.5], [1, 0], logits=[1e30, 1e30])["nll"] == pytest.approx(
+        math.log(2)
+    )
+
+
+@pytest.mark.parametrize(
+    "logits,error",
+    [
+        ([0], "aligned"),
+        ([0, float("nan")], "finite"),
+        ([0, float("inf")], "finite"),
+        ([1e308, -1e308], "span"),
+        ([0, 1], "different distributions"),
+    ],
+)
+def test_logit_nll_rejects_nonfinite_misaligned_or_inconsistent_inputs(logits, error):
+    spec = QuestionSpec("choice", "Pick?", ["a", "b"])
+    with pytest.raises(ValueError, match=error):
+        typed_row(spec, [0.5, 0.5], [1, 0], logits=logits)
 
 
 def test_noul_abstention_thresholds_and_yes_calibration():

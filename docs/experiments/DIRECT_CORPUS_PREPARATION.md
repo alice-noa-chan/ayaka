@@ -17,6 +17,12 @@ policy reasoning data, independently observed teacher improvements or a
 matched v1-reasoning versus v2-off quality evaluation. Preparing this control
 does not establish that a paid experiment or model promotion is justified.
 
+New direct-run evaluations retain candidate logits alongside emitted probabilities.
+Calibration fits the untempered logits, without probability floors or reconstruction
+from rounded probabilities. NLL is computed in log space, including finite tails
+whose probabilities underflow to zero; these rows declare `nll_source: "logits"`.
+Legacy probability-only diagnostics keep their historical behavior.
+
 ## 1. Declare settings and configuration
 
 Copy the example settings and use the intended pinned LM-readout configuration
