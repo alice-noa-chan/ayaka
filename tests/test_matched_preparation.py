@@ -227,14 +227,22 @@ def test_job_refuses_stale_results_or_server_before_gpu_command(tmp_path, failur
             "OUT": out.as_posix(),
             "TRACE": trace.as_posix(),
             "PROTOCOL_SHA256": "a" * 64,
+            "PYTHONIOENCODING": "utf-8",
         }
         script = Path(__file__).resolve().parents[1] / "scripts/direct_v2/matched_job.sh"
         result = subprocess.run(
-            [bash, str(script)], env=env, capture_output=True, text=True, timeout=30
+            [bash, str(script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
         )
     assert result.returncode != 0
     assert not trace.exists(), result.stdout + result.stderr
     if failure == "old_output":
+        assert "OUT must be fresh" in result.stderr
         assert (out / "DONE").read_text(encoding="utf-8") == "stale"
     else:
+        assert "OSError" in result.stderr or "PermissionError" in result.stderr
         assert not (out / "DONE").exists()
