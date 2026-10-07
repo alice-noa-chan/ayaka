@@ -13,6 +13,7 @@ from ayaka.eval.checkpoint_comparison import (
     checked_rows,
     collect_rows,
     compare,
+    gate_breakdown,
     make_protocol,
     questions,
 )
@@ -170,6 +171,37 @@ def test_clipped_native_context_and_empty_reasoned_trace_are_rejected(tmp_path, 
     rows["v2_on"][0]["reasoning_tokens"] = 0
     with pytest.raises(ValueError, match="reasoning usage"):
         checked_rows(rows["v2_on"], samples, protocol, "v2_on")
+
+
+def test_gate_breakdown_separates_v1_reasoned_questions_and_composes_v2(tmp_path, cohort):
+    samples, protocol = cohort
+    rows = results(tmp_path, cohort)
+    # v1's gate reasons on the Noul question; v2 direct abstains on it.
+    for row in rows["v1_on"]:
+        if row["type"] == "noul":
+            row.update(route="reasoned", reasoning_tokens=5)
+    for row in rows["v2_off"]:
+        if row["type"] == "noul":
+            row["probs"] = [0.5, 0.5]
+    report = gate_breakdown(rows, samples, protocol, replicates=5)
+    assert report["gated_questions"] == 1
+    assert report["strata"]["v1_reasoned"]["questions"] == 1
+    assert report["strata"]["v1_direct"]["questions"] == 2
+    assert set(report["strata"]["v1_reasoned"]["systems"]["v2_off"]["by_type"]) == {"noul"}
+    assert report["noul_abstentions_by_source"]["v2_off"] == {"approval": 1}
+    assert report["noul_abstentions_by_source"]["v2_composed"] == {}
+    composed = report["v2_composed"]["by_type"]
+    direct = compare(rows, samples, protocol, replicates=5)["systems"]["v2_off"]["by_type"]
+    assert composed["noul"]["abstentions"] == 0
+    assert composed["choice"] == direct["choice"] and composed["score"] == direct["score"]
+    assert report["promotable"] is False and report["official_composite"] is None
+
+
+def test_gate_breakdown_without_gated_questions_reports_an_empty_stratum(tmp_path, cohort):
+    samples, protocol = cohort
+    report = gate_breakdown(results(tmp_path, cohort), samples, protocol, replicates=5)
+    assert report["gated_questions"] == 0
+    assert report["strata"]["v1_reasoned"] == {"questions": 0, "systems": None}
 
 
 def test_protocol_rejects_test_inputs_and_identical_checkpoint_identities(cohort):

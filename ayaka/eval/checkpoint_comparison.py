@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 import time
+from collections import Counter
 from dataclasses import asdict, replace
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +26,7 @@ from .read_artifact import fingerprint
 from .v2 import summarize, typed_row
 
 VERSION = "ayaka-trained-checkpoint-comparison-dev-1"
+BREAKDOWN_VERSION = "ayaka-trained-checkpoint-gate-breakdown-dev-1"
 SYSTEMS = ("v1_on", "v2_off", "v2_on")
 
 
@@ -244,6 +246,52 @@ def compare(rows, samples, protocol, *, replicates=2000):
     }
 
 
+def gate_breakdown(rows, samples, protocol, *, replicates=2000):
+    """Diagnostic split of the matched comparison by v1's frozen reasoning gate.
+
+    v1_on reasons only on the questions its calculation gate selects. Comparing
+    v2_off with v1_on therefore mixes direct-versus-direct reads with
+    direct-versus-reasoned reads. This report scores the two strata separately
+    and adds a composed system: v2 direct reads, replaced by v2 reasoned reads
+    on exactly the questions where v1's gate reasoned. The composed system
+    borrows v1's gate decisions, so it is an upper-level diagnostic, not a
+    deployable v2 policy. Nothing is fitted and no threshold changes.
+    """
+    systems = {name: checked_rows(rows[name], samples, protocol, name) for name in SYSTEMS}
+    by_id = {name: {row["id"]: row for row in value} for name, value in systems.items()}
+    ids = sorted(by_id["v1_on"])
+    gated = {i for i in ids if by_id["v1_on"][i]["route"] == "reasoned"}
+    strata = {}
+    for stratum, members in (
+        ("v1_direct", [i for i in ids if i not in gated]),
+        ("v1_reasoned", [i for i in ids if i in gated]),
+    ):
+        strata[stratum] = {
+            "questions": len(members),
+            "systems": {name: summarize([by_id[name][i] for i in members]) for name in SYSTEMS}
+            if members
+            else None,
+        }
+    composed = [by_id["v2_on" if i in gated else "v2_off"][i] for i in ids]
+    abstentions = {}
+    for name, value in (*systems.items(), ("v2_composed", composed)):
+        counts = Counter(row["source"] for row in value if row.get("abstained"))
+        abstentions[name] = dict(sorted(counts.items()))
+    return {
+        "version": BREAKDOWN_VERSION,
+        "scope": "diagnostic only; borrows v1 gate decisions; not a promotable policy",
+        "gated_questions": len(gated),
+        "strata": strata,
+        "v2_composed": summarize(composed),
+        "v2_composed_over_v1_on": _comparison(
+            systems["v1_on"], composed, major_gain=True, replicates=replicates
+        ),
+        "noul_abstentions_by_source": abstentions,
+        "official_composite": None,
+        "promotable": False,
+    }
+
+
 class ContentTokenCounter:
     """Observe the unchanged v1 generator's final decoded token list."""
 
@@ -306,7 +354,7 @@ def predictor(model, tok, system):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("collect", "compare"))
+    parser.add_argument("action", choices=("collect", "compare", "breakdown"))
     for name in ("samples", "protocol", "out"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--system", choices=SYSTEMS)
@@ -325,10 +373,11 @@ def main(argv=None):
     ]
     protocol = json.loads(args.protocol.read_bytes())
     validate_protocol(protocol, samples)
-    if args.action == "compare":
+    if args.action in ("compare", "breakdown"):
         if args.out.exists():
             raise ValueError("comparison summaries must use a new output file")
-        report = compare(
+        score = compare if args.action == "compare" else gate_breakdown
+        report = score(
             {name: read_rows(getattr(args, name)) for name in SYSTEMS},
             samples,
             protocol,
