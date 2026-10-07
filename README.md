@@ -356,18 +356,63 @@ facts; no public benchmark scenario text or answer rationale enters these source
   This teaches uncertainty from the stated process instead of fabricated
   one-hot observed events.
 
-Calibration and evaluation use the `openjev_v2` rows of jev-distill's
-calibration and `test_set_30k` splits. Primitives those splits lack (score)
-are topped up from reserved training groups, targeting
-`calibration_per_bucket` (200) questions per (primitive, prompt length)
-bucket. Groups are reserved bucket by bucket rather than drawn at random:
+New training runs automatically reserve calibration data from their own
+corpus before reserving evaluation data. Entire state and source-lineage
+groups stay separate from training and from each other. The
+`holdout_fraction` default of 0.1 limits each reservation to 10% of the
+available groups, with a one-group minimum when a separate holdout is
+possible. Training groups are retained even for a small custom corpus.
+No separate calibration command is required.
+
+The training objective includes gold negative log-likelihood and Brier
+loss, so correctness and useful probability estimates are learned before
+calibration. Each run records `raw_heldout` metrics before calibration and
+`heldout` metrics after it on the same independent evaluation groups.
+Compare both when judging the learned model; calibration alone does not
+establish an improvement in its decisions.
+
+Calibration targets `calibration_per_bucket` (200) questions per
+(primitive, prompt length) bucket within that group limit. Groups are
+reserved bucket by bucket rather than drawn at random:
 a flat draw once yielded a single long noul question, so long noul prompts
 silently inherited the short temperature (T=0.88, which sharpens) and hard
 prompts were overconfident. Natural sources are scanned before generated
 ones, since the model trains on the generators' own templates and is
-unrealistically accurate on them. The actual bucket counts are recorded in
-`report.json`; buckets that stay sparse fall back to their primitive's
-temperature.
+unrealistically accurate on them. After every run, fresh temperatures are
+fitted from uncalibrated logits and saved inside the checkpoint; serving
+and export load those values automatically. `calibration.json`,
+`report.json`, and checkpoint metadata record the data source, bucket
+counts, fitted types, and any types with insufficient data. Sparse length
+buckets fall back to their primitive's temperature; a primitive with fewer
+than 20 calibration questions keeps the identity temperature and is
+reported as unfitted.
+
+Direct text Noul also checks a regularized positive-slope binary logit
+correction. Five folds keep complete source groups together; the fit uses
+only reserved calibration logits in canonical `[false, true]` order. A
+separate evaluation holdout must confirm lower NLL, non-increasing Brier,
+non-decreasing served credit, and fewer abstentions under the fixed 0.2/0.8
+policy. Insufficient data or a rejected candidate retains the temperature
+policy. The report records both decisions and the validation measurements.
+
+The optional `noul_calibration.json` travels inside the checkpoint and
+loads automatically. Its binding covers the saved weights, temperatures,
+configuration, and serving input recipe. It applies once to direct text
+Noul; Choice, Score, image inputs and reasoned reads retain their existing
+policies. An explicitly supplied path calibration replaces this correction.
+Resuming training clears the old correction so updated weights require a
+fresh fit. Standalone merged exports retain it; quantizing or compacting a
+selected correction requires recalibration on the transformed weights.
+
+The first calibration-only trial on the trained v2 Large improved Noul
+probability losses but increased development abstentions from 18 to 19.
+It was rejected for serving; its parameters were not retuned on development
+answers. See [the calibration trial](docs/experiments/NOUL_CALIBRATION_2026-10-07.md).
+
+An external calibration dataset remains an explicit option, for example
+`--set calibration_spec=jev_open_calibration`. Reserved corpus groups
+top up its sparse buckets. The published v1 runs used this external
+Open-Jev calibration split; their frozen checkpoints are unchanged.
 
 Temperatures are fitted per primitive **and** per prompt-length bucket:
 short prompts are under `long_prompt_tokens` (1024 by default), long
