@@ -79,10 +79,13 @@ def evaluate_tracks(decision, samples, modes=("off", "low", "medium", "high"), *
                     language=metadata["language"],
                     modality=metadata.get("modality", "text"),
                     family=metadata["task_family"],
+                    source=metadata.get("source", metadata["task_family"]),
+                    tier=metadata.get("tier", "standard"),
                     partition="generated_finite" if "proposal_supervision" in metadata else "fixed",
                     probs=result.probs,
                     target=target,
                     ordinals=spec.ordinals,
+                    candidate_ids=[candidate.id for candidate in q.candidates],
                     budget=setting.budget,
                     route=diagnostic.get("route", "direct"),
                     generated_tokens=diagnostic.get("generated_tokens", 0),
@@ -90,6 +93,7 @@ def evaluate_tracks(decision, samples, modes=("off", "low", "medium", "high"), *
                     input_tokens=diagnostic.get("input_tokens", 0),
                     latency_s=time.perf_counter() - start,
                     finish_reason=diagnostic.get("finish_reason", "direct"),
+                    error=diagnostic.get("error"),
                 )
                 if mode == "off" and row["generated_tokens"]:
                     raise ValueError("off evaluation unexpectedly generated tokens")
