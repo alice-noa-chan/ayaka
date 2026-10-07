@@ -69,6 +69,8 @@ class ReasoningRead(QuestionRead):
 
 
 def _served_read(read, diagnostics):
+    if diagnostics["route"] == "direct" and read.readout == "grouped_approx":
+        diagnostics = {**diagnostics, "route": "grouped"}
     values = {item.name: getattr(read, item.name) for item in fields(QuestionRead)}
     values["input_tokens"] += diagnostics["trace_input_tokens"]
     values["output_tokens"] += diagnostics["trace_tokens"]

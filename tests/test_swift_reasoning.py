@@ -179,6 +179,30 @@ def test_saved_router_keeps_grouped_questions_direct_without_explicit_reasoning(
         service.close()
 
 
+@pytest.mark.parametrize("settings", [{"mode": "off"}, {"mode": "on", "max_tokens": 0}])
+@pytest.mark.parametrize("placement", ["request", "question"])
+def test_disabled_reasoning_preserves_grouped_route_and_probabilities(settings, placement):
+    reader = TraceReader()
+    service = DecisionService(reader, "fake", diagnostic=True)
+    body = {
+        "state": "Evidence",
+        "questions": {"q": {"type": "choice", "criteria": [str(i) for i in range(27)]}},
+    }
+    try:
+        baseline = service.handle(body)["answers"]["q"]
+        if placement == "request":
+            body["options"] = {"reasoning": settings}
+        else:
+            body["questions"]["q"]["reasoning"] = settings
+        answer = service.handle(body)["answers"]["q"]
+        assert answer["probabilities"] == baseline["probabilities"]
+        assert answer["ayaka"]["route"] == answer["ayaka"]["diagnostics"]["route"] == "grouped"
+        assert answer["ayaka"]["diagnostics"]["effective_budget"] == 0
+        assert not reader.trace_calls
+    finally:
+        service.close()
+
+
 def always_router():
     return {
         "features": FEATURES.copy(),
