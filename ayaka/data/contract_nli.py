@@ -72,6 +72,25 @@ def _question_contract(question):
     }
 
 
+def document_questions(doc, labels):
+    """The 17 three-way hypothesis questions for one original document.
+
+    Shared by training preparation and held-out evaluation so both read the
+    same wording; ``labels`` is the original hypothesis table.
+    """
+    annotations = doc["annotation_sets"][0]["annotations"]
+    return [
+        Question(
+            key,
+            "choice",
+            INSTRUCTION + labels[key]["hypothesis"],
+            [Candidate(label, description) for label, description in LABELS],
+            {label: float(label == annotations[key]["choice"]) for label, _ in LABELS},
+        )
+        for key in HYPOTHESIS_IDS
+    ]
+
+
 class ContractGoldRegistry:
     """Offline original train bytes and annotations, with immutable exit guards.
 
@@ -239,20 +258,8 @@ class ContractGoldRegistry:
 
     def sample(self, index):
         doc = self._document(index)
-        annotations = doc["annotation_sets"][0]["annotations"]
         return Sample(
-            doc["text"],
-            [
-                Question(
-                    key,
-                    "choice",
-                    INSTRUCTION + self.raw["labels"][key]["hypothesis"],
-                    [Candidate(label, description) for label, description in LABELS],
-                    {label: float(label == annotations[key]["choice"]) for label, _ in LABELS},
-                )
-                for key in HYPOTHESIS_IDS
-            ],
-            self._identity(index, doc),
+            doc["text"], document_questions(doc, self.raw["labels"]), self._identity(index, doc)
         )
 
     def sources(self):

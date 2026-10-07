@@ -126,6 +126,77 @@ def _intent_description(ontology, index, language):
     }[language]
 
 
+def task_view(source, row, intent_names=None):
+    """The approved state, questions and task-view metadata for one raw row.
+
+    Shared by training preparation and held-out evaluation so both read the
+    same task wording. ``intent_names`` is the complete MASSIVE intent
+    ontology; it is required for MASSIVE rows only.
+    """
+    if source == "helpsteer2":
+        state = {"prompt": row["prompt"], "response": row["response"]}
+        questions = [
+            Question(
+                attr,
+                "score",
+                instruction,
+                [Candidate(f"s{i}", f"{i}: {desc}", ordinal=i) for i, desc in enumerate(levels)],
+                _ordinal_target(row[attr]),
+            )
+            for attr, (instruction, levels) in HELPSTEER_LEVELS.items()
+        ]
+        return (
+            state,
+            questions,
+            {"task_family": "judge", "task_view": "human-ordinal-mean-adjacent-v1"},
+        )
+    if source == "commonsense_qa":
+        candidates = [
+            Candidate(label, text)
+            for label, text in zip(row["choices"]["label"], row["choices"]["text"], strict=True)
+        ]
+        if row["answerKey"] not in {c.id for c in candidates}:
+            raise ValueError("raw human answer must be an original candidate")
+        questions = [
+            Question(
+                "q",
+                "choice",
+                "Choose the most appropriate answer.",
+                candidates,
+                {c.id: float(c.id == row["answerKey"]) for c in candidates},
+            )
+        ]
+        return (
+            row["question"],
+            questions,
+            {"task_family": "choice", "task_view": "original-five-way-choice-v1"},
+        )
+    if source in ("massive_ko", "massive_ja"):
+        names, label = intent_names, row["intent"]
+        if not names or len(names) < 2 or type(label) is not int or not 0 <= label < len(names):
+            raise ValueError("raw intent must belong to the complete original ontology")
+        seed = int(fingerprint(row)[:16], 16)
+        negative = (label + 1 + seed % (len(names) - 1)) % len(names)
+        probes = [label, negative]
+        if seed % 2:
+            probes.reverse()
+        language = SOURCES[source][3]
+        questions = [
+            Question.noul(f"intent/{i}", _intent_description(names, i, language), float(i == label))
+            for i in probes
+        ]
+        return (
+            row["utt"],
+            questions,
+            {
+                "task_family": "intent_rehearsal",
+                "task_view": "massive-balanced-binary-probes-v1",
+                "original_ontology_size": len(names),
+            },
+        )
+    raise ValueError(f"no approved task view for source {source}")
+
+
 def _question_contract(q):
     return {
         "id": q.id,
@@ -257,66 +328,13 @@ class NaturalGoldRegistry:
     def sample(self, source, index):
         row = self._row(source, index)
         metadata = self._identity(source, index, row)
-        if source == "helpsteer2":
-            state = {"prompt": row["prompt"], "response": row["response"]}
-            questions = [
-                Question(
-                    attr,
-                    "score",
-                    instruction,
-                    [
-                        Candidate(f"s{i}", f"{i}: {desc}", ordinal=i)
-                        for i, desc in enumerate(levels)
-                    ],
-                    _ordinal_target(row[attr]),
-                )
-                for attr, (instruction, levels) in HELPSTEER_LEVELS.items()
-            ]
-            metadata.update(task_family="judge", task_view="human-ordinal-mean-adjacent-v1")
-        elif source == "commonsense_qa":
-            state = row["question"]
-            candidates = [
-                Candidate(label, text)
-                for label, text in zip(row["choices"]["label"], row["choices"]["text"], strict=True)
-            ]
-            if row["answerKey"] not in {c.id for c in candidates}:
-                raise ValueError("raw human answer must be an original candidate")
-            questions = [
-                Question(
-                    "q",
-                    "choice",
-                    "Choose the most appropriate answer.",
-                    candidates,
-                    {c.id: float(c.id == row["answerKey"]) for c in candidates},
-                )
-            ]
-            metadata.update(task_family="choice", task_view="original-five-way-choice-v1")
-        else:
+        names = None
+        if source.startswith("massive_"):
             if row["partition"] != "train":
                 raise ValueError("direct natural preparation reads original train rows only")
             names = self.raw[source]["features"]["info"]["features"]["intent"]["names"]
-            label = row["intent"]
-            if type(label) is not int or not 0 <= label < len(names) or len(names) < 2:
-                raise ValueError("raw intent must belong to the complete original ontology")
-            seed = int(fingerprint(row)[:16], 16)
-            negative = (label + 1 + seed % (len(names) - 1)) % len(names)
-            probes = [label, negative]
-            if seed % 2:
-                probes.reverse()
-            state = row["utt"]
-            questions = [
-                Question.noul(
-                    f"intent/{i}",
-                    _intent_description(names, i, metadata["language"]),
-                    float(i == label),
-                )
-                for i in probes
-            ]
-            metadata.update(
-                task_family="intent_rehearsal",
-                task_view="massive-balanced-binary-probes-v1",
-                original_ontology_size=len(names),
-            )
+        state, questions, view = task_view(source, row, names)
+        metadata.update(view)
         return Sample(state, questions, metadata)
 
     def sources(self):
