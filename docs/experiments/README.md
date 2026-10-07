@@ -18,6 +18,7 @@ none is an official JevBench score or rank.
 | Report | What it says | Status |
 |---|---|---|
 | [V2 gap analysis, 10-07](V2_GAP_ANALYSIS_2026-10-07.md) | The v2 direct deficit comes from the 27 questions where v1 reasons; on directly read questions v2 already leads. Remaining abstentions are calculation and ko/ja intent questions. | current |
+| [CPU cause checks, 10-07](CAUSE_CHECKS_CPU_2026-10-07.md) | Test 1's Noul regression is a lost "false" bias on calculation items with no ranking skill (AUC 0.50–0.55); direct reads are under-confident on gold-true answers; tokenizer reserialization causes the 2.1 s v2 latency. | current |
 | [Trained checkpoint comparison, 10-07](TRAINED_CHECKPOINT_COMPARISON_2026-10-07.md) | v2 on 77.87 > v1 on 63.09 > v2 off 57.93 CC on 376 dev questions. v2 not promoted. | current |
 | [Ayaka v2 controls](AYAKA_V2.md) | Reasoning modes, efforts and API fields for v2 checkpoints. | reference |
 

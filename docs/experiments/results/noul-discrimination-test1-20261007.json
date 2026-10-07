@@ -1,0 +1,104 @@
+{
+  "version": "ayaka-noul-discrimination-1",
+  "band": [
+    0.2,
+    0.8
+  ],
+  "group": "family",
+  "groups": {
+    "numeric": {
+      "parent": {
+        "questions": 240,
+        "hard_target_questions": 240,
+        "soft_target_questions": 0,
+        "auc": 0.5018694885361552,
+        "correct": 7,
+        "wrong": 11,
+        "abstain": 222,
+        "mean_p_true_by_gold": {
+          "0": 0.2591187291202091,
+          "1": 0.2577730863734528
+        }
+      },
+      "pilot": {
+        "questions": 240,
+        "hard_target_questions": 240,
+        "soft_target_questions": 0,
+        "auc": 0.5153439153439153,
+        "correct": 0,
+        "wrong": 0,
+        "abstain": 240,
+        "mean_p_true_by_gold": {
+          "0": 0.448226896637962,
+          "1": 0.45012338161468507
+        }
+      }
+    },
+    "rule_revision": {
+      "parent": {
+        "questions": 240,
+        "hard_target_questions": 120,
+        "soft_target_questions": 120,
+        "auc": 0.9896184062850729,
+        "correct": 106,
+        "wrong": 5,
+        "abstain": 9,
+        "mean_p_true_by_gold": {
+          "0": 0.14960162379779998,
+          "1": 0.9470016589444695
+        }
+      },
+      "pilot": {
+        "questions": 240,
+        "hard_target_questions": 120,
+        "soft_target_questions": 120,
+        "auc": 0.9901795735129069,
+        "correct": 106,
+        "wrong": 8,
+        "abstain": 6,
+        "mean_p_true_by_gold": {
+          "0": 0.17548529534577836,
+          "1": 0.9687499862277147
+        }
+      }
+    },
+    "temporal_numeric": {
+      "parent": {
+        "questions": 240,
+        "hard_target_questions": 240,
+        "soft_target_questions": 0,
+        "auc": 0.5431393298059964,
+        "correct": 70,
+        "wrong": 54,
+        "abstain": 116,
+        "mean_p_true_by_gold": {
+          "0": 0.32246635746624736,
+          "1": 0.31362883233953087
+        }
+      },
+      "pilot": {
+        "questions": 240,
+        "hard_target_questions": 240,
+        "soft_target_questions": 0,
+        "auc": 0.5462433862433862,
+        "correct": 17,
+        "wrong": 32,
+        "abstain": 191,
+        "mean_p_true_by_gold": {
+          "0": 0.5190142038795683,
+          "1": 0.5058497247951371
+        }
+      }
+    }
+  },
+  "fitted": false,
+  "transitions": {
+    "abstain->abstain": 330,
+    "abstain->correct": 5,
+    "abstain->wrong": 12,
+    "correct->abstain": 65,
+    "correct->correct": 118,
+    "wrong->abstain": 42,
+    "wrong->wrong": 28
+  }
+}

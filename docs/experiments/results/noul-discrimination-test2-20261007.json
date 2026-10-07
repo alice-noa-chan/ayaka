@@ -1,0 +1,134 @@
+{
+  "version": "ayaka-noul-discrimination-1",
+  "band": [
+    0.2,
+    0.8
+  ],
+  "group": "source",
+  "groups": {
+    "ayaka-v2-verified": {
+      "v1_on": {
+        "questions": 32,
+        "hard_target_questions": 32,
+        "soft_target_questions": 0,
+        "auc": 0.96484375,
+        "correct": 28,
+        "wrong": 4,
+        "abstain": 0,
+        "mean_p_true_by_gold": {
+          "0": 0.136183566375621,
+          "1": 0.8677064836956561
+        }
+      },
+      "v2_off": {
+        "questions": 32,
+        "hard_target_questions": 32,
+        "soft_target_questions": 0,
+        "auc": 0.890625,
+        "correct": 19,
+        "wrong": 2,
+        "abstain": 11,
+        "mean_p_true_by_gold": {
+          "0": 0.1712161963514518,
+          "1": 0.6879888686817139
+        }
+      },
+      "v2_on": {
+        "questions": 32,
+        "hard_target_questions": 32,
+        "soft_target_questions": 0,
+        "auc": 1.0,
+        "correct": 32,
+        "wrong": 0,
+        "abstain": 0,
+        "mean_p_true_by_gold": {
+          "0": 0.002992115915390059,
+          "1": 0.9989495761692524
+        }
+      }
+    },
+    "massive_ja": {
+      "v1_on": {
+        "questions": 16,
+        "hard_target_questions": 16,
+        "soft_target_questions": 0,
+        "auc": 1.0,
+        "correct": 12,
+        "wrong": 0,
+        "abstain": 4,
+        "mean_p_true_by_gold": {
+          "0": 0.014346002542879432,
+          "1": 0.7761719711124897
+        }
+      },
+      "v2_off": {
+        "questions": 16,
+        "hard_target_questions": 16,
+        "soft_target_questions": 0,
+        "auc": 0.9375,
+        "correct": 13,
+        "wrong": 1,
+        "abstain": 2,
+        "mean_p_true_by_gold": {
+          "0": 0.14482145418878645,
+          "1": 0.8577792197465897
+        }
+      },
+      "v2_on": {
+        "questions": 16,
+        "hard_target_questions": 16,
+        "soft_target_questions": 0,
+        "auc": 1.0,
+        "correct": 15,
+        "wrong": 1,
+        "abstain": 0,
+        "mean_p_true_by_gold": {
+          "0": 0.0003078006629948504,
+          "1": 0.8874520659446716
+        }
+      }
+    },
+    "massive_ko": {
+      "v1_on": {
+        "questions": 16,
+        "hard_target_questions": 16,
+        "soft_target_questions": 0,
+        "auc": 1.0,
+        "correct": 10,
+        "wrong": 3,
+        "abstain": 3,
+        "mean_p_true_by_gold": {
+          "0": 0.011602203652728349,
+          "1": 0.47764375526458025
+        }
+      },
+      "v2_off": {
+        "questions": 16,
+        "hard_target_questions": 16,
+        "soft_target_questions": 0,
+        "auc": 1.0,
+        "correct": 10,
+        "wrong": 1,
+        "abstain": 5,
+        "mean_p_true_by_gold": {
+          "0": 0.03250997661962174,
+          "1": 0.6216883212327957
+        }
+      },
+      "v2_on": {
+        "questions": 16,
+        "hard_target_questions": 16,
+        "soft_target_questions": 0,
+        "auc": 0.921875,
+        "correct": 11,
+        "wrong": 5,
+        "abstain": 0,
+        "mean_p_true_by_gold": {
+          "0": 0.00039652441319049103,
+          "1": 0.3765800806795596
+        }
+      }
+    }
+  },
+  "fitted": false
+}
