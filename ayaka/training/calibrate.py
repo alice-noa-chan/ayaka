@@ -1,8 +1,9 @@
 """Per-primitive scalar temperature fitting (sec 40.2 / Stage 6, A8).
 
 One scalar T per primitive is fit on a held-out split by minimizing
-NLL of softmax(logits / T). Vector scaling is rejected — it would break
-the dynamic ontology and permutation equivariance.
+NLL of softmax(logits / T). Choice and Score keep scalar temperatures to
+preserve the dynamic ontology and permutation equivariance. Canonical binary
+Noul can additionally use the guarded correction in ``noul_calibration``.
 """
 
 from __future__ import annotations

@@ -45,6 +45,7 @@ class TrainItem:
         None  # frozen native probabilities; separate from reasoned teacher
     )
     direct_input_binding: dict | None = None  # opt-in exact Swift serving-input/gold contract
+    calibration_group: str | None = None  # whole reserved state/lineage group
 
     @property
     def length(self) -> int:

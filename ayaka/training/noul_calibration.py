@@ -8,8 +8,10 @@ credit do not regress and the fixed 0.2/0.8 policy abstains less often.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import torch
 
@@ -50,6 +52,39 @@ def _metrics(rows, probabilities):
         "credit": credit / len(rows),
         "abstentions": abstentions,
     }
+
+
+def _acceptable(reference, measured):
+    return (
+        measured["nll"] < reference["nll"] - 1e-4
+        and measured["brier"] <= reference["brier"] + 1e-8
+        and measured["credit"] >= reference["credit"] - 1e-8
+        and measured["abstentions"] < reference["abstentions"]
+    )
+
+
+def model_noul_temperatures(model):
+    from ..model.electra import PRIMITIVE_INDEX
+
+    short, long = model.temperature[PRIMITIVE_INDEX["noul"]].tolist()
+    return {"noul@short": short, "noul@long": long}
+
+
+def item_calibration_rows(items, values, *, split, raw=False):
+    """Carry the reserved lineage groups into calibration and validation."""
+    return [
+        {
+            "type": "noul",
+            "split": split,
+            "cluster_id": it.calibration_group or (it.source + "/" + it.sample_id),
+            "candidate_ids": ["false", "true"],
+            "logits" if raw else "probs": value,
+            "target": it.target,
+            "tokens": it.length,
+        }
+        for it, value in zip(items, values, strict=True)
+        if it.type == "noul" and it.native_inputs is None and it.reasoning_positions is None
+    ]
 
 
 def _fit_affine(rows, regularization):
@@ -131,6 +166,70 @@ class NoulCalibration:
             "report": self.report,
         }
 
+    def validate(self, rows):
+        """Accept a frozen fit only if a separate holdout confirms the gains.
+
+        This step can reject the candidate; it never changes its parameters.
+        Insufficient validation leaves the existing temperature policy active.
+        """
+        if not self.selected:
+            return
+        rows = [r for r in rows if r.get("type") == "noul"]
+        if any(
+            r.get("split") not in {"evaluation", "dev"}
+            or not isinstance(r.get("cluster_id"), str)
+            or not r["cluster_id"]
+            or r.get("candidate_ids") != ["false", "true"]
+            or len(r.get("target", [])) != 2
+            or any(not math.isfinite(y) or not 0 <= y <= 1 for y in r["target"])
+            or abs(sum(r["target"]) - 1) > 1e-8
+            for r in rows
+        ):
+            raise ValueError("Noul validation requires an independent binary evaluation holdout")
+        clusters = {r["cluster_id"] for r in rows}
+        fitted_groups = set(self.report.get("source_groups_sha256", []))
+        if fitted_groups.intersection(hashlib.sha256(c.encode()).hexdigest() for c in clusters):
+            raise ValueError("Noul validation overlaps its calibration source groups")
+        self.report["validation"] = {"questions": len(rows), "independent_cases": len(clusters)}
+        if len(clusters) < MIN_QUESTIONS:
+            self.report["status"] = "insufficient_validation"
+            return
+        corrected = _metrics(rows, [self.apply(r["probs"], "noul", r["tokens"])[1] for r in rows])
+        baseline = _metrics(rows, [r["probs"][1] for r in rows])
+        self.report["validation"].update(baseline=baseline, corrected=corrected)
+        if not _acceptable(baseline, corrected):
+            self.report["status"] = "rejected_validation"
+
+    def save(self, path, model_id, *, input_recipe_sha256=None):
+        if (
+            not isinstance(model_id, str)
+            or len(model_id) != 64
+            or any(c not in "0123456789abcdef" for c in model_id)
+        ):
+            raise ValueError("Noul calibration requires an exact checkpoint identity")
+        Path(path).write_text(
+            json.dumps(
+                {
+                    "model_id": model_id,
+                    "input_recipe_sha256": input_recipe_sha256,
+                    **self.as_dict(),
+                },
+                indent=2,
+                allow_nan=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(cls, path, model_id, *, input_recipe_sha256=None):
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if payload.pop("model_id", None) != model_id:
+            raise ValueError("Noul calibration checkpoint binding mismatch")
+        if payload.pop("input_recipe_sha256", None) != input_recipe_sha256:
+            raise ValueError("Noul calibration serving input recipe mismatch")
+        return cls.from_dict(payload)
+
     @classmethod
     def from_dict(cls, payload):
         value = dict(payload)
@@ -172,6 +271,7 @@ def fit_noul_calibration(rows, temperatures, long_threshold=1024):
         "status": "insufficient_data",
         "questions": len(rows),
         "independent_cases": len(clusters),
+        "source_groups_sha256": sorted(hashlib.sha256(c.encode()).hexdigest() for c in clusters),
         "folds": FOLDS,
         "selection_split": "calibration",
         "thresholds": [0.2, 0.8],
@@ -210,12 +310,7 @@ def fit_noul_calibration(rows, temperatures, long_threshold=1024):
     reference = _metrics(rows, baseline)
     measured = {strength: _metrics(rows, p) for strength, p in candidates.items()}
     accepted = [
-        strength
-        for strength, metrics in measured.items()
-        if metrics["nll"] < reference["nll"] - 1e-4
-        and metrics["brier"] <= reference["brier"] + 1e-8
-        and metrics["credit"] >= reference["credit"] - 1e-8
-        and metrics["abstentions"] < reference["abstentions"]
+        strength for strength, metrics in measured.items() if _acceptable(reference, metrics)
     ]
     result.report.update(
         status="not_selected",

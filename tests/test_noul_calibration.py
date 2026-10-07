@@ -67,6 +67,33 @@ def test_fewer_abstentions_cannot_override_worse_probability_losses(monkeypatch)
     assert result.apply([0.5, 0.5], "noul", 100) == [0.5, 0.5]
 
 
+@pytest.mark.parametrize("target,accepted", [(1.0, True), (0.0, False), (0.5, False)])
+def test_frozen_fit_needs_independent_validation_gains(target, accepted):
+    fitted = calibration.NoulCalibration(bias=2.0, report={"status": "selected"})
+    heldout = [{**r, "split": "evaluation", "probs": [0.5, 0.5]} for r in rows(40, target=target)]
+    parameters = fitted.scale, fitted.bias
+    fitted.validate(heldout)
+    assert fitted.selected is accepted
+    assert (fitted.scale, fitted.bias) == parameters
+    if not accepted:
+        assert fitted.report["status"] == "rejected_validation"
+        assert fitted.apply([0.5, 0.5], "noul", 100) == [0.5, 0.5]
+
+
+def test_insufficient_validation_and_overlapping_sources_are_not_accepted():
+    fitted = calibration.NoulCalibration(bias=2.0, report={"status": "selected"})
+    heldout = [{**r, "split": "evaluation", "probs": [0.5, 0.5]} for r in rows(40)]
+    fitted.validate(heldout[:2] * 100)
+    assert fitted.report["status"] == "insufficient_validation"
+    assert not fitted.selected
+    fitted.report = {
+        "status": "selected",
+        "source_groups_sha256": [calibration.hashlib.sha256(b"source-0").hexdigest()],
+    }
+    with pytest.raises(ValueError, match="overlaps"):
+        fitted.validate(heldout)
+
+
 def test_repeated_questions_do_not_create_independent_sources(monkeypatch):
     def forbidden(*args):
         pytest.fail("insufficient source groups must not be fitted")
