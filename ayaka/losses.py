@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import torch
 
 from .model.electra import SCORE, DecisionOutput
-from .model.ragged import per_question_sum, ragged_max
+from .model.ragged import per_question_sum, ragged_max, seg_ids
 
 
 def nll_loss(log_probs: torch.Tensor, targets: torch.Tensor, cu: torch.Tensor) -> torch.Tensor:
@@ -32,21 +32,28 @@ def rps_loss(
     ordinals: torch.Tensor,
     score_mask: torch.Tensor,
 ) -> torch.Tensor:
-    """Ranked Probability Score over Score questions (ordinal CDFs)."""
-    losses = []
-    cul = cu.tolist()
-    for qi in torch.nonzero(score_mask).flatten().tolist():
-        s, e = cul[qi], cul[qi + 1]
-        k = e - s
-        if k < 2:
-            continue
-        order = torch.argsort(ordinals[s:e])
-        cp = probs[s:e][order].cumsum(0)[:-1]
-        cy = targets[s:e][order].cumsum(0)[:-1]
-        losses.append(((cp - cy) ** 2).sum() / (k - 1))
-    if not losses:
-        return probs.sum() * 0.0
-    return torch.stack(losses).mean()
+    """Mean ordinal CDF error over eligible Score questions, entirely on device."""
+    count = probs.shape[0]
+    seg = seg_ids(cu, output_size=count)
+    # Stable two-pass sorting orders ordinals within each question without padding.
+    order = torch.argsort(ordinals, stable=True)
+    order = order[torch.argsort(seg[order], stable=True)]
+    # A global scan minus each question's prefix gives its local CDF difference.
+    # Double precision protects small errors from cancellation across large batches.
+    accumulation_dtype = torch.float32 if probs.device.type == "mps" else torch.float64
+    delta = probs[order].to(accumulation_dtype) - targets[order].to(accumulation_dtype)
+    cumulative = delta.cumsum(0)
+    prefix = torch.cat((cumulative.new_zeros(1), cumulative))[cu[:-1].long()]
+    error = cumulative - prefix[seg]
+    step = torch.arange(count, device=probs.device) < cu[1:].long()[seg] - 1
+    per_question = cumulative.new_zeros(cu.numel() - 1).index_add(
+        0, seg, torch.where(step, error.square(), 0.0)
+    )
+    lengths = cu[1:] - cu[:-1]
+    per_question = per_question / (lengths - 1).clamp_min(1)
+    eligible = score_mask & (lengths > 1)
+    loss = torch.where(eligible, per_question, 0.0).sum() / eligible.sum().clamp_min(1)
+    return loss.to(probs.dtype)
 
 
 def missing_evidence_loss(
