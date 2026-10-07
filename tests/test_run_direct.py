@@ -163,6 +163,57 @@ def test_calibration_and_test_inputs_cannot_inject_trace_or_teacher_metadata(tmp
         evaluate_direct(trainer, [sample], "dev")
 
 
+def test_reload_parity_retains_actual_prediction_chunks_after_backoff(tmp_path, monkeypatch):
+    from ayaka.training.trainer import Trainer
+
+    root = bundle(tmp_path, steps=1)
+    original_step = Trainer.train_step
+    original_predict = Trainer.predict
+    original_forward = Trainer._forward
+    prediction_chunks = []
+    active_chunks = None
+
+    def backoff(self, items):
+        record = original_step(self, items)
+        self.micro_tokens = 1024
+        self.micro_ckpt_tokens = 2048
+        self.ckpt_threshold = 1024
+        return record
+
+    def capture_predict(self, items, **kwargs):
+        nonlocal active_chunks
+        active_chunks = []
+        prediction_chunks.append(active_chunks)
+        try:
+            return original_predict(self, items, **kwargs)
+        finally:
+            active_chunks = None
+
+    def capture_forward(self, kind, items, *args, **kwargs):
+        if active_chunks is not None:
+            active_chunks.append((kind, tuple(id(item) for item in items)))
+        return original_forward(self, kind, items, *args, **kwargs)
+
+    monkeypatch.setattr(Trainer, "train_step", backoff)
+    monkeypatch.setattr(Trainer, "predict", capture_predict)
+    monkeypatch.setattr(Trainer, "_forward", capture_forward)
+    completed = run_pipeline(
+        root,
+        tmp_path / "full",
+        action="train",
+        mechanics_only=True,
+        training={"bf16": False, "log_every": 0, "micro_batch_tokens": 8192},
+    )
+    assert completed["reload_probability_parity"]
+    assert completed["reload_prediction_policy"] == {
+        "micro_tokens": 1024,
+        "micro_ckpt_tokens": 2048,
+        "ckpt_threshold": 1024,
+    }
+    assert len(prediction_chunks[-2]) > 1
+    assert prediction_chunks[-2] == prediction_chunks[-1]
+
+
 def test_direct_evaluation_retains_logits_after_probability_underflow():
     from types import SimpleNamespace
 

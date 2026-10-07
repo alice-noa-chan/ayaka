@@ -420,6 +420,13 @@ def run_pipeline(
         )
     # Original test is absent from the development bundle. A separate evaluator
     # opens its holdout only after dev selection has been frozen externally.
+    # CUDA OOM backoff changes the prediction batch plan. Preserve that plan
+    # across reload so BF16 rounding changes are not mistaken for lost weights.
+    prediction_policy = {
+        "micro_tokens": trainer.micro_tokens,
+        "micro_ckpt_tokens": trainer.micro_ckpt_tokens,
+        "ckpt_threshold": trainer.ckpt_threshold,
+    }
     probe_probs = trainer.predict(probes)
     meta = {
         "binding": binding,
@@ -434,6 +441,7 @@ def run_pipeline(
         "calibration_split": "calibration",
         "test_used_for_selection": False,
         "independent_test_required": True,
+        "reload_prediction_policy": prediction_policy,
     }
     save_checkpoint(model, str(root / "checkpoint"), meta)
     trainer, model = None, None
@@ -450,6 +458,9 @@ def run_pipeline(
         strict_loading=True,
     )
     verifier = Trainer(reloaded, tok, tcfg, dev)
+    verifier.micro_tokens = prediction_policy["micro_tokens"]
+    verifier.micro_ckpt_tokens = prediction_policy["micro_ckpt_tokens"]
+    verifier.ckpt_threshold = prediction_policy["ckpt_threshold"]
     for expected, actual in zip(probe_probs, verifier.predict(probes), strict=True):
         torch.testing.assert_close(
             torch.tensor(actual), torch.tensor(expected), atol=1e-5, rtol=1e-4
