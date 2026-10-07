@@ -11,6 +11,7 @@ import argparse
 import gc
 import itertools
 import json
+import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -286,6 +287,9 @@ def run_pipeline(
     binding = training_binding(manifest, recipe, tcfg, native_weights_sha256=native_sha)
     binding["external_bundle_manifest_sha256"] = expected_bundle_sha256
     binding["cpu_audit_sha256"] = fingerprint(audited.binding)
+    if dev.type == "cuda":
+        # Configure cuBLAS before native loading can initialize its first CUDA handle.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     torch.manual_seed(tcfg.seed)
     model = ElectraDecisionModel.from_config(
         cfg,

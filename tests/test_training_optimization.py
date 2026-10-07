@@ -1,4 +1,5 @@
 import copy
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,7 @@ from ayaka.training.optimization import (
     OptimizationConfig,
     apply_optimizations,
     causal_padding_mask,
+    deterministic_kernel_probe,
     hybrid_attention,
     optimization_plan,
     optimize_and_verify,
@@ -127,16 +129,53 @@ def test_native_to_sdpa_parity_preserves_checkpoint_mode_and_has_no_optimizer_up
     assert trainer.step_i == 0
 
 
+@pytest.mark.parametrize("failure", [False, True])
+def test_kernel_probe_restores_backend_determinism_after_success_and_failure(failure):
+    trainer, _ = fixture()
+    original = (
+        torch.are_deterministic_algorithms_enabled(),
+        torch.is_deterministic_algorithms_warn_only_enabled(),
+        torch.backends.cudnn.deterministic,
+        torch.backends.cudnn.benchmark,
+    )
+    try:
+        torch.use_deterministic_algorithms(False, warn_only=True)
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+        outcome = pytest.raises(RuntimeError, match="probe failure") if failure else nullcontext()
+        with outcome, deterministic_kernel_probe(trainer):
+            assert torch.are_deterministic_algorithms_enabled()
+            assert not torch.is_deterministic_algorithms_warn_only_enabled()
+            assert torch.backends.cudnn.deterministic
+            assert not torch.backends.cudnn.benchmark
+            if failure:
+                raise RuntimeError("probe failure")
+        assert not torch.are_deterministic_algorithms_enabled()
+        assert torch.is_deterministic_algorithms_warn_only_enabled()
+        assert not torch.backends.cudnn.deterministic
+        assert torch.backends.cudnn.benchmark
+    finally:
+        torch.use_deterministic_algorithms(original[0], warn_only=original[1])
+        torch.backends.cudnn.deterministic = original[2]
+        torch.backends.cudnn.benchmark = original[3]
+
+
 def test_unified_flash_hybrid_through_real_model_collation_and_backward():
     trainer, items = fixture(unified=True)
+
+    def deterministic_flash(*args, **kwargs):
+        assert kwargs["deterministic"] is True
+        return reference_flash(*args, **kwargs)
+
     application = optimize_and_verify(
         trainer,
         items,
         OptimizationConfig(attention="flash_attention_2", liger=True),
         liger_functions=(reference_rms, reference_geglu),
-        flash_function=reference_flash,
+        flash_function=deterministic_flash,
     )
     assert application.report["parity_verified"]
+    assert application.report["deterministic_algorithms_for_probe"]
     assert application.report["observed_attention_calls"]["flash_attention_2"] > 0
     assert trainer.model.text_config._attn_implementation == ATTENTION_NAME
     application.rollback()

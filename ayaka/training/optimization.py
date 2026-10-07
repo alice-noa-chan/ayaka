@@ -124,6 +124,8 @@ def hybrid_attention(
             is_causal=False,
         )
     module._ayaka_attention_calls["flash_attention_2"] += 1
+    if torch.are_deterministic_algorithms_enabled():
+        kwargs["deterministic"] = True
     out = module._ayaka_flash_function(
         query.transpose(1, 2),
         key.transpose(1, 2),
@@ -337,7 +339,14 @@ def deterministic_kernel_probe(trainer):
         (m, m.attention_dropout) for m in model.modules() if hasattr(m, "attention_dropout")
     ]
     checkpoint = trainer._ckpt_active
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    cudnn_deterministic = torch.backends.cudnn.deterministic
+    cudnn_benchmark = torch.backends.cudnn.benchmark
     try:
+        torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
         for module, _ in dropout:
             module.p = 0.0
         for module, _ in attn_dropout:
@@ -354,6 +363,9 @@ def deterministic_kernel_probe(trainer):
         torch.set_rng_state(cpu_rng)
         if cuda_rng is not None:
             torch.cuda.set_rng_state_all(cuda_rng)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
+        torch.backends.cudnn.deterministic = cudnn_deterministic
+        torch.backends.cudnn.benchmark = cudnn_benchmark
 
 
 def optimize_and_verify(trainer, items, options, **injected):
@@ -414,6 +426,7 @@ def optimize_and_verify(trainer, items, options, **injected):
                 optimizer_steps=0,
                 weights_unchanged=True,
                 dropout_disabled_for_probe=True,
+                deterministic_algorithms_for_probe=True,
             )
             return application
         except BaseException:
