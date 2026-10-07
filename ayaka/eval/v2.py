@@ -144,6 +144,11 @@ def summarize(rows):
         "n": len(rows),
         "by_type": by_type,
         "cc_equal_types": sum(v["cc"] for v in by_type.values()) / len(by_type),
+        # Diagnostic companion: with equal type weights a small type (e.g. 64
+        # Noul questions) moves the headline far more per question than a
+        # large one. This weights each type's CC by its question count.
+        "cc_question_weighted": sum(v["cc"] * v["n"] for v in by_type.values())
+        / sum(v["n"] for v in by_type.values()),
         "proper_loss": sum(v.get("rps", v["nll"]) for v in by_type.values()) / len(by_type),
         "p50_s": percentile(latencies, 0.5),
         "p95_s": percentile(latencies, 0.95),

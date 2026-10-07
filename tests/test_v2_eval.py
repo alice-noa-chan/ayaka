@@ -80,6 +80,18 @@ def test_type_balancing_paired_fixes_and_invalid_probabilities():
         paired_report(direct, list(reversed(reasoned)))
 
 
+def test_question_weighted_headline_weights_types_by_question_count():
+    choice = QuestionSpec("choice", "Pick?", ["a", "b"])
+    noul = QuestionSpec("noul", "True?", ["false", "true"])
+    rows = [typed_row(choice, [0.9, 0.1], [1, 0]) for _ in range(3)]
+    rows.append(typed_row(noul, [0.5, 0.5], [0, 1]))  # an abstention
+    result = summarize(rows)
+    choice_cc, noul_cc = result["by_type"]["choice"]["cc"], result["by_type"]["noul"]["cc"]
+    assert result["cc_equal_types"] == pytest.approx((choice_cc + noul_cc) / 2)
+    assert result["cc_question_weighted"] == pytest.approx((3 * choice_cc + noul_cc) / 4)
+    assert result["cc_question_weighted"] > result["cc_equal_types"]
+
+
 def test_paired_uncertainty_clusters_repeated_underlying_cases():
     spec = QuestionSpec("choice", "Pick?", ["a", "b"])
     direct, reasoned = [], []
