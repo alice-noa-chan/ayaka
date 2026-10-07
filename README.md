@@ -461,8 +461,8 @@ STAGES="zeroshot small"         bash scripts/run_plan.sh   # small baseline, the
 STAGES="large teacher distill export" AUTO_STOP=1 bash scripts/run_plan.sh
 # WITH_BASE=1 also distills Base; STAGES="base" trains Base directly
 
-modal run modal_app.py --cmd "train --model electra-small --run small-v1"            # Modal A100-80GB
-modal run modal_app.py --cmd "train --model electra-large --run large-v1" --gpu h100  # Modal H100
+modal run scripts/modal/train_v1.py --cmd "train --model electra-small --run small-v1"            # Modal A100-80GB
+modal run scripts/modal/train_v1.py --cmd "train --model electra-large --run large-v1" --gpu h100  # Modal H100
 ```
 
 Multi-question states are encoded once in training too. Open-Jev states

@@ -5,7 +5,7 @@ import pytest
 from test_training_throughput import setup
 
 from ayaka.training.workload import describe_rows
-from benchmark_gpu_v2 import matched_profile, prepare_batch
+from scripts.modal.benchmark_gpu_v2 import matched_profile, prepare_batch
 
 
 def test_selected_batch_preserves_order_duplicates_and_prepares_each_source_once():
@@ -50,7 +50,7 @@ def test_matched_profile_is_cold_deterministic_and_leaves_live_training_untouche
 def test_failed_profile_preserves_completed_batches_and_does_not_claim_completion(
     tmp_path, monkeypatch
 ):
-    import benchmark_gpu_v2
+    from scripts.modal import benchmark_gpu_v2
 
     trainer, rows, sample, _ = setup()
     trainer.cfg.questions_per_step = 2

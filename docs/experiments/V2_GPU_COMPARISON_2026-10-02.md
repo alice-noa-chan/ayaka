@@ -91,8 +91,8 @@ $env:MKL_NUM_THREADS = '4'
 
 ## Reproduction and audit
 
-`benchmark_gpu_v2.py` is the local/native zero-update probe.
-`modal_compare_v2.py` prepares and audits cached weights on CPU before reserving
+`scripts/modal/benchmark_gpu_v2.py` is the local/native zero-update probe.
+`scripts/modal/compare_v2.py` prepares and audits cached weights on CPU before reserving
 and executing H100, A10080 and RTX PRO sequentially. Each GPU has a 1,100s
 function limit, 970s child deadline, no retry and a 2s scale-down window.
 The current exploration budget cannot accommodate another comparison unchanged.
@@ -102,7 +102,7 @@ fresh eight-hour allowance.
 Recorded invocation:
 
 ```powershell
-modal run modal_compare_v2.py --out runs/v2-gpu-comparison-20261002
+modal run scripts/modal/compare_v2.py --out runs/v2-gpu-comparison-20261002
 ```
 
 The [completed Modal app](https://modal.com/apps/gaon12/main/ap-SuCqeWun7UA65bt5gQnKLj)

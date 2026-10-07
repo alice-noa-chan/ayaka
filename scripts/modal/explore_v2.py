@@ -1,6 +1,6 @@
 """CPU preparation followed by one bounded H100 worker, with no retries.
 
-    modal run modal_v2.py
+    modal run scripts/modal/explore_v2.py
 
 The maximum attached-GPU function lifetime is eight hours. CPU preparation
 downloads pinned weights into the persistent volume before GPU allocation.
@@ -10,6 +10,9 @@ import json
 from pathlib import Path
 
 import modal
+
+# Local paths resolve from the repository root, so `modal run` works from any directory.
+ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/root")
 
 app = modal.App("ayaka-v2-exploration")
 volume = modal.Volume.from_name("ayaka-v2-exploration", create_if_missing=True)
@@ -35,8 +38,10 @@ image = (
             "TRITON_CACHE_DIR": "/runs/kernel-cache",
         }
     )
-    .add_local_dir("ayaka", remote_path="/root/ayaka")
-    .add_local_file("docs/experiments/v2_candidates.json", remote_path="/root/candidates.json")
+    .add_local_dir(ROOT / "ayaka", remote_path="/root/ayaka")
+    .add_local_file(
+        ROOT / "docs/experiments/v2_candidates.json", remote_path="/root/candidates.json"
+    )
 )
 COMMON = {
     "image": image,

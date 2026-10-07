@@ -121,7 +121,7 @@ python -m ayaka.training.run_v2 \
 The short profiling cap is separate from the recipe's four-hour full-training
 forecast horizon. Actual optimizer execution still requires explicit `--execute`
 and `--steps`; no main training was started here. The bounded remote entry point
-is `modal_preflight_v2.py`: CPU bundle/weight verification precedes GPU allocation;
+is `scripts/modal/preflight_v2.py`: CPU bundle/weight verification precedes GPU allocation;
 `H100!` prevents automatic GPU substitution. It reserves 1,200 conservative GPU
 seconds inside the original cumulative eight-hour exploration ceiling, has no
 training mode or automatic retry, and saves partial reports with a failing exit

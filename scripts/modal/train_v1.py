@@ -1,9 +1,9 @@
 """Modal entry point: run any ``ayaka.pipeline`` command on A100-80GB or H100.
 
-    modal run modal_app.py --cmd "train --model electra-small --run small-v1"
-    modal run modal_app.py --cmd "train --model electra-large --run large-v1 --set steps=3000" --gpu h100
-    modal run modal_app.py --cmd "teacher --ckpt /runs/large-v1/checkpoint --out /runs/large-v1/teacher.jsonl"
-    modal run modal_app.py --cmd "export --ckpt /runs/small-distill/checkpoint --name electra-small"
+    modal run scripts/modal/train_v1.py --cmd "train --model electra-small --run small-v1"
+    modal run scripts/modal/train_v1.py --cmd "train --model electra-large --run large-v1 --set steps=3000" --gpu h100
+    modal run scripts/modal/train_v1.py --cmd "teacher --ckpt /runs/large-v1/checkpoint --out /runs/large-v1/teacher.jsonl"
+    modal run scripts/modal/train_v1.py --cmd "export --ckpt /runs/small-distill/checkpoint --name electra-small"
     modal volume get ayaka-runs exports ./exports        # download exported models
 
 Artifacts and the Hugging Face cache live on the ``ayaka-runs`` volume, so
@@ -13,8 +13,12 @@ weights download once. Modal bills per second while the function runs.
 from __future__ import annotations
 
 import shlex
+from pathlib import Path
 
 import modal
+
+# Local paths resolve from the repository root, so `modal run` works from any directory.
+ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/root")
 
 app = modal.App("ayaka-electra")
 
@@ -32,7 +36,7 @@ image = (
         "liger-kernel",
     )
     .env({"HF_HOME": "/runs/hf-cache", "AYAKA_ARTIFACTS": "/runs", "PYTHONPATH": "/root"})
-    .add_local_dir("ayaka", remote_path="/root/ayaka")  # includes eval data files
+    .add_local_dir(ROOT / "ayaka", remote_path="/root/ayaka")  # includes eval data files
 )
 
 runs = modal.Volume.from_name("ayaka-runs", create_if_missing=True)

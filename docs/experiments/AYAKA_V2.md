@@ -156,7 +156,7 @@ full differences remain in CC, NLL, RPS and confidence intervals.
 python -m ayaka.experiments.v2 prepare --manifest docs/experiments/v2_candidates.json --out NEW_RUN --download-weights
 python -m ayaka.experiments.v2 run --manifest docs/experiments/v2_candidates.json --out NEW_RUN
 # Hosted equivalent, CPU preparation precedes GPU allocation:
-modal run modal_v2.py
+modal run scripts/modal/explore_v2.py
 ```
 
 The run requires exactly one H100 80GB. Stage limits are screen 2h, heads 1h, SFT
@@ -205,7 +205,7 @@ decisions. IDs, targets, types and budgets must match, and only complete 96-item
 results can enter selection.
 
 ```sh
-modal run modal_v2.py --resume-paired-screen --closed-windows docs/experiments/v2_closed_windows.json
+modal run scripts/modal/explore_v2.py --resume-paired-screen --closed-windows docs/experiments/v2_closed_windows.json
 ```
 
 This continuation reuses the same prepared volume and ledger, resumes missing
@@ -236,7 +236,7 @@ observations; the current evidence file also includes this completed continuatio
 and does not grant a fresh screening allowance on another invocation.
 
 ```sh
-modal run modal_v2.py --refresh-curriculum --screen-candidates gemma4-e4b,gemma4-12b,domyn-small --closed-windows docs/experiments/v2_closed_windows.json
+modal run scripts/modal/explore_v2.py --refresh-curriculum --screen-candidates gemma4-e4b,gemma4-12b,domyn-small --closed-windows docs/experiments/v2_closed_windows.json
 ```
 
 Evaluation records the same natural-language and EN/KO/JA direct baselines before

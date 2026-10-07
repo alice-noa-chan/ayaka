@@ -7,10 +7,13 @@ from pathlib import Path
 
 import modal
 
+# Local paths resolve from the repository root, so `modal run` works from any directory.
+ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/root")
+
 app = modal.App("ayaka-v2-gpu-comparison")
 volume = modal.Volume.from_name("ayaka-v2-exploration", create_if_missing=False)
 BUNDLE = (
-    Path(os.environ.get("AYAKA_PROFILE_BUNDLE", "runs/v2-pretraining-20261002-ready"))
+    Path(os.environ.get("AYAKA_PROFILE_BUNDLE", ROOT / "runs/v2-pretraining-20261002-ready"))
     if modal.is_local()
     else Path("/root/pretraining-bundle")
 )
@@ -39,9 +42,11 @@ image = (
             "TRITON_CACHE_DIR": "/runs/kernel-cache",
         }
     )
-    .add_local_dir("ayaka", remote_path="/root/ayaka")
+    .add_local_dir(ROOT / "ayaka", remote_path="/root/ayaka")
     .add_local_dir(str(BUNDLE), remote_path="/root/pretraining-bundle")
-    .add_local_file("benchmark_gpu_v2.py", remote_path="/root/benchmark_gpu_v2.py")
+    .add_local_file(
+        ROOT / "scripts/modal/benchmark_gpu_v2.py", remote_path="/root/benchmark_gpu_v2.py"
+    )
 )
 OPTIONS = {
     "image": image,

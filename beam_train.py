@@ -3,7 +3,7 @@
 beam serverless offers T4 / A10G / RTX 4090 / RTX 5090 only (A100 and
 H100 are reserved on-demand machines), so beam is used for small-model
 work and evals; Large training runs on RunPod / vast.ai / Modal
-(scripts/run_plan.sh, modal_app.py). Run from the repo root under the
+(scripts/run_plan.sh, scripts/modal/train_v1.py). Run from the repo root under the
 beam SDK python::
 
     python -c "import beam_train as b; b.pipeline_4090.remote(['eval', '--model', 'electra-small', '--zero-shot'])"
