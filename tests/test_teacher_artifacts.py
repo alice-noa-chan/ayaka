@@ -17,7 +17,7 @@ from ayaka.data.schema import Candidate, Question, Sample
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.swift.collect import collect, load_reads
 from ayaka.swift.readers import HFReader, logmass_probs, token_input
-from ayaka.swift.reasoning import TraceResult, reasoned_read
+from ayaka.swift.reasoning import ReasoningFailure, TraceResult, reasoned_read
 from ayaka.swift.router import eligible
 from ayaka.tokenization import HFTokenizer
 from ayaka.training.direct_distillation import prepare_direct_distillation
@@ -179,15 +179,32 @@ def test_actual_native_gather_conversion_preserves_original_soft_gold_and_usage(
     assert samples == originals[0] and direct == originals[3] and paired == originals[4]
 
 
-@pytest.mark.parametrize("kind", ["empty", "capped"])
-def test_excluded_traces_keep_all_observed_generated_tokens(tmp_path, kind):
-    values = observations(tmp_path, empty=kind == "empty", capped=kind == "capped")
+def test_empty_traces_fail_before_final_read_and_preserve_observed_usage(tmp_path, monkeypatch):
+    reads = []
+    original_read = TraceHFReader.read
+
+    def record_read(reader, messages, letters):
+        reads.append(copy.deepcopy(messages))
+        return original_read(reader, messages, letters)
+
+    monkeypatch.setattr(TraceHFReader, "read", record_read)
+    with pytest.raises(ReasoningFailure, match="empty_trace") as failure:
+        observations(tmp_path, empty=True)
+    diagnostics = failure.value.diagnostics
+    assert diagnostics["trace_tokens"] == 1  # The EOS token was generated and billed.
+    assert diagnostics["trace_input_tokens"] > 0
+    assert diagnostics["usage_complete"] is True
+    assert diagnostics["read_latency_s"] == 0
+    assert len(reads) == len(load_reads([tmp_path / "direct.jsonl"])) == 3
+    assert not any(message["role"] == "assistant" for messages in reads for message in messages)
+
+
+def test_capped_traces_keep_all_observed_generated_tokens(tmp_path):
+    values = observations(tmp_path, capped=True)
     teachers, report = exported(values)
     assert teachers == {} and report["available_teacher_questions"] == 0
-    assert {row["status"] for row in report["observations"]} == (
-        {"empty_trace"} if kind == "empty" else {"incomplete_trace"}
-    )
-    assert report["usage"]["reasoning_tokens"] == (3 if kind == "empty" else 3 * 128)
+    assert {row["status"] for row in report["observations"]} == {"incomplete_trace"}
+    assert report["usage"]["reasoning_tokens"] == 3 * 128
     assert report["usage"]["backend_calls"] == 9
 
 
