@@ -476,16 +476,18 @@ class Trainer:
         validate_direct_input_items(items)
         self.model.eval()
         probs: list[list[float] | None] = [None] * len(items)
-        logits: list[list[float] | None] = [None] * len(items)
+        logits: list[list[float] | None] | None = [None] * len(items) if return_logits else None
         index = {id(it): i for i, it in enumerate(items)}
         for kind, mb, _ in self._plan(items):
             out, _ = self._forward(kind, mb, apply_temperature=apply_temperature, auxiliary=False)
-            lp = ragged_log_softmax(out.logits.float(), out.cand_cu).exp().tolist()
-            lg = out.logits.float().tolist()
+            candidate_logits = out.logits.float()
+            lp = ragged_log_softmax(candidate_logits, out.cand_cu).exp().tolist()
+            lg = candidate_logits.tolist() if return_logits else None
             cu = out.cand_cu.tolist()
             for j, it in enumerate(mb):
                 probs[index[id(it)]] = lp[cu[j] : cu[j + 1]]
-                logits[index[id(it)]] = lg[cu[j] : cu[j + 1]]
+                if return_logits:
+                    logits[index[id(it)]] = lg[cu[j] : cu[j + 1]]
         return (probs, logits) if return_logits else probs
 
     def evaluate(self, items: list[TrainItem]) -> dict:
