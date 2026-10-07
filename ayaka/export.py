@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, replace
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -49,6 +50,33 @@ SHARD_BYTES = 4 * 1024**3
 DYNAMIC_SAFE = ("q_proj", "k_proj", "v_proj", "gate_proj", "up_proj")
 LINEAR_MODES = ("auto", "dequant", "mixed", "dynamic")
 QUANT_FILE = "quantization.json"
+
+
+def _calibration_fingerprint(path):
+    """Bind a correction to the exact standalone weights and configuration."""
+    import hashlib
+
+    root, digest = Path(path), hashlib.sha256()
+    backbone = root / "backbone"
+    index = json.loads((backbone / "model.safetensors.index.json").read_text())
+    files = [
+        root / "electra_config.json",
+        root / "head.pt",
+        backbone / "config.json",
+        backbone / "model.safetensors.index.json",
+    ]
+    files.extend(backbone / name for name in sorted(set(index["weight_map"].values())))
+    for file in files:
+        if (
+            not file.is_file()
+            or file.resolve().parent != (root if file in files[:2] else backbone).resolve()
+        ):
+            raise ValueError("invalid standalone calibration weight path")
+        digest.update(file.relative_to(root).as_posix().encode())
+        with file.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+    return digest.hexdigest()
 
 
 # ------------------------------------------------------------------ write
@@ -93,6 +121,9 @@ def export_model(
     meta: dict | None = None,
 ) -> str:
     """Write one export folder from an in-memory (merged) model."""
+    calibration = getattr(model, "noul_calibration", None)
+    if quantize and calibration is not None and calibration.selected:
+        raise ValueError("quantized weights require independent recalibration before serving")
     meta = checkpoint_metadata(model, meta)
     contract = getattr(model, "input_contract", None)
     if contract is None:
@@ -138,6 +169,15 @@ def export_model(
     torch.save(model.head_state_dict(), os.path.join(out_dir, "head.pt"))
     with open(os.path.join(out_dir, "export_meta.json"), "w") as f:
         json.dump({"quantized": quantize, **meta}, f, indent=2, default=str)
+    calibration_path = os.path.join(out_dir, "noul_calibration.json")
+    if calibration is not None and not quantize:
+        calibration.save(
+            calibration_path,
+            _calibration_fingerprint(out_dir),
+            input_recipe_sha256=meta.get("input_recipe_sha256"),
+        )
+    elif os.path.exists(calibration_path):
+        os.unlink(calibration_path)
     with open(os.path.join(out_dir, "README.md"), "w", encoding="utf-8") as f:
         f.write(_readme(os.path.basename(os.path.normpath(out_dir)), quantize))
     return out_dir
@@ -263,6 +303,16 @@ def load_exported(
     dtype = dtype or torch.bfloat16
     cfg = load_config(path)
     contract = read_contract(path, cfg, "export_meta.json")
+    calibration = None
+    calibration_path = os.path.join(path, "noul_calibration.json")
+    if os.path.exists(calibration_path):
+        from .training.noul_calibration import NoulCalibration
+
+        calibration = NoulCalibration.load(
+            calibration_path,
+            _calibration_fingerprint(path),
+            input_recipe_sha256=contract["input_recipe_sha256"] if contract else None,
+        )
     bb_dir = os.path.join(path, cfg.backbone)
     if os.path.exists(os.path.join(bb_dir, QUANT_FILE)):
         text, tcfg = load_int8_backbone(bb_dir, dev, dtype, linear_mode)
@@ -278,6 +328,7 @@ def load_exported(
     tok = HFTokenizer.from_pretrained(bb_dir) if has_tok else ToyTokenizer()
     validate_tokenizer(contract, tok)
     model.input_contract = contract
+    model.noul_calibration = calibration
     return model.to(dev), tok
 
 
