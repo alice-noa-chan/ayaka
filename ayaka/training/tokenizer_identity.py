@@ -55,18 +55,34 @@ def _serialize(backend):
     }
 
 
+def _vocabulary_size(backend):
+    return backend.get_vocab_size(with_added_tokens=True)
+
+
 @dataclass
 class _Snapshot:
     native: object
     backend: object
     configuration_sha256: str
     fingerprints: dict
+    vocabulary_size: int
     active: bool = True
+
+    @classmethod
+    def take(cls, native, backend):
+        return cls(
+            native,
+            backend,
+            configuration_fingerprint(native),
+            _serialize(backend),
+            _vocabulary_size(backend),
+        )
 
     def check(self, *, serialized=False):
         if (
             not self.active
             or getattr(self.native, "backend_tokenizer", None) is not self.backend
+            or _vocabulary_size(self.backend) != self.vocabulary_size
             or configuration_fingerprint(self.native) != self.configuration_sha256
             or serialized
             and _serialize(self.backend) != self.fingerprints
@@ -105,7 +121,7 @@ def tokenizer_identity_scope(tokenizer):
             existing.check()
             yield
             return
-    snapshot = _Snapshot(native, backend, configuration_fingerprint(native), _serialize(backend))
+    snapshot = _Snapshot.take(native, backend)
     token = _SCOPES.set((*_SCOPES.get(), snapshot))
     try:
         yield
@@ -113,6 +129,39 @@ def tokenizer_identity_scope(tokenizer):
     finally:
         snapshot.active = False
         _SCOPES.reset(token)
+
+
+class TokenizerPin:
+    """Serialize a long-lived serving tokenizer once; reuse it on every request.
+
+    Serving loads its tokenizer once and validates it against the checkpoint
+    input recipe at startup. Reserializing the full vocabulary on each request
+    costs about 0.35 s per call for Gemma 4. Inside ``scope()``, nested
+    ``tokenizer_identity_scope`` calls and ``backend_fingerprints`` reuse the
+    pinned serialization after a cheap check: the same backend object, the same
+    configuration (chat template, special tokens, decode settings) and the same
+    vocabulary size. An in-place edit that keeps all three is not detected, so
+    preparation code that writes artifacts keeps ``tokenizer_identity_scope``,
+    which reserializes on exit.
+    """
+
+    def __init__(self, tokenizer):
+        native = _native(tokenizer)
+        backend = getattr(native, "backend_tokenizer", None)
+        # The segmented ToyTokenizer has no backend and needs no serialization.
+        self._snapshot = None if backend is None else _Snapshot.take(native, backend)
+
+    @contextmanager
+    def scope(self):
+        if self._snapshot is None:
+            yield
+            return
+        self._snapshot.check()
+        token = _SCOPES.set((*_SCOPES.get(), self._snapshot))
+        try:
+            yield
+        finally:
+            _SCOPES.reset(token)
 
 
 def scoped_tokenizer_preparation(function):

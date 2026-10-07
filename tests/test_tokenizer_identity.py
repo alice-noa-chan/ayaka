@@ -194,3 +194,48 @@ def test_copied_context_cannot_reuse_a_snapshot_after_its_scope_exits(monkeypatc
 
     copied.run(new_scope)
     assert len(calls) == 5
+
+
+def test_pin_serializes_once_and_nested_scopes_reuse_it(monkeypatch):
+    native = tokenizer()
+    expected = identity.backend_fingerprints(native)
+    calls = counter(monkeypatch)
+    pin = identity.TokenizerPin(native)
+    assert len(calls) == 1
+    for _ in range(5):
+        with pin.scope(), identity.tokenizer_identity_scope(HFTokenizer(native, "tiny")):
+            assert identity.backend_fingerprints(native) == expected
+    assert len(calls) == 1
+    # Outside the pinned scope nothing is cached.
+    identity.backend_fingerprints(native)
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("mutation", ["vocabulary", "template", "padding", "replacement"])
+def test_pin_rejects_a_changed_tokenizer_on_the_next_request(mutation):
+    native = tokenizer()
+    pin = identity.TokenizerPin(native)
+    with pin.scope():
+        pass
+    if mutation == "vocabulary":
+        native.backend_tokenizer.add_tokens(["NEW_OBSERVED_TOKEN"])
+    elif mutation == "template":
+        native.chat_template += " changed"
+    elif mutation == "padding":
+        native.padding_side = "left"
+    else:
+        native._tokenizer = copy.deepcopy(native.backend_tokenizer)
+    with pytest.raises(ValueError, match="tokenizer changed"), pin.scope():
+        pass
+
+
+def test_pin_scope_resets_after_errors_and_ignores_backendless_tokenizers(monkeypatch):
+    native = tokenizer()
+    pin = identity.TokenizerPin(native)
+    calls = counter(monkeypatch)
+    with pytest.raises(RuntimeError), pin.scope():
+        raise RuntimeError("request failed")
+    identity.backend_fingerprints(native)
+    assert len(calls) == 1  # The failed request left no active snapshot behind.
+    with identity.TokenizerPin(ToyTokenizer()).scope():
+        pass
