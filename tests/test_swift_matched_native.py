@@ -25,6 +25,7 @@ def test_p5_admission_implies_p4_exact_fit_and_prefix():
     assert "DIAGNOSTIC ONLY" in p5["work"]
 
 
+@pytest.mark.prepared_corpus
 def test_p5_dry_run_no_download_and_commands(capsys, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("dry run launched a process or downloaded a checkpoint")

@@ -64,4 +64,7 @@ known-first-party = ["ayaka"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-q"
+addopts = "-q --strict-markers"
+markers = [
+    "prepared_corpus: needs the local runs/v2-pretraining-20261002-ready corpus (skipped when absent)",
+]

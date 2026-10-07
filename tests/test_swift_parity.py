@@ -115,6 +115,7 @@ def test_common_raw_logit_offset_does_not_fail_parity():
     assert parity.compare([item()], Reader(result), Reader(shifted))["passed"]
 
 
+@pytest.mark.prepared_corpus
 def test_stored_cohort_is_deterministic_nonpublic_and_covers_stress_cases():
     rows = build()
     stored = [json.loads(line) for line in parity.COHORT.read_text(encoding="utf-8").splitlines()]

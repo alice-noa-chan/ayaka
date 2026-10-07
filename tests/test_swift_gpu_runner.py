@@ -89,6 +89,7 @@ def test_packer_rejects_heldout_and_escaping_paths_before_open(tmp_path, monkeyp
         pack_inputs(tmp_path, manifest, tmp_path / "packed.tar.gz")
 
 
+@pytest.mark.prepared_corpus
 def test_default_inventory_and_real_pack_never_open_test(tmp_path, monkeypatch):
     original_open = Path.open
 
@@ -161,6 +162,7 @@ def test_jevbench_audit_fallback_packs_under_canonical_paths(tmp_path):
         assert all(prefix + name in archive.getnames() for name in [*names, "LICENSE"])
 
 
+@pytest.mark.prepared_corpus
 def test_dry_run_no_processes_or_network_and_explicit_unresolved_pins(monkeypatch, capsys):
     monkeypatch.delenv("SWIFT_GEMMA_E4B_REVISION", raising=False)
     monkeypatch.delenv("SWIFT_QWEN_REVISION", raising=False)
@@ -207,6 +209,7 @@ def git_bash():
     return next((str(path) for path in candidates if path.is_file()), None)
 
 
+@pytest.mark.prepared_corpus
 def test_shell_entrypoint_dry_run_and_syntax():
     bash = git_bash()
     if bash is None:
@@ -221,6 +224,7 @@ def test_shell_entrypoint_dry_run_and_syntax():
     assert "4120 model reads" in result.stdout
 
 
+@pytest.mark.prepared_corpus
 def test_dry_run_fixed_variants_and_optional_lora(capsys):
     assert gpu_runner.main(["--dry-run", "--with-lora-arm"]) == 0
     output = capsys.readouterr().out
@@ -1070,6 +1074,7 @@ def test_supervisor_cleanup_grace_is_bounded_by_absolute_deadline(tmp_path, monk
     assert stream.closed and not supervisor.processes
 
 
+@pytest.mark.prepared_corpus
 def test_dry_run_allow_partial_prints_admission_prefix(capsys):
     assert gpu_runner.main(["--dry-run", "--max-minutes", "45", "--allow-partial"]) == 0
     output = capsys.readouterr().out
