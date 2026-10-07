@@ -1,0 +1,18 @@
+{
+  "version": "ayaka-heldout-dev-cohort-1",
+  "split": "router_train",
+  "seed": 20261017,
+  "max_input_tokens": 7680,
+  "natural": {
+    "helpsteer2": 12,
+    "commonsense_qa": 48,
+    "massive": 16,
+    "hotpotqa": 48,
+    "strategyqa": 32,
+    "contract_nli": 2
+  },
+  "synthetic": {
+    "start": 32,
+    "per_type": 16
+  }
+}

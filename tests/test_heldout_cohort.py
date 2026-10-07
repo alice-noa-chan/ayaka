@@ -126,6 +126,7 @@ def settings(**natural):
     quotas.update(natural)
     return {
         "version": cohort.VERSION,
+        "split": "dev",
         "seed": 7,
         "max_input_tokens": 100,
         "natural": quotas,
@@ -225,6 +226,20 @@ def test_synthetic_questions_skip_the_indices_earlier_cohorts_used():
 def test_invalid_settings_are_rejected(change):
     with pytest.raises(ValueError):
         cohort.validate_settings({**settings(), **change})
+
+
+def test_tuning_cohorts_label_every_sample_with_their_split():
+    units = cohort.natural_units(rows(), FILES, "calibration")
+    samples, _ = cohort.build_cohort(
+        {**settings(), "split": "calibration"}, units, EMPTY_TRAIN, public=NO_PUBLIC
+    )
+    assert {s.metadata["split"] for s in samples} == {"calibration"}
+    synthetic = [s for s in samples if s.metadata["data_kind"] == "synthetic"]
+    assert {s.metadata["document_voice"] for s in synthetic} == {"calibration"}
+    with pytest.raises(ValueError, match="different split"):
+        cohort.build_cohort(settings(), units, EMPTY_TRAIN, public=NO_PUBLIC)
+    with pytest.raises(ValueError, match="test is never built"):
+        cohort.validate_settings({**settings(), "split": "test"})
 
 
 def test_summary_counts_cases_by_lineage():

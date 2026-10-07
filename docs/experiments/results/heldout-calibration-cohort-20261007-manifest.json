@@ -1,0 +1,235 @@
+{
+  "version": "ayaka-heldout-dev-cohort-1",
+  "settings": {
+    "version": "ayaka-heldout-dev-cohort-1",
+    "split": "calibration",
+    "seed": 20261027,
+    "max_input_tokens": 7680,
+    "natural": {
+      "helpsteer2": 12,
+      "commonsense_qa": 48,
+      "massive": 16,
+      "hotpotqa": 48,
+      "strategyqa": 32,
+      "contract_nli": 2
+    },
+    "synthetic": {
+      "start": 32,
+      "per_type": 16
+    }
+  },
+  "sources": {
+    "helpsteer2": {
+      "repo": "nvidia/HelpSteer2",
+      "revision": "990b2711a36180dd19d9c94b8627844866f8982a",
+      "file": "validation.jsonl.gz",
+      "sha256": "610eeb5289494d613c4c0f70aade2df8df0b499f3a24e76d232f74e6909d010a"
+    },
+    "commonsense_qa": {
+      "repo": "tau/commonsense_qa",
+      "revision": "94630fe30dad47192a8546eb75f094926d47e155",
+      "file": "data/validation-00000-of-00001.parquet",
+      "sha256": "bdbd9bf9cc4d2349b24901038b2ab2f58e10e4e507ad2fd425dca55cd3cb6660"
+    },
+    "massive_ko": {
+      "repo": "AmazonScience/massive",
+      "revision": "ed58ac423a2f4121720918bf5301577edce4ffd3",
+      "file": "ko-KR/validation/0000.parquet",
+      "sha256": "cce429518bfd53056bb83ef49a21222a2581fbeb0eed874bf9aeb426d5756d07"
+    },
+    "massive_ja": {
+      "repo": "AmazonScience/massive",
+      "revision": "ed58ac423a2f4121720918bf5301577edce4ffd3",
+      "file": "ja-JP/validation/0000.parquet",
+      "sha256": "c98ddb8e6f3c172fdc42c5a0653adc2bf8e2160ae13d4a23fef67b84bdff437e"
+    },
+    "hotpotqa": {
+      "repo": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "file": "distractor/validation-00000-of-00001.parquet",
+      "sha256": "c20b638ca82b21d04fe12e14ff417ad05153d4d215a65de54497fca4e972f7c6"
+    },
+    "strategyqa": {
+      "repo": "ChilleD/StrategyQA",
+      "revision": "705562638fe1d8ca6bb98c66fc8f94d45fda8c83",
+      "file": "data/test-00000-of-00001-bae602f3ee37f4ca.parquet",
+      "sha256": "d45b64bac89eea93147731ba4d757459e2d1cb8d7e6e73c59c6501e4e0a0dc61"
+    },
+    "contract_nli": {
+      "archive_sha256": "e03fc77bbf8b53e2976a250e81d8a294bc3d5e5fb014521e477dee9340d6287b",
+      "member": "contract-nli/dev.json",
+      "sha256": "310af7d661d2ab50ee3700169cef524c75f39fb296bbf5a515c229eb0f42e68e"
+    }
+  },
+  "excluded_cohorts": [
+    {
+      "file": "dev.jsonl",
+      "sha256": "f4a1b8d124a5c80c737ed4b5f7a2f2463c8e1d18eefd37220efa600c538b296b"
+    },
+    {
+      "file": "calibration.jsonl",
+      "sha256": "a509e8714ea43740a5fecfcfc28b5691be9c3875f0d818635ec9e684640c6de2"
+    },
+    {
+      "file": "dev.jsonl",
+      "sha256": "c4454d6b829bfe9fdd18f0d4676f812a89bd9349b8b88a641a8241e5ee23fbcb"
+    },
+    {
+      "file": "dev.jsonl",
+      "sha256": "5a01c79e27329872170269eb5c45efc6cdb23ac2c5560ce0cca41260fa3b691b"
+    }
+  ],
+  "context_check": {
+    "checkpoint_config_sha256": "0823a0634d0057f79d655203fb459d6c4673fbe762c00636645a85ec3bd9a657",
+    "limit": 7680
+  },
+  "exclusions": {
+    "helpsteer2": {
+      "train_text_overlap": 1,
+      "reserved_overlap": 2
+    },
+    "commonsense_qa": {
+      "reserved_overlap": 5
+    },
+    "massive": {
+      "train_text_overlap": 1
+    },
+    "hotpotqa": {
+      "reserved_overlap": 28
+    },
+    "strategyqa": {
+      "reserved_overlap": 4
+    }
+  },
+  "summary": {
+    "questions": 334,
+    "independent_cases": 173,
+    "types": {
+      "choice": 98,
+      "noul": 160,
+      "score": 76
+    },
+    "by_source": {
+      "ayaka-v2-verified": {
+        "samples": 48,
+        "questions": 48,
+        "independent_cases": 15,
+        "types": {
+          "choice": 16,
+          "noul": 16,
+          "score": 16
+        }
+      },
+      "commonsense_qa": {
+        "samples": 48,
+        "questions": 48,
+        "independent_cases": 48,
+        "types": {
+          "choice": 48
+        }
+      },
+      "contract_nli": {
+        "samples": 2,
+        "questions": 34,
+        "independent_cases": 2,
+        "types": {
+          "choice": 34
+        }
+      },
+      "helpsteer2": {
+        "samples": 12,
+        "questions": 60,
+        "independent_cases": 12,
+        "types": {
+          "score": 60
+        }
+      },
+      "hotpotqa": {
+        "samples": 48,
+        "questions": 48,
+        "independent_cases": 48,
+        "types": {
+          "noul": 48
+        }
+      },
+      "massive_ja": {
+        "samples": 16,
+        "questions": 32,
+        "independent_cases": 16,
+        "types": {
+          "noul": 32
+        }
+      },
+      "massive_ko": {
+        "samples": 16,
+        "questions": 32,
+        "independent_cases": 16,
+        "types": {
+          "noul": 32
+        }
+      },
+      "strategyqa": {
+        "samples": 32,
+        "questions": 32,
+        "independent_cases": 32,
+        "types": {
+          "noul": 32
+        }
+      }
+    },
+    "by_data_kind": {
+      "natural": {
+        "samples": 174,
+        "questions": 286,
+        "independent_cases": 158,
+        "types": {
+          "choice": 82,
+          "noul": 144,
+          "score": 60
+        }
+      },
+      "synthetic": {
+        "samples": 48,
+        "questions": 48,
+        "independent_cases": 15,
+        "types": {
+          "choice": 16,
+          "noul": 16,
+          "score": 16
+        }
+      }
+    },
+    "by_language": {
+      "en": {
+        "samples": 190,
+        "questions": 270,
+        "independent_cases": 157,
+        "types": {
+          "choice": 98,
+          "noul": 96,
+          "score": 76
+        }
+      },
+      "ja": {
+        "samples": 16,
+        "questions": 32,
+        "independent_cases": 16,
+        "types": {
+          "noul": 32
+        }
+      },
+      "ko": {
+        "samples": 16,
+        "questions": 32,
+        "independent_cases": 16,
+        "types": {
+          "noul": 32
+        }
+      }
+    }
+  },
+  "cohort_sha256": "4dbb60373bf35c467ae62aa6b359f22c8322ed241f1decb586e7e4e6d5cd85cb",
+  "dev_jsonl_sha256": "a7de5e22b9a1ccb2cddb3f68eff11f35948da93a509f885d35df66d0e974644b",
+  "fitted": false,
+  "scope": "development cohort; neither published v1 nor trained v2 trained on these splits"
+}

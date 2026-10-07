@@ -40,6 +40,7 @@ from ..data.reasoning_v2 import curriculum
 from ..data.schema import Sample
 from ..data.source_groups import evidence
 from ..data.transforms import hotpot_decision, strategyqa_noul
+from .quality_hierarchy import READ_SPLITS
 from .read_artifact import fingerprint
 
 VERSION = "ayaka-heldout-dev-cohort-1"
@@ -210,10 +211,11 @@ def _intent_names(features):
 def validate_settings(settings):
     if not isinstance(settings, dict) or settings.get("version") != VERSION:
         raise ValueError(f"settings must declare version {VERSION}")
-    if set(settings) != {"version", "seed", "max_input_tokens", "natural", "synthetic"}:
-        raise ValueError(
-            "settings need exactly version, seed, max_input_tokens, natural, synthetic"
-        )
+    keys = {"version", "split", "seed", "max_input_tokens", "natural", "synthetic"}
+    if set(settings) != keys:
+        raise ValueError(f"settings need exactly {', '.join(sorted(keys))}")
+    if settings["split"] not in READ_SPLITS:
+        raise ValueError(f"split must be one of {READ_SPLITS}; test is never built here")
     natural, synthetic = settings["natural"], settings["synthetic"]
     if not isinstance(natural, dict) or set(natural) != set(NATURAL_SOURCES):
         raise ValueError(f"natural quotas must name exactly {', '.join(NATURAL_SOURCES)}")
@@ -228,7 +230,6 @@ def validate_settings(settings):
 
 def _metadata(source, original_split, key, lineage, row, file_sha256, language, view):
     return {
-        "split": "dev",
         "source": source,
         "language": language,
         "license": LICENSES[source],
@@ -246,12 +247,13 @@ def _metadata(source, original_split, key, lineage, row, file_sha256, language, 
     }
 
 
-def natural_units(rows, files):
+def natural_units(rows, files, split="dev"):
     """Candidate units per source: lists of samples that share one lineage.
 
     ``rows`` maps each held-out source (and ``contract_nli``) to its parsed
     rows; ``files`` maps it to the file SHA-256. MASSIVE needs ``features``
     under ``rows["massive_ko"]["features"]`` and the Japanese equivalent.
+    Every sample is labeled with ``split``, the cohort's evaluation split.
     """
     units = defaultdict(list)
     by_prompt = {}
@@ -353,6 +355,10 @@ def natural_units(rows, files):
         )
         sample = Sample(doc["text"], contract_nli.document_questions(doc, labels), meta)
         units["contract_nli"].append(([sample], normalized(doc["text"])))
+    for source_units in units.values():
+        for samples, _ in source_units:
+            for sample in samples:
+                sample.metadata["split"] = split
     return units
 
 
@@ -375,11 +381,15 @@ def _overlaps_train(source, key, train):
     return key in train[source]
 
 
-def synthetic_samples(start, per_type):
-    """Verified authored questions after the first ``start`` indices of each type."""
+def synthetic_samples(start, per_type, split="dev"):
+    """Verified authored questions after the first ``start`` indices of each type.
+
+    The generator writes each split in its own document voice and labels the
+    samples with that split.
+    """
     if per_type == 0:
         return []
-    generated = curriculum("dev", start + per_type)
+    generated = curriculum(split, start + per_type)
     total = start + per_type
     result = []
     for position, (sample, traces) in enumerate(generated):
@@ -391,7 +401,7 @@ def synthetic_samples(start, per_type):
             tier="standard",
             data_kind="synthetic",
             label_source="verified_procedure",
-            original_split="dev",
+            original_split=split,
             heldout_cohort_version=VERSION,
             verified_traces=traces,
         )
@@ -408,6 +418,13 @@ def build_cohort(settings, units, train, *, fits=None, reserved=(), public=None)
     shares a lineage or normalized state with them.
     """
     validate_settings(settings)
+    if any(
+        sample.metadata.get("split") != settings["split"]
+        for source_units in units.values()
+        for samples, _ in source_units
+        for sample in samples
+    ):
+        raise ValueError("candidate units were built for a different split than the settings")
     blocked_lineages = {s.metadata.get("source_lineage") for s in reserved}
     blocked_states = {evidence(s) for s in reserved}
     public = Decontaminator.from_jevbench() if public is None else public
@@ -440,7 +457,9 @@ def build_cohort(settings, units, train, *, fits=None, reserved=(), public=None)
                 taken += 1
         if taken < quota:
             raise ValueError(f"{source}: only {taken} eligible units for a quota of {quota}")
-    synthetic = synthetic_samples(settings["synthetic"]["start"], settings["synthetic"]["per_type"])
+    synthetic = synthetic_samples(
+        settings["synthetic"]["start"], settings["synthetic"]["per_type"], settings["split"]
+    )
     if any(public.sample_hit(s) for s in synthetic):
         raise ValueError("authored questions overlap public benchmark text; choose new indices")
     if fits is not None and not all(fits(s) for s in synthetic):
@@ -599,7 +618,7 @@ def main(argv=None):
         raise ValueError("the context check needs both --checkpoint and --tokenizer")
     settings = validate_settings(json.loads(args.settings.read_bytes()))
     heldout, train, files, provenance = load_sources(args.contractnli_archive)
-    units = natural_units(heldout, files)
+    units = natural_units(heldout, files, settings["split"])
     reserved = [
         Sample.from_json(json.loads(line))
         for path in args.exclude
