@@ -485,13 +485,27 @@ class Trainer:
             lg = candidate_logits.tolist() if return_logits else None
             cu = out.cand_cu.tolist()
             for j, it in enumerate(mb):
-                probs[index[id(it)]] = lp[cu[j] : cu[j + 1]]
+                probabilities = lp[cu[j] : cu[j + 1]]
+                calibration = getattr(self.model, "noul_calibration", None)
+                corrected = (
+                    apply_temperature
+                    and calibration is not None
+                    and calibration.selected
+                    and it.type == "noul"
+                    and it.native_inputs is None
+                    and it.reasoning_positions is None
+                )
+                if corrected:
+                    probabilities = calibration.apply(probabilities, it.type, it.length)
+                probs[index[id(it)]] = probabilities
                 if return_logits:
-                    logits[index[id(it)]] = lg[cu[j] : cu[j + 1]]
+                    logits[index[id(it)]] = (
+                        [math.log(p) for p in probabilities] if corrected else lg[cu[j] : cu[j + 1]]
+                    )
         return (probs, logits) if return_logits else probs
 
-    def evaluate(self, items: list[TrainItem]) -> dict:
-        p = self.predict(items)
+    def evaluate(self, items: list[TrainItem], *, apply_temperature: bool = True) -> dict:
+        p = self.predict(items, apply_temperature=apply_temperature)
         y = [it.target for it in items]
         # RPS needs ordinal order
         p_o, y_o = [], []

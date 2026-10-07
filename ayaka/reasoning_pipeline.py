@@ -328,6 +328,8 @@ class ControlledDecision:
 
 def controlled_decision(model, tok, max_seq_len=None, router=None, calibration=None):
     original = Decision(model, tok, max_seq_len)
+    # Explicit path calibration replaces the automatic direct correction.
+    original.apply_probability_calibration = calibration is None
     contract = original.input_contract
     if contract is not None and contract["input_encoding"]["encoder"] == "swift_canonical":
         from .swift_continuation import SwiftTraceGenerator

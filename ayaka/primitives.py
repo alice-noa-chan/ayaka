@@ -83,6 +83,7 @@ class Decision:
                 getattr(model.text_config, "max_position_embeddings", self.max_seq_len),
             )
         self.apply_temperature = True
+        self.apply_probability_calibration = True
         self.reuse_head = True  # encode the constant prompt head once
         self._head: tuple[list[int], object, torch.device] | None = None
 
@@ -163,7 +164,22 @@ class Decision:
             return []
         self.model.eval()
         views = [q.view() for q in questions]
-        probs = self._run(state, views, device)
+        calibration = getattr(self.model, "noul_calibration", None)
+        use_calibration = (
+            self.apply_temperature
+            and self.apply_probability_calibration
+            and calibration is not None
+            and calibration.selected
+            and any(q.type == "noul" for q in questions)
+            and not getattr(state, "is_multimodal", False)
+        )
+        lengths = None
+        if use_calibration:
+            prefix, items = self.encode(state, views)
+            lengths = [len(prefix) + len(it.rendered.suffix_ids) for it in items]
+            probs = self._run_encoded(prefix, items, device)
+        else:
+            probs = self._run(state, views, device)
         for i, v in enumerate(views):
             if (
                 v.type == "choice"
@@ -175,7 +191,9 @@ class Decision:
             ):
                 probs[i] = self._shortlist(state, v, probs[i], device)
         results = []
-        for q, p in zip(questions, probs, strict=True):
+        for i, (q, p) in enumerate(zip(questions, probs, strict=True)):
+            if use_calibration:
+                p = calibration.apply(p, q.type, lengths[i])
             res = DecisionResult(
                 type=q.type, probs=p, distribution=dict(zip(q.candidates, p, strict=True))
             )

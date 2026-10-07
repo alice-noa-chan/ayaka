@@ -89,6 +89,18 @@ def save_checkpoint(model: ElectraDecisionModel, path: str, meta: dict | None = 
     if hasattr(model.backbone, "save_pretrained") and hasattr(model.backbone, "peft_config"):
         model.backbone.save_pretrained(os.path.join(path, "adapter"))
     save_head(model.head_state_dict(), path)
+    calibration_path = os.path.join(path, "noul_calibration.json")
+    calibration = getattr(model, "noul_calibration", None)
+    if calibration is not None:
+        from .training.scoped_calibration import checkpoint_fingerprint
+
+        calibration.save(
+            calibration_path,
+            checkpoint_fingerprint(path, include_calibration=False),
+            input_recipe_sha256=meta.get("input_recipe_sha256"),
+        )
+    elif os.path.exists(calibration_path):
+        os.unlink(calibration_path)  # A fresh export must not retain an older model's correction.
     with open(os.path.join(path, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2, default=str)
     return path
@@ -129,6 +141,17 @@ def load_checkpoint(
     adapter unmerged and trainable (resume / continue training)."""
     cfg = load_config(path)
     contract = read_contract(path, cfg)
+    calibration = None
+    calibration_path = os.path.join(path, "noul_calibration.json")
+    if os.path.exists(calibration_path):
+        from .training.noul_calibration import NoulCalibration
+        from .training.scoped_calibration import checkpoint_fingerprint
+
+        calibration = NoulCalibration.load(
+            calibration_path,
+            checkpoint_fingerprint(path, include_calibration=False),
+            input_recipe_sha256=contract["input_recipe_sha256"] if contract else None,
+        )
     model = ElectraDecisionModel.from_config(
         cfg,
         dtype=dtype,
@@ -146,6 +169,7 @@ def load_checkpoint(
             model.backbone = model.backbone.merge_and_unload()
     model.load_head_state_dict(load_head(path, device))
     model.input_contract = contract
+    model.noul_calibration = None if trainable else calibration
     return model.to(device)
 
 
@@ -171,7 +195,24 @@ def compact_checkpoint(
 
     if os.path.abspath(src) == os.path.abspath(dst):
         raise ValueError("compact into a new directory")
+    calibration_path = os.path.join(src, "noul_calibration.json")
+    if os.path.exists(calibration_path):
+        from .training.noul_calibration import NoulCalibration
+        from .training.scoped_calibration import checkpoint_fingerprint
+
+        calibration = NoulCalibration.load(
+            calibration_path,
+            checkpoint_fingerprint(src, include_calibration=False),
+            input_recipe_sha256=(read_contract(src, load_config(src)) or {}).get(
+                "input_recipe_sha256"
+            ),
+        )
+        if calibration.selected:
+            raise ValueError("compacted weights require independent recalibration before serving")
     shutil.copytree(src, dst)
+    copied_calibration = os.path.join(dst, "noul_calibration.json")
+    if os.path.exists(copied_calibration):
+        os.unlink(copied_calibration)  # An unselected correction has no serving effect.
     weights = os.path.join(dst, "adapter", "adapter_model.safetensors")
     before = os.path.getsize(weights)
     tensors = {

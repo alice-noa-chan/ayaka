@@ -12,7 +12,7 @@ from .calibrate import MIN_QUESTIONS, fit_temperature
 from .path_calibration import PathCalibration, path_key
 
 
-def checkpoint_fingerprint(path):
+def checkpoint_fingerprint(path, *, include_calibration=True):
     root, digest = Path(path), hashlib.sha256()
     files = [root / "ayaka_config.json", root / "head.safetensors"]
     files += sorted((root / "adapter").glob("*.json")) + sorted(
@@ -23,6 +23,9 @@ def checkpoint_fingerprint(path):
         or not (root / "adapter" / "adapter_model.safetensors").is_file()
     ):
         raise ValueError("scoped artifacts require a native config, safe head and saved adapter")
+    calibration = root / "noul_calibration.json"
+    if include_calibration and calibration.is_file():
+        files.append(calibration)
     for file in files:
         digest.update(str(file.relative_to(root)).replace("\\", "/").encode())
         with file.open("rb") as stream:
