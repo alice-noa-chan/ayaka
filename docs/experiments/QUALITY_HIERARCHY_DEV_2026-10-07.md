@@ -51,3 +51,20 @@ not attest actual model execution or fresh data independence. Production
 promotion requires separately checked execution evidence and an independent
 final holdout after development choices are frozen. Speed and cost require
 matched execution hardware and are not decided by this quality screen.
+
+## Known limitations (added 2026-10-07)
+
+The [gap analysis](V2_GAP_ANALYSIS_2026-10-07.md) of the first matched run
+found two limits of this screen as declared. They are recorded here; the
+rule itself is unchanged.
+
+- Rule 1 compares v2 with reasoning off against v1 with reasoning. On the
+  calculation questions this compares a single direct read with worked
+  steps, so it mixes model quality with inference budget. A matched
+  direct-versus-direct and routed-versus-routed pair would separate them.
+- Rule 5 needs at least 200 independent cases. The first development cohort
+  had 99, so it could not pass whatever the result.
+
+The per-source and per-language non-regression checks stay blocking: in
+that run reasoning gains came from the synthetic source while natural
+sources were flat or worse, which is the case these checks exist to catch.
