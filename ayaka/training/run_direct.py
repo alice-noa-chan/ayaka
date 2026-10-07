@@ -42,6 +42,7 @@ from .direct_state import (
 )
 from .frozen_replay import attach_base_replay
 from .native_snapshot import DEPLOYABLE_VERSION, verify_snapshot
+from .noul_calibration import fit_noul_calibration, model_noul_temperatures
 from .optimization import OptimizationConfig, optimize_and_verify
 from .prepare_v2 import canonical
 from .swift_direct import direct_readout_binding, encode_direct_sample
@@ -406,11 +407,23 @@ def run_pipeline(
         cfg.long_prompt_tokens,
     )
     apply_temperatures(model, temperatures)
+    correction = fit_noul_calibration(rows, model_noul_temperatures(model), cfg.long_prompt_tokens)
+    if correction.selected:
+        validation = evaluate_direct(
+            trainer, splits["dev"], "dev", input_encoding=recipe["input_encoding"]
+        )
+        correction.validate(validation["rows"])
+    model.noul_calibration = correction
     _write(root, "calibration_raw.json", raw_calibration)
     _write(
         root,
         "calibration.json",
-        {"temperatures": temperatures, "split": "calibration", "binding": binding},
+        {
+            "temperatures": temperatures,
+            "noul_correction": correction.as_dict(),
+            "split": "calibration",
+            "binding": binding,
+        },
     )
     for split in ("dev",):
         _write(
@@ -439,6 +452,7 @@ def run_pipeline(
         "promotable": False,
         "mechanics_only": mechanics_only,
         "calibration_split": "calibration",
+        "noul_correction": correction.as_dict(),
         "test_used_for_selection": False,
         "independent_test_required": True,
         "reload_prediction_policy": prediction_policy,

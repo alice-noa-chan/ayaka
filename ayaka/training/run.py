@@ -1,7 +1,7 @@
 """End-to-end decision training run.
 
     pools (decontaminated) ─► LoRA Electra ─► train ─► checkpoint
-        ─► temperature calibration (jev-distill calibration split)
+        ─► automatic temperature calibration (reserved source groups)
         ─► evals: held-out mix, Jev fidelity (test_set_30k), JevBench public
 
 Distillation (Large -> Base/Small) is the same run with
@@ -35,6 +35,11 @@ from ..serialization import canonical_state
 from ..tokenization import HFTokenizer, ToyTokenizer
 from .batching import TrainItem, sample_to_items
 from .calibrate import apply_temperatures, fit_temperatures
+from .noul_calibration import (
+    fit_noul_calibration,
+    item_calibration_rows,
+    model_noul_temperatures,
+)
 from .trainer import TrainConfig, Trainer
 
 # Default training data: only sources whose licenses/terms allow training
@@ -120,9 +125,10 @@ class RunConfig:
     max_seq_len: int | None = None  # override the size default
     eval_questions: int = 1000
     eval_every: int = 250
+    holdout_fraction: float = 0.1  # source-group fraction per holdout; at least one when possible
     calibrate: bool = True
     calibration_questions: int = 4000
-    calibration_spec: str = "jev_open_calibration"  # held-out split for temperatures
+    calibration_spec: str = ""  # default: reserve calibration from the user's training corpus
     calibration_per_bucket: int = 200  # reserved top-up per (primitive, length) bucket
     fidelity_questions: int = 3000  # reference-labelled held-out evaluation
     fidelity_spec: str = "jev_open_test"
@@ -317,19 +323,30 @@ def _remove_held(pools, held) -> None:
         samples[:] = [sample for sample in samples if id(sample) not in held_ids]
 
 
-def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: int) -> list[Sample]:
+def split_eval(
+    pools: dict[tuple[str, str], list[Sample]],
+    n_eval: int,
+    seed: int,
+    *,
+    max_fraction: float = 1.0,
+) -> list[Sample]:
     """Hold out whole state/lineage groups, including cross-source duplicates.
 
     ``n_eval`` is a question budget; an indivisible group may overshoot it.
-    Always leave at least one group in every affected training cell.
+    Always leave at least one group in every affected training cell, and
+    optionally cap the fraction of groups removed from the corpus, with a
+    one-group minimum when a separate holdout is possible.
     """
     if n_eval <= 0:
         return []
+    if not 0 < max_fraction <= 1:
+        raise ValueError("max_fraction must be greater than zero and at most one")
     rng = random.Random(seed + 3)
     groups, cell_groups = _state_groups(pools)
+    group_limit = max(1, int(len(groups) * max_fraction))
     keys = sorted(groups)
     rng.shuffle(keys)
-    held, n_questions = [], 0
+    held, n_questions, n_groups = [], 0, 0
     for key in keys:
         affected = {cell for cell, _ in groups[key]}
         if any(len(cell_groups[cell]) <= 1 for cell in affected):
@@ -338,7 +355,8 @@ def split_eval(pools: dict[tuple[str, str], list[Sample]], n_eval: int, seed: in
             cell_groups[cell].remove(key)
         held.extend(sample for _, sample in groups[key])
         n_questions += sum(len(sample.questions) for _, sample in groups[key])
-        if n_questions >= n_eval:
+        n_groups += 1
+        if n_questions >= n_eval or n_groups >= group_limit:
             break
     _remove_held(pools, held)
     return held
@@ -355,6 +373,8 @@ def reserve_calibration(
     per_bucket: int = 200,
     seed: int = 0,
     max_groups: int = 50_000,
+    *,
+    max_fraction: float = 1.0,
 ) -> list[TrainItem]:
     """Hold out whole groups until every (primitive, length) bucket has
     ``per_bucket`` calibration questions, and return their items.
@@ -372,8 +392,11 @@ def reserve_calibration(
     """
     if per_bucket <= 0:
         return []
+    if not 0 < max_fraction <= 1:
+        raise ValueError("max_fraction must be greater than zero and at most one")
     rng = random.Random(seed + 17)
     groups, cell_groups = _state_groups(pools)
+    group_limit = max(1, int(len(groups) * max_fraction))
     keys = sorted(groups)
     rng.shuffle(keys)
     keys.sort(
@@ -383,19 +406,22 @@ def reserve_calibration(
     need = {(t, b): per_bucket for t in ("noul", "choice", "score") for b in (False, True)}
     present = {q.type for cell in pools.values() for s in cell for q in s.questions}
     need = {k: v for k, v in need.items() if k[0] in present}
-    held, items = [], []
+    held, items, n_groups = [], [], 0
     for key in keys[:max_groups]:
-        if not any(need.values()):
+        if not any(need.values()) or n_groups >= group_limit:
             break
         affected = {cell for cell, _ in groups[key]}
         if any(len(cell_groups[cell]) <= 1 for cell in affected):
             continue
         group_items = [it for _, s in groups[key] for it in sample_to_items(s, tok, mcfg)]
+        for it in group_items:
+            it.calibration_group = key
         if not any(need.get((it.type, it.length >= long_n), 0) for it in group_items):
             continue
         for cell in affected:
             cell_groups[cell].remove(key)
         held.extend(sample for _, sample in groups[key])
+        n_groups += 1
         for it in group_items:
             bucket = it.type, it.length >= long_n
             if need.get(bucket, 0):
@@ -463,6 +489,8 @@ def items_from_spec(
 
 
 def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
+    if not 0 < cfg.holdout_fraction < 0.5:
+        raise ValueError("holdout_fraction must be greater than zero and less than 0.5")
     # Seed head and adapter initialization too, not just the later Trainer.
     torch.manual_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -494,18 +522,37 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
         quota["teacher_distill"] = cfg.teacher_quota
     if not any(pools.values()):
         raise RuntimeError("no training samples: every dataset spec failed to load")
-    held = split_eval(pools, cfg.eval_questions, cfg.seed) if cfg.eval_questions else []
-    # separate from `held`: tops up (primitive, length) buckets the calibration
-    # spec lacks (Open-Jev has no score and few long questions) without
-    # touching evaluation data
+    training_types = {
+        q.type for cell in pools.values() for sample in cell for q in sample.questions
+    }
+    # Reserve calibration first so a large evaluation budget cannot consume it.
+    # Whole source groups stay separate, and each holdout has a bounded size.
     cal_reserve = (
-        reserve_calibration(pools, tok, mcfg, cfg.calibration_per_bucket, cfg.seed + 11)
+        reserve_calibration(
+            pools,
+            tok,
+            mcfg,
+            cfg.calibration_per_bucket,
+            cfg.seed + 11,
+            max_fraction=cfg.holdout_fraction,
+        )
         if cfg.calibrate
+        else []
+    )
+    held = (
+        split_eval(pools, cfg.eval_questions, cfg.seed, max_fraction=cfg.holdout_fraction)
+        if cfg.eval_questions
         else []
     )
     with open(os.path.join(art, "data_summary.json"), "w") as f:
         json.dump(pool_summary(pools), f, indent=2)
-    eval_items = [it for s in held for it in sample_to_items(s, tok, mcfg)]
+    eval_groups, _ = _state_groups({("evaluation", "all"): held})
+    eval_items = []
+    for key, group in eval_groups.items():
+        for _, sample in group:
+            for it in sample_to_items(sample, tok, mcfg):
+                it.calibration_group = key
+                eval_items.append(it)
     if verbose:
         sizes = {f"{f}/{lang}": len(v) for (f, lang), v in pools.items()}
         print(f"[run] pools: {sizes} | held-out questions: {len(eval_items)}", flush=True)
@@ -552,6 +599,7 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
         "train_sec": train_sec,
         "stopped_early": trainer.stopped_early,
         "run": asdict(cfg),
+        "calibration": {"status": "pending" if cfg.calibrate else "disabled"},
     }
     save_checkpoint(model, ckpt_dir, meta)  # before calibration: a late failure can't lose the run
 
@@ -559,15 +607,18 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
         "train_sec": train_sec,
         "steps": trainer.step_i,
         "stopped_early": trainer.stopped_early,
+        "calibration": meta["calibration"],
     }
+    if eval_items:
+        report["raw_heldout"] = trainer.evaluate(eval_items, apply_temperature=False)
     if cfg.calibrate:
-        if _is_synthetic(pools):
-            cal = eval_items
-        else:
+        if cfg.calibration_spec:
             cal = items_from_spec(
                 cfg.calibration_spec, cfg.calibration_questions, tok, mcfg, cfg.seed, decon
             )
-            extra = cal_reserve
+        else:
+            cal = list(cal_reserve)
+        if cfg.calibration_spec:
             long_n = mcfg.long_prompt_tokens
             have = {
                 (t, b): sum(it.type == t and (it.length >= long_n) == b for it in cal)
@@ -576,15 +627,19 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             }
             # top up every (primitive, length bucket) the calibration split lacks,
             # long prompts especially: they were overconfident with one scalar
-            for it in extra:
+            for it in cal_reserve:
                 key = it.type, it.length >= long_n
                 if have[key] < cfg.calibration_per_bucket:
                     cal.append(it)
                     have[key] += 1
-            report["calibration_counts"] = {
-                f"{prim}@{'long' if long else 'short'}": count
-                for (prim, long), count in have.items()
-            }
+        report["calibration_counts"] = {
+            f"{prim}@{bucket}": sum(
+                it.type == prim and (it.length >= mcfg.long_prompt_tokens) == (bucket == "long")
+                for it in cal
+            )
+            for prim in ("noul", "choice", "score")
+            for bucket in ("short", "long")
+        }
         _, logits = trainer.predict(cal, apply_temperature=False, return_logits=True)
         temps = fit_temperatures(
             logits,
@@ -594,9 +649,37 @@ def run_training(cfg: RunConfig, pools=None, verbose: bool = True) -> dict:
             mcfg.long_prompt_tokens,
         )
         apply_temperatures(model, temps)
+        correction = fit_noul_calibration(
+            item_calibration_rows(cal, logits, split="calibration", raw=True),
+            model_noul_temperatures(model),
+            mcfg.long_prompt_tokens,
+        )
+        if correction.selected:
+            baseline = trainer.predict(eval_items)
+            correction.validate(item_calibration_rows(eval_items, baseline, split="evaluation"))
+        model.noul_calibration = correction
         report["temperatures"] = temps
+        fitted_types = sorted(key for key in temps if "@" not in key)
+        unfitted_types = sorted(training_types - set(fitted_types))
+        report["calibration"] = {
+            "status": "insufficient_data"
+            if not temps
+            else ("partial" if unfitted_types else "fitted"),
+            "source": cfg.calibration_spec or "reserved_training_groups",
+            "questions": len(cal),
+            "counts": report["calibration_counts"],
+            "temperatures": temps,
+            "fitted_types": fitted_types,
+            "unfitted_types": unfitted_types,
+            "noul_correction": correction.as_dict(),
+        }
+        with open(os.path.join(art, "calibration.json"), "w") as f:
+            json.dump(report["calibration"], f, indent=2)
         if verbose:
-            print(f"[calibrate] {temps} on {len(cal)} questions", flush=True)
+            print(
+                f"[calibrate] {report['calibration']['status']}: {temps} on {len(cal)} questions",
+                flush=True,
+            )
     if eval_items:
         report["heldout"] = trainer.evaluate(eval_items)
         if verbose:
