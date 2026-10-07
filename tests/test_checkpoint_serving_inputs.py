@@ -217,6 +217,35 @@ def test_mutation_unsupported_inputs_and_empty_questions(tmp_path, monkeypatch):
         Decision(model, tok)
 
 
+def test_swift_service_serializes_its_tokenizer_once(tmp_path, monkeypatch):
+    from ayaka.training import tokenizer_identity
+
+    _, model, tok, _, _ = setup_checkpoint(tmp_path)
+    calls = []
+    original = tokenizer_identity._serialize
+
+    def measured(backend):
+        calls.append(backend)
+        return original(backend)
+
+    monkeypatch.setattr(tokenizer_identity, "_serialize", measured)
+    decision = controlled_decision(model, tok)
+    at_start = len(calls)
+    questions = [parse_question(q)[0] for q in QUESTIONS.values()]
+    for _ in range(3):
+        decision.decide(STATE, questions, reasoning=[ReasoningSettings(mode="off")] * 3)
+        decision.original.input_counts(STATE, questions)
+    assert len(calls) == at_start
+    # Reasoned reads tokenize several conversations per question; still no reserialization.
+    favor_trace_token(model, tok)
+    for spec in questions:
+        messages = decision.generator.messages_for(STATE, spec)
+        reserve = decision.generator.reserve_tokens(messages, spec)
+        trace = decision.generator.generate_trace(messages, 3, reserve)
+        decision.generator.readout(trace, spec)
+    assert len(calls) == at_start
+
+
 def test_swift_never_uses_legacy_shortlist_for_small_config_alphabet(tmp_path):
     source, model, tok, _, meta = setup_checkpoint(tmp_path)
     model.cfg = replace(model.cfg, max_label_candidates=1)

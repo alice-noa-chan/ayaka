@@ -9,6 +9,7 @@ import ayaka.swift_continuation as continuation
 from ayaka.primitives import QuestionSpec
 from ayaka.reasoning import ReasoningSettings
 from ayaka.reasoning_pipeline import ControlledDecision, Trace
+from ayaka.training.tokenizer_identity import TokenizerPin
 from tests.test_reasoning_pipeline import Original
 
 
@@ -51,6 +52,7 @@ def generator(monkeypatch, **kwargs):
     result.tok = SimpleNamespace(hf=NativeTemplate(**kwargs), pad_id=0)
     result.encoding = {"chat_template_kwargs": {"enable_thinking": False}}
     result.contract = {}
+    result._tokenizer_pin = TokenizerPin(result.tok)  # no backend: the pin is a no-op
     result.model = Model()
     result.max_context, result.apply_temperature = 8192, True
     result._tokens = lambda messages, letters: {

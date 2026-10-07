@@ -22,6 +22,7 @@ from .reasoning_pipeline import TraceFailure, TraceGenerator
 from .swift.prompt import render_question
 from .swift.readers import token_input
 from .swift.reasoning import FINAL_INSTRUCTION, TRACE_INSTRUCTION
+from .training.tokenizer_identity import TokenizerPin
 
 
 class SwiftTraceGenerator(TraceGenerator):
@@ -33,16 +34,20 @@ class SwiftTraceGenerator(TraceGenerator):
         super().__init__(model, tok, **kwargs)
         self.contract = copy.deepcopy(contract)
         self.encoding = self.contract["input_encoding"]
-        validate_tokenizer(self.contract, tok)
+        # Serialize the tokenizer once; each read then only re-checks its identity.
+        self._tokenizer_pin = TokenizerPin(tok)
+        with self._tokenizer_pin.scope():
+            validate_tokenizer(self.contract, tok)
 
     def _tokens(self, messages, letters):
-        validate_tokenizer(self.contract, self.tok)
-        return token_input(
-            self.tok.hf,
-            messages,
-            letters,
-            {**self.encoding["chat_template_kwargs"], "return_dict": False},
-        )
+        with self._tokenizer_pin.scope():
+            validate_tokenizer(self.contract, self.tok)
+            return token_input(
+                self.tok.hf,
+                messages,
+                letters,
+                {**self.encoding["chat_template_kwargs"], "return_dict": False},
+            )
 
     def messages_for(self, state, spec):
         _, wire, _ = swift_wire_question(spec.view())
@@ -63,13 +68,14 @@ class SwiftTraceGenerator(TraceGenerator):
 
     def conversation_tokens(self, messages):
         """Bind the supplied conversation before the generation-only cue."""
-        validate_tokenizer(self.contract, self.tok)
-        ids = self.tok.hf.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=False,
-            **{**self.encoding["chat_template_kwargs"], "return_dict": False},
-        )
+        with self._tokenizer_pin.scope():
+            validate_tokenizer(self.contract, self.tok)
+            ids = self.tok.hf.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=False,
+                **{**self.encoding["chat_template_kwargs"], "return_dict": False},
+            )
         if hasattr(ids, "keys"):
             ids = ids["input_ids"]
         return list(ids)

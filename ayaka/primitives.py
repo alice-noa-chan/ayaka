@@ -17,6 +17,7 @@ pointer shortlist, then label readout inside the shortlist.
 from __future__ import annotations
 
 import copy
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 import torch
@@ -27,6 +28,7 @@ from .model.decision import AyakaDecisionModel
 from .model.ragged import ragged_softmax
 from .prompt import QuestionView, prefix_head
 from .tokenization import Tokenizer
+from .training.tokenizer_identity import TokenizerPin
 
 
 @dataclass
@@ -73,11 +75,15 @@ class Decision:
         self.max_seq_len = max_seq_len or max(cfg.serve_max_seq_len, cfg.max_seq_len)
         self.max_labels = model.cfg.max_label_candidates
         self.input_contract = copy.deepcopy(getattr(model, "input_contract", None))
-        validate_tokenizer(self.input_contract, tok)
-        if (
+        swift = (
             self.input_contract is not None
             and self.input_contract["input_encoding"]["encoder"] == "swift_canonical"
-        ):
+        )
+        # Swift reads would otherwise reserialize the whole tokenizer on every request.
+        self._tokenizer_pin = TokenizerPin(tok) if swift else None
+        with self._tokenizer_scope():
+            validate_tokenizer(self.input_contract, tok)
+        if swift:
             self.max_seq_len = min(
                 self.max_seq_len,
                 getattr(model.text_config, "max_position_embeddings", self.max_seq_len),
@@ -86,6 +92,9 @@ class Decision:
         self.apply_probability_calibration = True
         self.reuse_head = True  # encode the constant prompt head once
         self._head: tuple[list[int], object, torch.device] | None = None
+
+    def _tokenizer_scope(self):
+        return nullcontext() if self._tokenizer_pin is None else self._tokenizer_pin.scope()
 
     def _device(self, device):
         return device or next(self.model.parameters()).device
@@ -100,9 +109,10 @@ class Decision:
             self.input_contract is not None
             and self.input_contract["input_encoding"]["encoder"] == "swift_canonical"
         ):
-            return encode_serving(
-                state, views, self.tok, self.model.cfg, self.input_contract, self.max_seq_len
-            )
+            with self._tokenizer_scope():
+                return encode_serving(
+                    state, views, self.tok, self.model.cfg, self.input_contract, self.max_seq_len
+                )
         return encode_decision(state, views, self.tok, self.max_seq_len, self.max_labels)
 
     def input_counts(self, state, questions):
