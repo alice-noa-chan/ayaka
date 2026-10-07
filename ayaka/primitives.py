@@ -91,6 +91,8 @@ class Decision:
         self.apply_temperature = True
         self.apply_probability_calibration = True
         self.reuse_head = True  # encode the constant prompt head once
+        # Diagnostic only: ("true", "false") shows Swift Noul options as A=true.
+        self.noul_order = ("false", "true")
         self._head: tuple[list[int], object, torch.device] | None = None
 
     def _tokenizer_scope(self):
@@ -111,8 +113,16 @@ class Decision:
         ):
             with self._tokenizer_scope():
                 return encode_serving(
-                    state, views, self.tok, self.model.cfg, self.input_contract, self.max_seq_len
+                    state,
+                    views,
+                    self.tok,
+                    self.model.cfg,
+                    self.input_contract,
+                    self.max_seq_len,
+                    self.noul_order,
                 )
+        if tuple(self.noul_order) != ("false", "true"):
+            raise ValueError("a reversed Noul order is supported only for Swift checkpoints")
         return encode_decision(state, views, self.tok, self.max_seq_len, self.max_labels)
 
     def input_counts(self, state, questions):

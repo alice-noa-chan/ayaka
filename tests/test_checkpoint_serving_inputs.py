@@ -310,6 +310,43 @@ def test_native_merged_export_retains_recipe_and_calibrated_service(tmp_path):
         load_exported(out, dtype=torch.float32)
 
 
+def test_reversed_noul_order_shows_true_first_and_maps_probabilities_back(tmp_path):
+    from ayaka.training.swift_direct import swift_question
+
+    _, model, tok, _, _ = setup_checkpoint(tmp_path)
+    # A strong letter-A preference: whichever label is shown first wins.
+    head = model.text_model()._ayaka_lm_head
+    bias = torch.zeros(head.weight.shape[0])
+    bias[tok.hf.encode("A", add_special_tokens=False)[0]] = 50
+    head.bias = torch.nn.Parameter(bias, requires_grad=False)
+    decision = Decision(model, tok)
+    judge = parse_question(QUESTIONS["judge"])[0]
+    default = decision.decide(STATE, [judge])[0].extras["p_true"]
+    decision.noul_order = ("true", "false")
+    reversed_ = decision.decide(STATE, [judge])[0].extras["p_true"]
+    assert default < 0.01 and reversed_ > 0.99
+    _, items = decision.encode(STATE, [judge.view()])
+    assert items[0].rendered.display_order == [1, 0]
+    q = parse_question(QUESTIONS["judge"])[0]
+    from ayaka.input_contract import serving_question
+
+    original = serving_question(q.view())
+    assert swift_question(original)[1].labels == ["false", "true"]
+    assert swift_question(original, ("true", "false"))[1].labels == ["true", "false"]
+    with pytest.raises(ValueError, match="noul_order"):
+        swift_question(original, ("yes", "no"))
+
+
+def test_reversed_noul_order_is_rejected_for_legacy_checkpoints():
+    model = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    from ayaka.tokenization import ToyTokenizer
+
+    decision = Decision(model, ToyTokenizer())
+    decision.noul_order = ("true", "false")
+    with pytest.raises(ValueError, match="only for Swift"):
+        decision.decide(STATE, [QuestionSpec("noul", "Approved?", ["false", "true"])])
+
+
 def test_legacy_checkpoint_still_uses_segmented_inputs(tmp_path):
     model = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     path = tmp_path / "legacy"

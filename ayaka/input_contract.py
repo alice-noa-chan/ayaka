@@ -122,7 +122,7 @@ def swift_wire_question(view):
 
 
 @scoped_tokenizer_preparation
-def encode_serving(state, views, tok, cfg, contract, context_limit):
+def encode_serving(state, views, tok, cfg, contract, context_limit, noul_order=("false", "true")):
     from .data.schema import Sample
 
     validate_tokenizer(contract, tok)
@@ -145,6 +145,7 @@ def encode_serving(state, views, tok, cfg, contract, context_limit):
             cfg,
             input_encoding=contract["input_encoding"],
             context_limit=context_limit,
+            noul_order=noul_order,
         )
     except ContextLimitError as exc:
         raise ValidationError(str(exc), "questions") from exc

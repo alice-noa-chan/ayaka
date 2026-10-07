@@ -21,6 +21,9 @@ from .swift_evidence import prepare_swift_evidence_inputs, validate_swift_eviden
 from .tokenizer_identity import backend_fingerprints, configuration_fingerprint
 
 VERSION = "ayaka-swift-direct-inputs-2"
+# Serving and training show Noul as A=false, B=true. The reversed order exists
+# only to measure letter-position bias; it never changes the default.
+NOUL_ORDERS = (("false", "true"), ("true", "false"))
 
 
 def normalize_input_encoding(value=None):
@@ -74,7 +77,9 @@ def input_serving_recipe(tok, input_encoding=None):
     }
 
 
-def encode_direct_sample(sample, tok, cfg, *, input_encoding=None, context_limit=None):
+def encode_direct_sample(
+    sample, tok, cfg, *, input_encoding=None, context_limit=None, noul_order=NOUL_ORDERS[0]
+):
     """Full original inputs on the declared encoder, never silent truncation."""
     encoding = normalize_input_encoding(input_encoding)
     limit = cfg.max_seq_len if context_limit is None else context_limit
@@ -84,8 +89,11 @@ def encode_direct_sample(sample, tok, cfg, *, input_encoding=None, context_limit
             tok,
             cfg,
             context_limit=limit,
+            noul_order=noul_order,
             **{k: v for k, v in encoding.items() if k != "encoder"},
         )
+    if tuple(noul_order) != NOUL_ORDERS[0]:
+        raise ValueError("a reversed Noul order is supported only by the Swift encoder")
     prefix = render_prefix(sample.state, tok)
     for q in sample.questions:
         rendered = render_question(question_view(_noul_canonical(q)), tok, cfg.max_label_candidates)
@@ -117,12 +125,16 @@ def direct_readout_binding(item):
     )
 
 
-def swift_question(question):
+def swift_question(question, noul_order=NOUL_ORDERS[0]):
     """Return API-equivalent criteria and wire-label -> original-id mapping.
 
     Swift's Score API uses integer level keys. Arbitrary dataset candidate IDs
     remain valid, but fractional levels cannot silently change meaning.
+    ``noul_order=("true", "false")`` shows a Noul question as A=true, B=false;
+    probabilities still map back to the original candidates by label.
     """
+    if tuple(noul_order) not in NOUL_ORDERS:
+        raise ValueError(f"noul_order must be one of {NOUL_ORDERS}")
     q = _noul_canonical(question)
     labels = [c.id for c in q.candidates]
     if any(not isinstance(label, str) or not label for label in labels):
@@ -136,7 +148,15 @@ def swift_question(question):
         "instructions": q.instruction,
         "criteria": {label: c.description for label, c in zip(labels, q.candidates, strict=True)},
     }
-    return q, parse_question(raw), dict(zip(labels, (c.id for c in q.candidates), strict=True))
+    wire = parse_question(raw)
+    if q.type == "noul" and tuple(noul_order) != tuple(wire.labels):
+        order = [wire.labels.index(label) for label in noul_order]
+        wire = replace(
+            wire,
+            labels=[wire.labels[i] for i in order],
+            descriptions=[wire.descriptions[i] for i in order],
+        )
+    return q, wire, dict(zip(labels, (c.id for c in q.candidates), strict=True))
 
 
 def _bound_values(item):
@@ -158,6 +178,7 @@ def swift_sample_to_items(
     state_format="pretty",
     chat_template_kwargs=None,
     context_limit=None,
+    noul_order=NOUL_ORDERS[0],
 ):
     """Encode complete isolated questions with the existing Swift renderer.
 
@@ -173,7 +194,7 @@ def swift_sample_to_items(
     ):
         raise ValueError("Swift direct encoding requires original text-only inputs")
     native = getattr(tok, "hf", tok)
-    questions = [swift_question(q) for q in sample.questions]
+    questions = [swift_question(q, noul_order) for q in sample.questions]
     prepared = prepare_swift_evidence_inputs(
         sample.state,
         [wire for _, wire, _ in questions],
