@@ -1,11 +1,11 @@
-"""Export trained Electra models as self-contained model folders.
+"""Export trained Ayaka models as self-contained model folders.
 
     <out>/electra-small/         bf16, LoRA merged into the weights
     <out>/electra-small-int8/    int8 rows (see ayaka.quant)
 
 Each folder::
 
-    electra_config.json   ElectraConfig; backbone = "backbone"
+    electra_config.json   AyakaConfig; backbone = "backbone"
     head.pt               pointer head + gate + per-primitive temperatures
     backbone/             Gemma 4 text-only config, tokenizer, safetensors
     export_meta.json      source checkpoint, quantization, parity report
@@ -29,7 +29,7 @@ import torch.nn as nn
 
 from .checkpoint import load_config
 from .input_contract import checkpoint_metadata, read_contract, validate_tokenizer
-from .model.electra import ElectraDecisionModel
+from .model.decision import AyakaDecisionModel
 from .quant import (
     Int8Embedding,
     _Float32IO,
@@ -114,7 +114,7 @@ def _save_tokenizer(source: str, out_dir: str, revision: str | None = None) -> N
 
 
 def export_model(
-    model: ElectraDecisionModel,
+    model: AyakaDecisionModel,
     out_dir: str,
     tokenizer_source: str,
     quantize: bool = False,
@@ -194,7 +194,7 @@ def _readme(name: str, quantized: bool) -> str:
     )
     return f"""# {name}
 
-Electra decision model (Gemma 4 backbone). {q}
+Ayaka decision model (Gemma 4 backbone). {q}
 ## Serve (TypeSafe-compatible `/v1/systemone`)
 
     pip install "ayaka @ <path-or-git-url-of-this-repo>"
@@ -296,7 +296,7 @@ def load_int8_backbone(bb_dir: str, device="cpu", dtype=torch.bfloat16, linear_m
 def load_exported(
     path: str, device="cpu", dtype: torch.dtype | None = None, linear_mode: str = "auto"
 ):
-    """Load an export folder -> (ElectraDecisionModel, tokenizer)."""
+    """Load an export folder -> (AyakaDecisionModel, tokenizer)."""
     from .tokenization import HFTokenizer, ToyTokenizer
 
     dev = torch.device(device)
@@ -316,9 +316,9 @@ def load_exported(
     bb_dir = os.path.join(path, cfg.backbone)
     if os.path.exists(os.path.join(bb_dir, QUANT_FILE)):
         text, tcfg = load_int8_backbone(bb_dir, dev, dtype, linear_mode)
-        model = ElectraDecisionModel(replace(cfg, backbone=bb_dir), text, tcfg)
+        model = AyakaDecisionModel(replace(cfg, backbone=bb_dir), text, tcfg)
     else:
-        model = ElectraDecisionModel.from_config(
+        model = AyakaDecisionModel.from_config(
             replace(cfg, backbone=bb_dir), dtype=dtype, device=dev
         )
     model.head.to(dev)
@@ -373,7 +373,7 @@ def main(argv: list[str] | None = None) -> dict:
 
     from .checkpoint import load_checkpoint
 
-    ap = argparse.ArgumentParser(description="Export an Electra checkpoint (bf16 + int8)")
+    ap = argparse.ArgumentParser(description="Export an Ayaka checkpoint (bf16 + int8)")
     ap.add_argument("--ckpt", required=True, help="training checkpoint directory")
     ap.add_argument("--out", required=True, help="export root directory")
     ap.add_argument("--name", required=True, help="folder name, e.g. electra-small")

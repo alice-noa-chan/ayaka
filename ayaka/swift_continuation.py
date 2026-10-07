@@ -15,7 +15,7 @@ import torch
 
 from .collate import EncodedQuestion, suffix_rows
 from .input_contract import swift_wire_question, validate_tokenizer
-from .model.electra import PRIMITIVE_INDEX
+from .model.decision import PRIMITIVE_INDEX
 from .model.ragged import ragged_softmax
 from .prompt import RenderedQuestion
 from .reasoning_pipeline import TraceFailure, TraceGenerator

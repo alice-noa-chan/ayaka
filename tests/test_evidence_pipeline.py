@@ -150,9 +150,9 @@ def test_reasoning_decision_requires_an_unmerged_adapter():
 
     from ayaka.config import tiny_config
     from ayaka.evidence_pipeline import reasoning_decision
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.tokenization import ToyTokenizer
 
-    merged = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    merged = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     with pytest.raises(ValueError):
         reasoning_decision(merged, ToyTokenizer())

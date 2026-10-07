@@ -1,4 +1,4 @@
-"""Structural invariants of the Electra decision model (docs.md section 48).
+"""Structural invariants of the Ayaka decision model (docs.md section 48).
 
 Runs a random tiny Gemma 4 text stack on CPU in fp32.
 """
@@ -11,7 +11,7 @@ import torch
 
 from ayaka.collate import encode_decision, full_rows
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.model.ragged import ragged_softmax
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.prompt import QuestionView
@@ -26,7 +26,7 @@ STATE = {
 
 @pytest.fixture(scope="module")
 def model():
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     with torch.no_grad():
         m.gate.fill_(0.7)  # exercise the pointer path too
     return m.eval()
@@ -214,7 +214,7 @@ def test_shared_layer_pruning_is_exact_cache_path(model):
 
 def test_shared_layer_pruning_same_gradients():
     """Training through the pruned path yields the same gradients."""
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     views = [QuestionView("choice", "Which carrier?", ["DHL", "UPS", "FedEx"])]
     _, items = encode_decision(STATE, views, TOK, max_seq_len=512)
     batch = full_rows(items, TOK.pad_id)
@@ -251,7 +251,7 @@ def test_windowed_attention_is_exact(block, monkeypatch):
     on training rows, the prefix-cache path and gradients."""
     from ayaka.model import attention
 
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float64)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float64)
     m.head.double()
     m.gate.data = m.gate.data.double()
     cfg = m.text_model().config
@@ -292,7 +292,7 @@ def test_inference_budget_keeps_states_that_training_would_truncate():
     tok = ToyTokenizer()
     cfg = tiny_config(max_seq_len=160, serve_max_seq_len=4096)
     torch.manual_seed(0)
-    m = ElectraDecisionModel.from_config(cfg, dtype=torch.float32).eval()
+    m = AyakaDecisionModel.from_config(cfg, dtype=torch.float32).eval()
     state = "clause " * 60 + "DECISIVE-FACT-IN-THE-MIDDLE " + "filler " * 60
     q = QuestionSpec("noul", "Does it hold?", ["no", "yes"])
     trained_prefix, _ = encode_decision(state, [q.view()], tok, cfg.max_seq_len)
@@ -305,5 +305,5 @@ def test_inference_budget_keeps_states_that_training_would_truncate():
     assert abs(sum(probs) - 1) < 1e-5
     # an explicit budget still wins, and old configs never shrink below training
     assert Decision(m, tok, max_seq_len=200).max_seq_len == 200
-    old = ElectraDecisionModel.from_config(tiny_config(serve_max_seq_len=64), dtype=torch.float32)
+    old = AyakaDecisionModel.from_config(tiny_config(serve_max_seq_len=64), dtype=torch.float32)
     assert Decision(old, tok).max_seq_len == old.cfg.max_seq_len

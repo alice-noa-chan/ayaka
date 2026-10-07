@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> None:
 
     from .export import load_exported
 
-    ap = argparse.ArgumentParser(description="TypeSafe-compatible Electra server")
+    ap = argparse.ArgumentParser(description="TypeSafe-compatible Ayaka server")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--model", help="export folder (ayaka.export)")
     src.add_argument(

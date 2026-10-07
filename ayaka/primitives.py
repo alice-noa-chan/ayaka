@@ -23,7 +23,7 @@ import torch
 
 from .collate import EncodedQuestion, encode_decision, suffix_rows
 from .input_contract import encode_serving, validate_tokenizer
-from .model.electra import ElectraDecisionModel
+from .model.decision import AyakaDecisionModel
 from .model.ragged import ragged_softmax
 from .prompt import QuestionView, prefix_head
 from .tokenization import Tokenizer
@@ -65,7 +65,7 @@ class DecisionResult:
 
 
 class Decision:
-    def __init__(self, model: ElectraDecisionModel, tok: Tokenizer, max_seq_len: int | None = None):
+    def __init__(self, model: AyakaDecisionModel, tok: Tokenizer, max_seq_len: int | None = None):
         self.model = model
         self.tok = tok
         cfg = model.cfg

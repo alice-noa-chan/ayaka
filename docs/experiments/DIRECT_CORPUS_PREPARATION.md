@@ -36,10 +36,10 @@ Example configuration creation, using the repository's pinned large model:
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from ayaka.config import ELECTRA_LARGE
+from ayaka.config import AYAKA_LARGE
 
 cfg = replace(
-    ELECTRA_LARGE, name="ayaka-v2-direct-control", version=2, readout="lm", lora_r=32, lora_alpha=64
+    AYAKA_LARGE, name="ayaka-v2-direct-control", version=2, readout="lm", lora_r=32, lora_alpha=64
 )
 Path("direct-config.json").write_text(json.dumps(asdict(cfg)), encoding="utf-8")
 ```

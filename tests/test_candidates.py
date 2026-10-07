@@ -166,12 +166,12 @@ def test_unvalidated_partition_bypasses_native_text_temperature():
     from test_reasoning_pipeline import Tok
 
     from ayaka.config import tiny_config
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.primitives import QuestionSpec
     from ayaka.reasoning import ReasoningSettings
     from ayaka.reasoning_pipeline import controlled_decision
 
-    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
     ordinary = controlled_decision(model, Tok())
     experimental = ordinary.for_unvalidated_partition()
     spec = [QuestionSpec("noul", "A request?", ["no", "yes"])]

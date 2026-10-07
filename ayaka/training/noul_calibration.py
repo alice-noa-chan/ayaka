@@ -64,7 +64,7 @@ def _acceptable(reference, measured):
 
 
 def model_noul_temperatures(model):
-    from ..model.electra import PRIMITIVE_INDEX
+    from ..model.decision import PRIMITIVE_INDEX
 
     short, long = model.temperature[PRIMITIVE_INDEX["noul"]].tolist()
     return {"noul@short": short, "noul@long": long}

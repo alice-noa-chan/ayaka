@@ -200,7 +200,7 @@ def test_unbound_receipts_fail_before_any_native_weight_load_or_output(
     else:
         kwargs["expected_audit_receipt_sha256"] = "0" * 64
     monkeypatch.setattr(
-        run_direct.ElectraDecisionModel, "from_config", lambda *a, **k: pytest.fail("no weights")
+        run_direct.AyakaDecisionModel, "from_config", lambda *a, **k: pytest.fail("no weights")
     )
     with pytest.raises(ValueError, match="together|pinned|digest"):
         run_pipeline(root, tmp_path / "absent", action="train", mechanics_only=True, **kwargs)

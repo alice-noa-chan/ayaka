@@ -1,4 +1,4 @@
-"""ElectraDecisionModel — decision head over a Gemma 4 text backbone.
+"""AyakaDecisionModel — decision head over a Gemma 4 text backbone.
 
     prefix (instructions + state)          encoded once per state
       └─ suffix_q (question + options + cue)  isolated branch per question
@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 
 from ..backbone import load_text_backbone, native_logits, output_rows
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from .attention import enable_windowed_attention
 from .fastpath import forward_kept, kv_shared_start, prefix_cache
 from .heads import PointerHead
@@ -140,8 +140,8 @@ def span_means(
     return total / lengths.clamp(min=1).unsqueeze(-1).to(total.dtype)
 
 
-class ElectraDecisionModel(nn.Module):
-    def __init__(self, cfg: ElectraConfig, backbone: nn.Module, text_config):
+class AyakaDecisionModel(nn.Module):
+    def __init__(self, cfg: AyakaConfig, backbone: nn.Module, text_config):
         super().__init__()
         self.cfg = cfg
         self.backbone = backbone
@@ -170,14 +170,14 @@ class ElectraDecisionModel(nn.Module):
     @classmethod
     def from_config(
         cls,
-        cfg: ElectraConfig,
+        cfg: AyakaConfig,
         dtype: torch.dtype = torch.bfloat16,
         device="cpu",
         *,
         backbone_path: str | None = None,
         local_files_only: bool = False,
         strict_loading: bool = False,
-    ) -> ElectraDecisionModel:
+    ) -> AyakaDecisionModel:
         backbone, text_config = load_text_backbone(
             backbone_path or cfg.backbone,
             dtype=dtype,

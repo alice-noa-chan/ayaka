@@ -8,7 +8,7 @@ import torch
 
 from ayaka.checkpoint import apply_lora, load_checkpoint, save_checkpoint
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.batching import budget_batches, collate_items, sample_to_items
@@ -20,7 +20,7 @@ TOK = ToyTokenizer()
 
 
 def _model():
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     for p in m.backbone.parameters():
         p.requires_grad_(False)
     return apply_lora(m)
@@ -270,7 +270,7 @@ def test_shared_prefix_training_matches_full_rows(prune):
     from ayaka.training.batching import plan_chunks
 
     torch.manual_seed(0)
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float64)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float64)
     m.head.double()
     m.gate.data = m.gate.data.double().fill_(0.5)
     m.prune_shared_positions = prune
@@ -374,7 +374,7 @@ def test_selective_checkpointing_matches_plain_gradients_and_splits_by_length():
     from ayaka.losses import decision_loss
 
     torch.manual_seed(0)
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float64)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float64)
     m.head.double()
     m.gate.data = m.gate.data.double().fill_(0.5)
     items = _mixed_length_items(m)

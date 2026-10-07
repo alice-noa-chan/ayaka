@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import torch
 
 from .collate import EncodedQuestion, suffix_rows
-from .model.electra import PRIMITIVE_INDEX, ElectraDecisionModel
+from .model.decision import PRIMITIVE_INDEX, AyakaDecisionModel
 from .model.ragged import ragged_softmax
 from .primitives import Decision
 from .prompt import render_prefix, render_question, render_state
@@ -316,7 +316,7 @@ def load_image_decision(
     text = native.language_model
     if lm.get_output_embeddings().weight is not text.get_input_embeddings().weight:
         text.add_module("_ayaka_lm_head", lm.get_output_embeddings())
-    model = ElectraDecisionModel(cfg, text, config.text_config).to(device).eval()
+    model = AyakaDecisionModel(cfg, text, config.text_config).to(device).eval()
     adapter = os.path.join(path, "adapter")
     if os.path.isdir(adapter):
         from peft import PeftModel

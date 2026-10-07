@@ -113,7 +113,7 @@ def test_custom_data_is_automatically_calibrated_refitted_and_saved(tmp_path, mo
         assert result["raw_heldout"]["nll"] != pytest.approx(result["heldout"]["nll"])
         loaded = load_checkpoint(result["checkpoint"], device="cpu", dtype=torch.float32)
         assert loaded.noul_calibration is not None and not loaded.noul_calibration.selected
-        from ayaka.model.electra import PRIMITIVE_INDEX
+        from ayaka.model.decision import PRIMITIVE_INDEX
 
         assert loaded.temperature[PRIMITIVE_INDEX["noul"]].tolist() == pytest.approx(
             [expected_temperature, expected_temperature]

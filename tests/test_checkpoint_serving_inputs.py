@@ -18,7 +18,7 @@ from ayaka.eval.read_artifact import fingerprint
 from ayaka.export import export_model, load_exported
 from ayaka.http_transport import request_bytes
 from ayaka.input_contract import metadata_contract
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.reasoning import ReasoningSettings
 from ayaka.reasoning_pipeline import controlled_decision
@@ -81,7 +81,7 @@ def setup_checkpoint(tmp_path, family="granite", *, variant="labeled"):
         long_prompt_tokens=180,
         lora_dropout=0,
     )
-    model = apply_lora(ElectraDecisionModel(cfg, detach_text_backbone(lm), text.config))
+    model = apply_lora(AyakaDecisionModel(cfg, detach_text_backbone(lm), text.config))
     generator = torch.Generator().manual_seed(117)
     with torch.no_grad():
         for name, weight in model.backbone.named_parameters():
@@ -189,7 +189,7 @@ def test_invalid_contract_rejected_before_weight_loading(tmp_path, monkeypatch, 
     def forbid(*args, **kwargs):
         pytest.fail("invalid metadata reached weight loader")
 
-    monkeypatch.setattr(ElectraDecisionModel, "from_config", forbid)
+    monkeypatch.setattr(AyakaDecisionModel, "from_config", forbid)
     with pytest.raises(ValueError):
         load_checkpoint(str(checkpoint), local_files_only=True)
 
@@ -282,7 +282,7 @@ def test_native_merged_export_retains_recipe_and_calibrated_service(tmp_path):
 
 
 def test_legacy_checkpoint_still_uses_segmented_inputs(tmp_path):
-    model = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     path = tmp_path / "legacy"
     save_checkpoint(model, str(path))
     loaded = load_checkpoint(str(path), dtype=torch.float32)
@@ -300,7 +300,7 @@ def favor_trace_token(model, tok):
 
 def test_real_swift_trace_continues_same_cache_and_matches_full_native_read(tmp_path):
     from ayaka.collate import full_rows
-    from ayaka.model.electra import PRIMITIVE_INDEX
+    from ayaka.model.decision import PRIMITIVE_INDEX
     from ayaka.prompt import RenderedQuestion
 
     _, model, tok, _, _ = setup_checkpoint(tmp_path)
@@ -449,7 +449,7 @@ def test_native_service_preserves_signed_levels_and_rejects_fractional_aliases(
 
 def test_real_gemma_sliding_cache_keeps_eos_outside_trace_then_matches_full_read(tmp_path):
     from ayaka.collate import EncodedQuestion, full_rows
-    from ayaka.model.electra import PRIMITIVE_INDEX
+    from ayaka.model.decision import PRIMITIVE_INDEX
     from ayaka.model.fastpath import prefill_last
     from ayaka.prompt import RenderedQuestion
 

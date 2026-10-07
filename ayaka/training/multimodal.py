@@ -5,7 +5,7 @@ from dataclasses import replace
 import torch
 
 from ..collate import EncodedQuestion
-from ..model.electra import PRIMITIVE_INDEX
+from ..model.decision import PRIMITIVE_INDEX
 from ..multimodal import ImageTraceGenerator, decode_media
 from ..primitives import QuestionSpec
 from ..prompt import render_prefix

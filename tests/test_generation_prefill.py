@@ -2,14 +2,14 @@ import pytest
 import torch
 
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.model.fastpath import prefill_last
 
 
 @pytest.mark.parametrize("padded", [False, True])
 def test_native_prefill_matches_full_forward_and_next_cached_step(padded):
     torch.manual_seed(119)
-    model = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32, device="cpu")
+    model = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32, device="cpu")
     model.eval()
     text = model.text_model()
     ids = torch.randint(15, 100, (2, 17))

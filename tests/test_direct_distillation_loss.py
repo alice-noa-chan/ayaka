@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from ayaka.losses import LossWeights, decision_loss, rps_loss
-from ayaka.model.electra import CHOICE, SCORE, DecisionOutput
+from ayaka.model.decision import CHOICE, SCORE, DecisionOutput
 
 
 def output():

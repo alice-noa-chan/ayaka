@@ -46,7 +46,7 @@ def test_fixed_diagnostic_budget_fits_existing_credit_and_refuses_retry(tmp_path
     [
         "../escape",
         "/absolute",
-        "ayaka/model/electra.py",
+        "ayaka/model/decision.py",
         "diagnostic-pilot/adapter/a.pt",
         "diagnostic-pilot/adapter/a\\b.json",
     ],

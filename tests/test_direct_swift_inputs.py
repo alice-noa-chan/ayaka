@@ -12,7 +12,7 @@ from ayaka.backbone import detach_text_backbone
 from ayaka.config import tiny_config
 from ayaka.data.schema import Candidate, Question, Sample
 from ayaka.losses import LossWeights, decision_loss
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.prompt import render_prefix
 from ayaka.swift.prompt import PROMPT_VARIANTS, render_question
 from ayaka.swift.readers import HFReader
@@ -67,7 +67,7 @@ def setup(family, *, variant="min", state_format="pretty", shared=False):
     tok = HFTokenizer(tokenizer(), "offline-random-fixture")
     lm, text = native_model(family)
     cfg = tiny_config(readout="lm", max_seq_len=2048)
-    model = ElectraDecisionModel(cfg, text, text.config)
+    model = AyakaDecisionModel(cfg, text, text.config)
     trainer = Trainer(
         model,
         tok,

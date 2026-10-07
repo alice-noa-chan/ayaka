@@ -265,7 +265,7 @@ def test_runner_requires_same_complete_deployable_snapshot_before_weight_load(
     else:
         record = None
     monkeypatch.setattr(
-        run_direct.ElectraDecisionModel,
+        run_direct.AyakaDecisionModel,
         "from_config",
         lambda *a, **k: pytest.fail("weight allocation prohibited"),
     )
@@ -289,7 +289,7 @@ def test_cpu_runner_audit_checks_supplied_native_weights_without_loading_them(
 ):
     root, native, _, receipt, kwargs, record = prepared(tmp_path, "granite")
     monkeypatch.setattr(
-        run_direct.ElectraDecisionModel,
+        run_direct.AyakaDecisionModel,
         "from_config",
         lambda *a, **k: pytest.fail("must not load weights"),
     )

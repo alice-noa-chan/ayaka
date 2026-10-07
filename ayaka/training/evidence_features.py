@@ -16,7 +16,7 @@ import torch
 
 from ayaka.backbone import native_logits, output_rows
 from ayaka.eval.read_artifact import fingerprint
-from ayaka.model.electra import PRIMITIVE_INDEX, at_least_fp32
+from ayaka.model.decision import PRIMITIVE_INDEX, at_least_fp32
 from ayaka.prompt import QuestionView, render_prefix, render_question
 
 from ..input_errors import ContextLimitError

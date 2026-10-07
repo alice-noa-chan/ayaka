@@ -17,14 +17,14 @@ from pathlib import Path
 import torch
 
 from ..checkpoint import apply_lora, load_checkpoint, save_checkpoint
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.decontam import Decontaminator
 from ..data.reasoning_v2 import CURRICULUM_VERSION, SPLITS, curriculum
 from ..eval.reasoning_v2 import dataset_signature
 from ..eval.reasoning_v2 import evaluate_efforts as run_efforts
 from ..eval.v2 import assert_isolated, select_candidates
 from ..losses import LossWeights
-from ..model.electra import ElectraDecisionModel
+from ..model.decision import AyakaDecisionModel
 from ..reasoning_pipeline import controlled_decision
 from ..routing import fit_router, paired_training_rows
 from ..tokenization import HFTokenizer
@@ -112,7 +112,7 @@ def load_manifest(path):
 
 
 def candidate_config(candidate, **overrides):
-    return ElectraConfig(
+    return AyakaConfig(
         name=candidate["name"],
         backbone=candidate["repo"],
         backbone_revision=candidate["revision"],
@@ -265,7 +265,7 @@ def load_candidate(candidate):
     torch.manual_seed(15)
     cfg = candidate_config(candidate)
     tok = HFTokenizer.for_config(cfg)
-    model = ElectraDecisionModel.from_config(cfg, device="cuda", dtype=torch.bfloat16).eval()
+    model = AyakaDecisionModel.from_config(cfg, device="cuda", dtype=torch.bfloat16).eval()
     return model, tok
 
 
@@ -434,7 +434,7 @@ def worker(manifest_path, out, stage, seconds, screen_candidates=()):
                             break
                         cfg = replace(model.cfg, readout=readout, set_mixer_layers=layers)
                         torch.manual_seed(15)
-                        probe = ElectraDecisionModel(cfg, model.backbone, model.text_config).cuda()
+                        probe = AyakaDecisionModel(cfg, model.backbone, model.text_config).cuda()
                         probe.backbone.requires_grad_(False)
                         train_items = [
                             it
@@ -509,7 +509,7 @@ def worker(manifest_path, out, stage, seconds, screen_candidates=()):
                                 readout=head["readout"],
                                 set_mixer_layers=head["set_mixer_layers"],
                             )
-                            model = ElectraDecisionModel(
+                            model = AyakaDecisionModel(
                                 cfg, model.backbone, model.text_config
                             ).cuda()
                     model.backbone.requires_grad_(False)

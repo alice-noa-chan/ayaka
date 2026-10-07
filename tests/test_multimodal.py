@@ -8,7 +8,7 @@ from PIL import Image
 
 from ayaka.backbone import native_logits, tiny_text_config
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.multimodal import (
     ImageBackend,
     ImageDecision,
@@ -117,7 +117,7 @@ def build(family):
         )
         config = Gemma4UnifiedConfig(text_config=text, vision_config=vision, image_token_id=510)
         lm = Gemma4UnifiedForConditionalGeneration(config).eval()
-    model = ElectraDecisionModel(
+    model = AyakaDecisionModel(
         tiny_config(version=2, serve_max_seq_len=4096), lm.model.language_model, text
     ).eval()
     tok = ImageTok()

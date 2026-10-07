@@ -1,4 +1,4 @@
-"""Int8 weight quantization for exported Electra models.
+"""Int8 weight quantization for exported Ayaka models.
 
 Storage: every Linear weight and both token embeddings are stored as
 symmetric per-row int8 + a float scale (row = output channel / token),

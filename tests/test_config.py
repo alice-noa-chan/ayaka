@@ -1,7 +1,7 @@
 from ayaka.config import (
-    ELECTRA_BASE,
-    ELECTRA_LARGE,
-    ELECTRA_SMALL,
+    AYAKA_BASE,
+    AYAKA_LARGE,
+    AYAKA_SMALL,
     MODEL_FAMILY,
     model_config,
     tiny_config,
@@ -9,14 +9,14 @@ from ayaka.config import (
 
 
 def test_family_backbones_are_gemma4_instruct():
-    assert ELECTRA_SMALL.backbone == "google/gemma-4-E2B-it"
-    assert ELECTRA_BASE.backbone == "google/gemma-4-E4B-it"
-    assert ELECTRA_LARGE.backbone == "google/gemma-4-12B-it"
+    assert AYAKA_SMALL.backbone == "google/gemma-4-E2B-it"
+    assert AYAKA_BASE.backbone == "google/gemma-4-E4B-it"
+    assert AYAKA_LARGE.backbone == "google/gemma-4-12B-it"
     assert set(MODEL_FAMILY) == {"electra-small", "electra-base", "electra-large"}
 
 
 def test_capacity_grows_with_size_topology_fixed():
-    s, b, lg = ELECTRA_SMALL, ELECTRA_BASE, ELECTRA_LARGE
+    s, b, lg = AYAKA_SMALL, AYAKA_BASE, AYAKA_LARGE
     assert s.pointer_dim < b.pointer_dim < lg.pointer_dim
     assert s.lora_r <= b.lora_r <= lg.lora_r
     for c in (s, b, lg):
@@ -27,5 +27,5 @@ def test_capacity_grows_with_size_topology_fixed():
 
 def test_model_config_lookup():
     assert model_config("tiny").backbone == "tiny"
-    assert model_config("electra-base") is ELECTRA_BASE
+    assert model_config("electra-base") is AYAKA_BASE
     assert tiny_config(pointer_dim=16).pointer_dim == 16

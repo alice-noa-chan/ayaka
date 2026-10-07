@@ -96,7 +96,7 @@ def cmd_eval(args) -> dict:
     from .config import model_config
     from .data.decontam import Decontaminator
     from .eval.jevbench import run_jevbench
-    from .model.electra import ElectraDecisionModel
+    from .model.decision import AyakaDecisionModel
     from .tokenization import HFTokenizer
     from .training.calibrate import apply_temperatures, fit_temperatures
     from .training.run import items_from_spec
@@ -105,7 +105,7 @@ def cmd_eval(args) -> dict:
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if dev.type == "cuda" else torch.float32
     if args.zero_shot:
-        model = ElectraDecisionModel.from_config(model_config(args.model), dtype=dtype, device=dev)
+        model = AyakaDecisionModel.from_config(model_config(args.model), dtype=dtype, device=dev)
     else:
         model = load_checkpoint(args.ckpt, device=dev, dtype=dtype)
     model.requires_grad_(False)

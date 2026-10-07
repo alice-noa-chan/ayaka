@@ -8,7 +8,7 @@ import torch
 
 from ..backbone import detach_text_backbone, tiny_text_config
 from ..checkpoint import apply_lora
-from ..model.electra import ElectraDecisionModel
+from ..model.decision import AyakaDecisionModel
 from .native_metadata import configuration_binding
 from .optimization import OptimizationConfig, optimization_plan
 
@@ -63,7 +63,7 @@ def inspect_direct_model(
         output_shape = list(head.weight.shape)
         has_bias = getattr(head, "bias", None) is not None
         backbone = detach_text_backbone(lm)
-        model = ElectraDecisionModel(cfg, backbone, text_config)
+        model = AyakaDecisionModel(cfg, backbone, text_config)
         model.backbone.requires_grad_(False)
         apply_lora(model)
         kernel_plan = optimization_plan(model, optimizations or OptimizationConfig())

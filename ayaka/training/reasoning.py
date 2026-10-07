@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from ..collate import EncodedQuestion
 from ..evidence_generation import chat_ids
-from ..model.electra import PRIMITIVE_INDEX
+from ..model.decision import PRIMITIVE_INDEX
 from ..primitives import QuestionSpec
 from ..reasoning_pipeline import readout_suffix, trace_messages
 from .batching import _noul_canonical, sample_to_items

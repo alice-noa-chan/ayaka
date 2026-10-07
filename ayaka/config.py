@@ -1,10 +1,13 @@
-"""Electra model family on pretrained Gemma 4 backbones.
+"""Ayaka model family on pretrained Gemma 4 backbones.
 
-The family keeps Electra's decision contract — shared state encoded
-once, isolated question branches, dynamic candidate sets, pointer
-readout, per-primitive calibration — but replaces the from-scratch
-encoder with an instruction-tuned Gemma 4 text stack. Only capacity
-changes across sizes; the decision topology is identical.
+The family keeps the decision contract of the original ELECTRA-based
+design — shared state encoded once, isolated question branches, dynamic
+candidate sets, pointer readout, per-primitive calibration — but replaces
+the from-scratch encoder with an instruction-tuned Gemma 4 text stack.
+Only capacity changes across sizes; the decision topology is identical.
+
+The ``electra-*`` size names are kept as stable identifiers: published
+checkpoints store them in their config, and the CLIs accept them.
 
 | size  | backbone              | effective params | train GPU  |
 | ----- | --------------------- | ---------------- | ---------- |
@@ -19,7 +22,7 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
-class ElectraConfig:
+class AyakaConfig:
     """Backbone choice + decision-head capacity for one family member."""
 
     name: str
@@ -65,7 +68,7 @@ class ElectraConfig:
             raise ValueError("input_contract_required must be boolean")
 
 
-ELECTRA_SMALL = ElectraConfig(
+AYAKA_SMALL = AyakaConfig(
     name="electra-small",
     backbone="google/gemma-4-E2B-it",
     backbone_revision="3e22461f65e89153144f8adb70e3b8c2cc9845a7",
@@ -76,7 +79,7 @@ ELECTRA_SMALL = ElectraConfig(
     lora_alpha=64,
 )
 
-ELECTRA_BASE = ElectraConfig(
+AYAKA_BASE = AyakaConfig(
     name="electra-base",
     backbone="google/gemma-4-E4B-it",
     backbone_revision="ee0ef6023621cff504d758262d4e04895a5af4a2",
@@ -87,7 +90,7 @@ ELECTRA_BASE = ElectraConfig(
     lora_alpha=64,
 )
 
-ELECTRA_LARGE = ElectraConfig(
+AYAKA_LARGE = AyakaConfig(
     name="electra-large",
     backbone="google/gemma-4-12B-it",
     backbone_revision="707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
@@ -98,12 +101,10 @@ ELECTRA_LARGE = ElectraConfig(
     lora_alpha=128,
 )
 
-MODEL_FAMILY: dict[str, ElectraConfig] = {
-    c.name: c for c in (ELECTRA_LARGE, ELECTRA_BASE, ELECTRA_SMALL)
-}
+MODEL_FAMILY: dict[str, AyakaConfig] = {c.name: c for c in (AYAKA_LARGE, AYAKA_BASE, AYAKA_SMALL)}
 
 
-def tiny_config(**overrides) -> ElectraConfig:
+def tiny_config(**overrides) -> AyakaConfig:
     """Random-weight Gemma 4 text stack for CPU tests (no downloads)."""
     base = {
         "name": "electra-tiny",
@@ -117,8 +118,8 @@ def tiny_config(**overrides) -> ElectraConfig:
         "serve_max_seq_len": 512,
     }
     base.update(overrides)
-    return ElectraConfig(**base)
+    return AyakaConfig(**base)
 
 
-def model_config(name: str) -> ElectraConfig:
+def model_config(name: str) -> AyakaConfig:
     return tiny_config() if name in ("tiny", "electra-tiny") else MODEL_FAMILY[name]

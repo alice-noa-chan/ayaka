@@ -6,7 +6,7 @@ import torch
 from ayaka.checkpoint import apply_lora
 from ayaka.config import tiny_config
 from ayaka.data.reasoning_v2 import curriculum
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.reasoning import reasoning_items
 from ayaka.training.trainer import TrainConfig, Trainer
@@ -23,7 +23,7 @@ def test_joint_step_trains_trace_and_decision_without_prompt_ce(primitive):
     assert len(items) == 2 and items[0].reasoning_labels is None
     assert len(items[1].reasoning_labels) == len(items[1].reasoning_positions)
     assert items[1].reasoning_positions[0] > 0
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     trainer = Trainer(model, tok, TrainConfig(steps=1, bf16=False, micro_batch_tokens=4096), "cpu")
@@ -108,7 +108,7 @@ def test_head_ablation_runs_and_returns_valid_distributions(readout):
     from ayaka.primitives import Decision, QuestionSpec
 
     cfg = replace(tiny_config(), readout=readout, set_mixer_layers=0)
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32).eval()
     result = Decision(model, ToyTokenizer()).decide(
         "Hello", [QuestionSpec("choice", "Intent?", ["hi", "refund"])]
     )[0]

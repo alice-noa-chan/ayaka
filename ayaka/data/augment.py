@@ -1,4 +1,4 @@
-"""Electra-specific counterfactual augmentation (sec 34/44, A5).
+"""Counterfactual augmentation (sec 34/44, A5).
 
 Rule-based target semantics accompany every transformation — the
 distribution moves with the candidates, and insufficient-evidence

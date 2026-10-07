@@ -8,7 +8,7 @@ import torch
 
 from ayaka.collate import encode_decision, full_rows, suffix_rows
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel, span_means
+from ayaka.model.decision import AyakaDecisionModel, span_means
 from ayaka.prompt import QuestionView
 from ayaka.tokenization import ToyTokenizer
 
@@ -52,9 +52,7 @@ def test_sparse_pool_does_not_lose_small_options_after_large_prefix():
 
 def model_and_batch():
     torch.manual_seed(1)
-    model = ElectraDecisionModel.from_config(
-        tiny_config(long_prompt_tokens=256), dtype=torch.float32
-    )
+    model = AyakaDecisionModel.from_config(tiny_config(long_prompt_tokens=256), dtype=torch.float32)
     tok = ToyTokenizer()
     _, encoded = encode_decision(
         {"status": "received", "amount": 300},

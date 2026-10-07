@@ -19,12 +19,12 @@ from pathlib import Path
 import torch
 
 from ..checkpoint import apply_lora, load_checkpoint, save_checkpoint
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..eval.v2 import summarize, typed_row
 from ..losses import LossWeights
-from ..model.electra import ElectraDecisionModel
+from ..model.decision import AyakaDecisionModel
 from ..primitives import QuestionSpec
 from .batching import _noul_canonical
 from .calibrate import apply_temperatures, fit_temperatures
@@ -229,7 +229,7 @@ def run_pipeline(
         audited.inventory,
         audited.groups,
     )
-    cfg = ElectraConfig(**recipe["model"])
+    cfg = AyakaConfig(**recipe["model"])
     if action == "audit":
         if snapshot_record is not None:
             _verified_native_root(cfg, recipe, snapshot_record, snapshot_path)
@@ -292,7 +292,7 @@ def run_pipeline(
         # Configure cuBLAS before native loading can initialize its first CUDA handle.
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     torch.manual_seed(tcfg.seed)
-    model = ElectraDecisionModel.from_config(
+    model = AyakaDecisionModel.from_config(
         cfg,
         dtype=torch.float32 if mechanics_only else torch.bfloat16,
         device=dev,

@@ -1,11 +1,11 @@
-from .electra import (
+from .decision import (
     CHOICE,
     NOUL,
     PRIMITIVE_INDEX,
     SCORE,
+    AyakaDecisionModel,
     DecisionBatch,
     DecisionOutput,
-    ElectraDecisionModel,
 )
 
 __all__ = [
@@ -15,5 +15,5 @@ __all__ = [
     "SCORE",
     "DecisionBatch",
     "DecisionOutput",
-    "ElectraDecisionModel",
+    "AyakaDecisionModel",
 ]

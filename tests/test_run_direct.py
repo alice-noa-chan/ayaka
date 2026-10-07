@@ -42,7 +42,7 @@ def test_audit_allocates_no_weights_or_execution_output(tmp_path, monkeypatch):
     def no_load(*args, **kwargs):
         raise AssertionError("audit must not load pretrained or random model weights")
 
-    monkeypatch.setattr(run_direct.ElectraDecisionModel, "from_config", no_load)
+    monkeypatch.setattr(run_direct.AyakaDecisionModel, "from_config", no_load)
     result = run_pipeline(root, tmp_path / "absent", action="audit", mechanics_only=True)
     assert result["optimizer_steps"] == 0
     assert not (tmp_path / "absent").exists()
@@ -59,7 +59,7 @@ def test_full_credit_rejection_precedes_any_weight_load_or_output(tmp_path, monk
     def no_load(*args, **kwargs):
         raise AssertionError("insufficient credit must reject before loading model weights")
 
-    monkeypatch.setattr(run_direct.ElectraDecisionModel, "from_config", no_load)
+    monkeypatch.setattr(run_direct.AyakaDecisionModel, "from_config", no_load)
     with pytest.raises(ValueError, match="exceeds prepaid credit"):
         run_pipeline(root, tmp_path / "absent", mechanics_only=True, budget=cfg)
     assert not (tmp_path / "absent").exists()
@@ -124,7 +124,7 @@ def test_zero_update_profile_then_complete_train_calibrate_test_export_and_resum
 
 
 def test_calibration_and_test_inputs_cannot_inject_trace_or_teacher_metadata(tmp_path):
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.training.trainer import Trainer
 
     sample, _ = curriculum("test", 1)[0]
@@ -133,7 +133,7 @@ def test_calibration_and_test_inputs_cannot_inject_trace_or_teacher_metadata(tmp
     sample.metadata["verified_traces"] = {"q": {"text": "Gold answer injected into rationale"}}
     sample.metadata["proposal_supervision"] = {"text": "injected proposal"}
     cfg = tiny_config(readout="lm", max_seq_len=2048)
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     from ayaka.training.run_direct import training_config
 
     recipe = {

@@ -1,4 +1,4 @@
-"""Upload an Electra export folder to the Hugging Face Hub.
+"""Upload an Ayaka export folder to the Hugging Face Hub.
 
 Dry-run by default: it validates the folder and prints what would be
 uploaded. Nothing leaves the machine without ``--yes``.
@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> dict:
     import argparse
 
     ap = argparse.ArgumentParser(
-        description="Upload an Electra export to the Hugging Face Hub (dry-run by default)"
+        description="Upload an Ayaka export to the Hugging Face Hub (dry-run by default)"
     )
     ap.add_argument(
         "--export", required=True, help="export folder (ayaka.export) or checkpoint folder"

@@ -39,13 +39,13 @@ def test_proposal_batch_matches_isolated_rows_with_different_lengths_and_one_for
     from ayaka.checkpoint import apply_lora
     from ayaka.config import tiny_config
     from ayaka.data.candidate_v2 import candidate_curriculum
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.tokenization import ToyTokenizer
     from ayaka.training.candidates import proposal_ce, proposal_items
 
     torch.set_num_threads(1)
     cfg, tok = tiny_config(version=2, max_seq_len=4096), ToyTokenizer()
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     model.eval()  # deterministic parity; gradients remain enabled
@@ -84,7 +84,7 @@ def test_supervised_position_pruning_matches_full_joint_loss_and_gradients(check
     from ayaka.config import tiny_config
     from ayaka.data.candidate_v2 import candidate_curriculum
     from ayaka.data.reasoning_v2 import curriculum
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.tokenization import ToyTokenizer
     from ayaka.training.candidates import proposal_items
     from ayaka.training.reasoning import reasoning_items
@@ -92,7 +92,7 @@ def test_supervised_position_pruning_matches_full_joint_loss_and_gradients(check
 
     torch.set_num_threads(1)
     cfg, tok = tiny_config(version=2, max_seq_len=4096, lora_dropout=0), ToyTokenizer()
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     original = copy.deepcopy(model)
@@ -126,14 +126,14 @@ def test_prediction_skips_proposal_and_trace_auxiliary_projection(monkeypatch):
     from ayaka.checkpoint import apply_lora
     from ayaka.config import tiny_config
     from ayaka.data.candidate_v2 import candidate_curriculum
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.tokenization import ToyTokenizer
     from ayaka.training import candidates
     from ayaka.training.candidates import proposal_items
     from ayaka.training.trainer import TrainConfig, Trainer
 
     cfg, tok = tiny_config(version=2, max_seq_len=4096), ToyTokenizer()
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     apply_lora(model)
     trainer = Trainer(model, tok, TrainConfig(bf16=False), "cpu")
     items = proposal_items(candidate_curriculum("dev", 1)[0], tok, cfg)

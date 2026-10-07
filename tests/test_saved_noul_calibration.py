@@ -7,7 +7,7 @@ import torch
 from test_checkpoint_serving_inputs import ENCODING, QUESTIONS, STATE, expected, setup_checkpoint
 
 from ayaka.checkpoint import compact_checkpoint, load_checkpoint, save_checkpoint
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.primitives import Decision
 from ayaka.reasoning import ReasoningSettings
 from ayaka.reasoning_pipeline import controlled_decision
@@ -76,7 +76,7 @@ def test_changed_weights_reject_binding_before_backbone_load(tmp_path, monkeypat
     def forbid(*args, **kwargs):
         pytest.fail("mismatched correction reached native weight loading")
 
-    monkeypatch.setattr(ElectraDecisionModel, "from_config", forbid)
+    monkeypatch.setattr(AyakaDecisionModel, "from_config", forbid)
     with pytest.raises(ValueError, match="binding mismatch"):
         load_checkpoint(str(checkpoint))
 
@@ -116,7 +116,7 @@ def test_changed_serving_recipe_rejects_correction_before_loading(tmp_path, monk
     def forbid(*args, **kwargs):
         pytest.fail("changed serving recipe reached weight loading")
 
-    monkeypatch.setattr(ElectraDecisionModel, "from_config", forbid)
+    monkeypatch.setattr(AyakaDecisionModel, "from_config", forbid)
     with pytest.raises(ValueError, match="recipe mismatch"):
         load_checkpoint(str(checkpoint))
 

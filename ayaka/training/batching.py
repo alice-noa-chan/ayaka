@@ -14,9 +14,9 @@ from dataclasses import dataclass
 import torch
 
 from ..collate import EncodedQuestion, encode_decision, full_rows, suffix_rows
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.schema import Question, Sample
-from ..model.electra import DecisionBatch
+from ..model.decision import DecisionBatch
 from ..prompt import QuestionView
 from ..tokenization import Tokenizer
 
@@ -72,7 +72,7 @@ def question_view(q: Question) -> QuestionView:
     return QuestionView(q.type, q.instruction, [c.description for c in q.candidates], ords)
 
 
-def sample_to_items(sample: Sample, tok: Tokenizer, cfg: ElectraConfig) -> list[TrainItem]:
+def sample_to_items(sample: Sample, tok: Tokenizer, cfg: AyakaConfig) -> list[TrainItem]:
     qs = [_noul_canonical(q) for q in sample.questions]
     _, encs = encode_decision(
         sample.state, [question_view(q) for q in qs], tok, cfg.max_seq_len, cfg.max_label_candidates

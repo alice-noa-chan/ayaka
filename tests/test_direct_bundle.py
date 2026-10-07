@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 import pytest
 
-from ayaka.config import ELECTRA_LARGE, tiny_config
+from ayaka.config import AYAKA_LARGE, tiny_config
 from ayaka.data.reasoning_v2 import SPLITS, curriculum
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.tokenization import ToyTokenizer
@@ -260,9 +260,9 @@ def test_real_models_require_pinned_approved_native_readout_before_tokenizer(tmp
     from dataclasses import replace
 
     for cfg in (
-        ELECTRA_LARGE,
-        replace(ELECTRA_LARGE, readout="lm", backbone_revision="main"),
-        replace(ELECTRA_LARGE, readout="lm", backbone="unknown/model"),
+        AYAKA_LARGE,
+        replace(AYAKA_LARGE, readout="lm", backbone_revision="main"),
+        replace(AYAKA_LARGE, readout="lm", backbone="unknown/model"),
     ):
         with pytest.raises(ValueError):
             prepare_bundle(tmp_path / "invalid", {}, None, cfg, {}, steps=1, rows_per_step=16)

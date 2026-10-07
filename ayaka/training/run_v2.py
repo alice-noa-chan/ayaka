@@ -14,8 +14,8 @@ from pathlib import Path
 import torch
 
 from ..checkpoint import apply_lora, save_checkpoint
-from ..config import ElectraConfig
-from ..model.electra import ElectraDecisionModel
+from ..config import AyakaConfig
+from ..model.decision import AyakaDecisionModel
 from ..multimodal import ImageBackend
 from ..tokenization import HFTokenizer
 from .prepare_v2 import canonical, prepared_items, sha256, validate_bundle
@@ -107,7 +107,7 @@ def fresh_image_backend(cfg, device, *, offline=True):
     native, text = lm.model, lm.model.language_model
     if lm.get_output_embeddings().weight is not text.get_input_embeddings().weight:
         text.add_module("_ayaka_lm_head", lm.get_output_embeddings())
-    model = ElectraDecisionModel(cfg, text, lm.config.text_config).to(device)
+    model = AyakaDecisionModel(cfg, text, lm.config.text_config).to(device)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     processor = AutoProcessor.from_pretrained(
@@ -239,7 +239,7 @@ def main(argv=None):
             raise ValueError("continuation checkpoint identity mismatch")
     config = dict(recipe["model"])
     config["lora_targets"] = tuple(config["lora_targets"])
-    cfg = ElectraConfig(**config)
+    cfg = AyakaConfig(**config)
     if args.planned_steps < 1:
         raise ValueError("planned step count must be positive")
     if args.plan_only:

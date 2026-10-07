@@ -1,4 +1,4 @@
-"""Electra decision models on Gemma 4 backbones.
+"""Ayaka decision models on Gemma 4 backbones.
 
 from ayaka import Decision, QuestionSpec, load_checkpoint
 model = load_checkpoint("artifacts/<run>/checkpoint", device="cuda")

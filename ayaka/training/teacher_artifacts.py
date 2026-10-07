@@ -14,7 +14,7 @@ import math
 from dataclasses import asdict
 from pathlib import Path
 
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
 from ..swift.binding import SwiftReadIndex, validate_bound_reads
@@ -548,7 +548,7 @@ def main(argv=None):
     teacher_dataset_items(samples)
     from .direct_bundle import _gold_verifier, local_tokenizer
 
-    cfg = ElectraConfig(**json.loads(args.config.read_bytes()))
+    cfg = AyakaConfig(**json.loads(args.config.read_bytes()))
     from .native_metadata import inspect_metadata, verify_metadata
 
     if args.native_path is not None and args.mechanics_tokenizer is not None:

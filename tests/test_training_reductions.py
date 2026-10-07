@@ -10,7 +10,7 @@ from ayaka.checkpoint import apply_lora
 from ayaka.config import tiny_config
 from ayaka.data.schema import Candidate, Question, Sample
 from ayaka.losses import LossWeights, decision_loss
-from ayaka.model.electra import DecisionOutput, ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel, DecisionOutput
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.batching import collate_items, sample_to_items
 from ayaka.training.trainer import TrainConfig, Trainer
@@ -189,7 +189,7 @@ def test_actual_tiny_lora_shared_and_checkpointed_gradients_match_full_batch():
     for item in items:
         item.direct_distillation = True
     torch.manual_seed(17)
-    model = ElectraDecisionModel.from_config(
+    model = AyakaDecisionModel.from_config(
         tiny_config(max_seq_len=4096, lora_dropout=0), dtype=torch.float64
     )
     model.backbone.requires_grad_(False)

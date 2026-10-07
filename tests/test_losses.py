@@ -12,7 +12,7 @@ from ayaka.losses import (
     nll_loss,
     rps_loss,
 )
-from ayaka.model.electra import CHOICE, SCORE, DecisionOutput
+from ayaka.model.decision import CHOICE, SCORE, DecisionOutput
 from ayaka.model.ragged import ragged_log_softmax, ragged_softmax
 
 

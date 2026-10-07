@@ -1,6 +1,6 @@
 """End-to-end decision training run.
 
-    pools (decontaminated) ─► LoRA Electra ─► train ─► checkpoint
+    pools (decontaminated) ─► LoRA Ayaka ─► train ─► checkpoint
         ─► automatic temperature calibration (reserved source groups)
         ─► evals: held-out mix, Jev fidelity (test_set_30k), JevBench public
 
@@ -30,7 +30,7 @@ from ..data.loaders import load_pools, load_spec_samples
 from ..data.manifest import write_manifest
 from ..data.mixture import TASK_FAMILY_QUOTA, MixtureSampler
 from ..data.schema import Candidate, Question, Sample
-from ..model.electra import ElectraDecisionModel
+from ..model.decision import AyakaDecisionModel
 from ..serialization import canonical_state
 from ..tokenization import HFTokenizer, ToyTokenizer
 from .batching import TrainItem, sample_to_items
@@ -175,14 +175,14 @@ def build_tokenizer(backbone: str):
     return ToyTokenizer() if backbone == "tiny" else HFTokenizer.from_pretrained(backbone)
 
 
-def build_model(cfg: RunConfig, device) -> ElectraDecisionModel:
+def build_model(cfg: RunConfig, device) -> AyakaDecisionModel:
     mcfg = model_config(cfg.model_size)
     if cfg.max_seq_len:
         from dataclasses import replace
 
         mcfg = replace(mcfg, max_seq_len=cfg.max_seq_len)
     dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
-    model = ElectraDecisionModel.from_config(mcfg, dtype=dtype, device=device)
+    model = AyakaDecisionModel.from_config(mcfg, dtype=dtype, device=device)
     for p in model.backbone.parameters():
         p.requires_grad_(False)
     if cfg.liger and device.type == "cuda":
@@ -194,7 +194,7 @@ def build_model(cfg: RunConfig, device) -> ElectraDecisionModel:
     return model
 
 
-def apply_liger(model: ElectraDecisionModel, device) -> bool:
+def apply_liger(model: AyakaDecisionModel, device) -> bool:
     """Swap in Liger's fused RMSNorm/GeGLU kernels, keeping them only if
     the backbone output is unchanged on a probe input. Liger targets the
     plain Gemma 4 31B layer stack; E2B/E4B add per-layer embeddings and

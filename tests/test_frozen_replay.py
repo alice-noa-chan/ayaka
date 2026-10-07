@@ -10,7 +10,7 @@ from ayaka.config import tiny_config
 from ayaka.data.schema import Candidate, Question, Sample
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.losses import LossWeights, decision_loss
-from ayaka.model.electra import DecisionOutput, ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel, DecisionOutput
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.batching import collate_items, sample_to_items
 from ayaka.training.frozen_replay import attach_base_replay
@@ -21,7 +21,7 @@ def setup():
     torch.set_num_threads(1)
     tok = ToyTokenizer()
     cfg = tiny_config(readout="lm", lora_dropout=0.2)
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     # Simulate a nonzero adapter without updating the native base. Collection

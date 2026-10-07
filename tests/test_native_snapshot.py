@@ -8,7 +8,7 @@ from transformers import Gemma4ForCausalLM
 
 from ayaka.backbone import load_text_backbone, native_logits, tiny_text_config
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.training.native_snapshot import inspect_snapshot, verify_snapshot
 
 REVISION = "a" * 40
@@ -105,7 +105,7 @@ def test_strict_offline_native_loader_retains_logits_and_declared_repository(tmp
     cfg = replace(
         tiny_config(readout="lm"), backbone="publisher/native", backbone_revision=REVISION
     )
-    model = ElectraDecisionModel.from_config(
+    model = AyakaDecisionModel.from_config(
         cfg,
         dtype=torch.float32,
         backbone_path=str(tmp_path),

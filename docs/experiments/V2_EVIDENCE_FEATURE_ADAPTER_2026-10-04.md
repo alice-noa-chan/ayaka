@@ -89,7 +89,7 @@ This example creates random tiny weights only; it makes no model-quality claim.
 import torch
 
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.model.evidence import EvidenceResidualHead
 from ayaka.prompt import QuestionView
 from ayaka.tokenization import ToyTokenizer
@@ -98,7 +98,7 @@ from ayaka.training.evidence_features import (
     prepare_evidence_inputs,
 )
 
-model = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32).eval()
+model = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32).eval()
 inputs = prepare_evidence_inputs(
     "The request is approved.",
     [QuestionView("noul", "Approved?", ["no", "yes"])],

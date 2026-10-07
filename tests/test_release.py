@@ -8,7 +8,7 @@ import torch
 from ayaka.checkpoint import apply_lora, save_checkpoint
 from ayaka.config import tiny_config
 from ayaka.export import export_model
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.modelcard import build_card, write_card
 from ayaka.publish import bundle_code, check_export
 from ayaka.publish import main as publish_main
@@ -51,7 +51,7 @@ def test_release_policy_drops_restricted_and_jev_output_splits():
 @pytest.fixture()
 def exported(tmp_path):
     """A fake finished run: checkpoint meta, reports, manifest, then an export."""
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     run = tmp_path / "runs" / "small-v1"
     ck = run / "checkpoint"
     meta = {
@@ -155,11 +155,11 @@ def test_checkpoint_publish_requires_pinned_base_revision_and_card(tmp_path, mon
 
     from ayaka.checkpoint import apply_lora, compact_checkpoint, resolve_checkpoint, save_checkpoint
     from ayaka.config import MODEL_FAMILY, tiny_config
-    from ayaka.model.electra import ElectraDecisionModel
+    from ayaka.model.decision import AyakaDecisionModel
     from ayaka.publish import is_checkpoint
 
     assert all(c.backbone_revision for c in MODEL_FAMILY.values())
-    m = apply_lora(ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32))
+    m = apply_lora(AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32))
     save_checkpoint(m, str(tmp_path / "ck"), {"step": 1})
     assert is_checkpoint(str(tmp_path / "ck"))
     problems = check_export(str(tmp_path / "ck"))

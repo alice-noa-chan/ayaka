@@ -3,7 +3,7 @@ import torch
 
 from ayaka.backbone import detach_text_backbone, native_logits
 from ayaka.config import tiny_config
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.tokenization import ToyTokenizer
 
@@ -128,7 +128,7 @@ def test_native_output_logits_and_cache_match(family, monkeypatch):
         assert torch.allclose(
             native_logits(text, tail.last_hidden_state), expected[:, 2:], atol=1e-5
         )
-        model = ElectraDecisionModel(tiny_config(), text, cfg).eval()
+        model = AyakaDecisionModel(tiny_config(), text, cfg).eval()
         decision = Decision(model, ToyTokenizer())
         questions = [
             QuestionSpec("noul", "Which?", ["no", "yes"]),

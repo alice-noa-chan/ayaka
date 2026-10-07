@@ -11,7 +11,7 @@ from ayaka.data.candidate_v2 import (
     finite_partition_audit,
     partition_diagnostics,
 )
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.candidates import proposal_items
 from ayaka.training.trainer import TrainConfig, Trainer
@@ -36,7 +36,7 @@ def test_proposal_ce_uses_separate_context_and_reaches_lora_without_weight_updat
     item = proposal_items(sample, tok, cfg)[0]
     assert item.proposal_positions[0] > 0
     assert item.proposal_input_ids != item.enc.prefix_ids + item.enc.rendered.suffix_ids
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     trainer = Trainer(model, tok, TrainConfig(bf16=False), "cpu")

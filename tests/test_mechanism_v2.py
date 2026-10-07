@@ -22,7 +22,7 @@ from ayaka.eval.mechanism_v2 import (
     score_trace,
     validate_plan,
 )
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.model.ragged import ragged_softmax
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.reasoning_pipeline import ControlledDecision, TraceGenerator
@@ -45,7 +45,7 @@ def cohort(tmp_path, per_rule=3):
 
 def tiny():
     torch.set_num_threads(1)
-    return ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    return AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
 
 
 def test_cohort_balanced_repeatable_dev_only_and_oracles_recomputed(tmp_path):

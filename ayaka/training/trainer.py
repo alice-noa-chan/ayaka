@@ -19,7 +19,7 @@ import torch
 
 from ..losses import LossWeights, decision_loss
 from ..metrics import compute_metrics
-from ..model.electra import SCORE, ElectraDecisionModel
+from ..model.decision import SCORE, AyakaDecisionModel
 from ..model.ragged import ragged_log_softmax
 from ..tokenization import Tokenizer
 from .batching import TrainItem, budget_batches, collate_items, plan_chunks
@@ -77,7 +77,7 @@ def _subset_counts(items):
 class Trainer:
     def __init__(
         self,
-        model: ElectraDecisionModel,
+        model: AyakaDecisionModel,
         tok: Tokenizer,
         cfg: TrainConfig,
         device,

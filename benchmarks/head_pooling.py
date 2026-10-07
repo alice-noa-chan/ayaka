@@ -14,7 +14,7 @@ import platform
 import torch
 from torch.utils.benchmark import Timer
 
-from ayaka.model.electra import at_least_fp32, span_means
+from ayaka.model.decision import at_least_fp32, span_means
 
 
 @torch.no_grad()

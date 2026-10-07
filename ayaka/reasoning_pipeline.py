@@ -11,7 +11,7 @@ from .collate import EncodedQuestion, encode_decision, suffix_rows
 from .evidence import EvidenceError
 from .evidence_generation import PlanGenerator, chat_ids
 from .evidence_pipeline import decision_request
-from .model.electra import PRIMITIVE_INDEX
+from .model.decision import PRIMITIVE_INDEX
 from .model.fastpath import prefill_last
 from .model.ragged import ragged_softmax
 from .primitives import Decision, DecisionResult

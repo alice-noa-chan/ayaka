@@ -11,7 +11,7 @@ import copy
 from dataclasses import dataclass
 
 from ..eval.read_artifact import fingerprint
-from ..model.electra import PRIMITIVE_INDEX
+from ..model.decision import PRIMITIVE_INDEX
 from ..swift.prompt import Question, parse_question, render_question
 from ..swift.readers import READOUT, token_input
 from .evidence_features import (

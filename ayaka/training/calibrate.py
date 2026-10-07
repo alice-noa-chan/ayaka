@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import torch
 
-from ..model.electra import LENGTH_BUCKETS, PRIMITIVE_INDEX, ElectraDecisionModel
+from ..model.decision import LENGTH_BUCKETS, PRIMITIVE_INDEX, AyakaDecisionModel
 
 
 def fit_temperature(
@@ -73,7 +73,7 @@ def fit_temperatures(
     return temps
 
 
-def apply_temperatures(model: ElectraDecisionModel, temps: dict[str, float]) -> None:
+def apply_temperatures(model: AyakaDecisionModel, temps: dict[str, float]) -> None:
     with torch.no_grad():
         for prim, p_idx in PRIMITIVE_INDEX.items():
             base = temps.get(prim, 1.0)

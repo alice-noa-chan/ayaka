@@ -6,7 +6,7 @@ import torch
 
 from ayaka.collate import EncodedQuestion, full_rows
 from ayaka.config import tiny_config
-from ayaka.model.electra import PRIMITIVE_INDEX, ElectraDecisionModel
+from ayaka.model.decision import PRIMITIVE_INDEX, AyakaDecisionModel
 from ayaka.model.ragged import ragged_softmax
 from ayaka.primitives import Decision, DecisionResult, QuestionSpec
 from ayaka.reasoning import ReasoningSettings
@@ -58,7 +58,7 @@ class Generator:
 
 @pytest.mark.parametrize("mode", ["off", "on"])
 def test_decimal_score_levels_survive_direct_and_reasoning_readouts(mode, monkeypatch):
-    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
     direct = Decision(model, Tok())
     monkeypatch.setattr(direct, "_run", lambda *args: [[0.1, 0.9]])
     spec = QuestionSpec(
@@ -125,7 +125,7 @@ def test_http_inheritance_isolation_and_failed_tokens_are_counted():
 
 def test_real_cache_continuation_equals_full_readout_and_is_permutation_invariant():
     torch.set_num_threads(1)
-    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
     tok, gen = Tok(), None
     gen = TraceGenerator(model, tok)
     gen.eos = set()
@@ -148,7 +148,7 @@ def test_real_cache_continuation_equals_full_readout_and_is_permutation_invarian
 
 def test_context_failure_preserves_requested_budget_and_eos_count():
     torch.set_num_threads(1)
-    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
     gen = TraceGenerator(model, Tok(), max_context=8)
     with pytest.raises(TraceFailure) as exc:
         gen.generate_trace([{"role": "user", "content": "Hello"}], 1024)
@@ -163,7 +163,7 @@ def test_context_failure_preserves_requested_budget_and_eos_count():
 
 def test_large_candidate_rerank_keeps_mass_and_separate_questions_have_separate_caches():
     torch.set_num_threads(1)
-    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
     gen = TraceGenerator(model, Tok())
     gen.eos = set()
     q = QuestionSpec("choice", "Which?", [f"candidate {i}" for i in range(28)])

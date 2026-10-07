@@ -6,7 +6,7 @@ import torch
 from ayaka.config import tiny_config
 from ayaka.evidence import EvidenceError
 from ayaka.evidence_generation import PlanGenerator, chat_ids, plan_complete
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 
 
@@ -17,7 +17,7 @@ class Tok(ToyTokenizer):
 
 def _model():
     torch.manual_seed(7)
-    model = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32, device="cpu")
+    model = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32, device="cpu")
     return model.eval()
 
 

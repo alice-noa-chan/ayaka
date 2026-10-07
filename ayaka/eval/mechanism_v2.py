@@ -19,7 +19,7 @@ from ..checkpoint import load_checkpoint
 from ..collate import EncodedQuestion, encode_decision, suffix_rows
 from ..data.recovery_holdout import POLICIES
 from ..data.schema import Sample
-from ..model.electra import PRIMITIVE_INDEX, length_bucket
+from ..model.decision import PRIMITIVE_INDEX, length_bucket
 from ..model.ragged import ragged_softmax
 from ..primitives import QuestionSpec
 from ..prompt import render_prefix

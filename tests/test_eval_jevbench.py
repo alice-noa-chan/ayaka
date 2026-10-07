@@ -15,7 +15,7 @@ from ayaka.eval.jevbench import (
     reference_outcomes,
     run_jevbench,
 )
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 
 
@@ -79,7 +79,7 @@ def test_reference_outcomes_cover_public_items():
 
 
 def test_run_jevbench_tiny_smoke(tmp_path):
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32).eval()
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32).eval()
     rep = run_jevbench(m, ToyTokenizer(), out_path=str(tmp_path / "r.json"), limit=2, verbose=False)
     s = rep["summary"]
     assert set(s["accuracy"]) == set(TIERS)

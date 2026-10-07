@@ -8,7 +8,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..evidence import reasoning_messages
 from ..evidence_generation import chat_ids
 from ..evidence_pipeline import decision_request
@@ -93,7 +93,7 @@ def checkpoint_config(root):
         or adapter.get("r") != 64
     ):
         raise ValueError("checkpoint adapter differs from the pinned v1 recipe")
-    cfg = ElectraConfig(**{**c, "lora_targets": tuple(c.get("lora_targets", ()))})
+    cfg = AyakaConfig(**{**c, "lora_targets": tuple(c.get("lora_targets", ()))})
     from ..input_contract import read_contract
 
     if read_contract(str(root), cfg) is not None:

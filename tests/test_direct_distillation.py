@@ -11,7 +11,7 @@ from ayaka.data.reasoning_v2 import SPLITS
 from ayaka.data.schema import Candidate, Question, Sample
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.losses import LossWeights
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.direct_distillation import make_teacher_read, prepare_direct_distillation
 from ayaka.training.trainer import TrainConfig, Trainer
@@ -264,7 +264,7 @@ def test_prepared_items_reach_real_tiny_lora_backward_without_trace_ce():
     tok = ToyTokenizer()
     w = LossWeights(gold_nll_with_teacher=True, distill=0.2)
     items, _ = prepare_direct_distillation(splits, tok, cfg, reads(splits), verify, weights=w)
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     trainer = Trainer(

@@ -52,7 +52,7 @@ def load_text_backbone(
 
     ``repo == "tiny"`` builds a random CPU test stack. A multimodal Gemma 4
     checkpoint (hub repo) has its text weights remapped out; a text-only
-    directory (an Electra export) loads directly.
+    directory (an Ayaka export) loads directly.
     """
     from transformers import AutoConfig, AutoModelForCausalLM, Gemma4ForCausalLM
 

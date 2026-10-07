@@ -10,7 +10,7 @@ import torch
 from ayaka.config import tiny_config
 from ayaka.export import export_model, load_exported, parity
 from ayaka.http_transport import request_bytes
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.primitives import Decision, QuestionSpec
 from ayaka.quant import Int8Embedding, dequantize_rows, quantize_rows
 from ayaka.serve import BadRequest, DecisionService, parse_question, serve
@@ -29,7 +29,7 @@ QUESTIONS = [
 
 @pytest.fixture(scope="module")
 def model():
-    m = ElectraDecisionModel.from_config(tiny_config(), dtype=torch.float32)
+    m = AyakaDecisionModel.from_config(tiny_config(), dtype=torch.float32)
     with torch.no_grad():
         m.gate.fill_(0.5)
         m.temperature[1] = 1.3

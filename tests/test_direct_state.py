@@ -7,11 +7,11 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from ayaka.checkpoint import apply_lora
-from ayaka.config import ElectraConfig, tiny_config
+from ayaka.config import AyakaConfig, tiny_config
 from ayaka.data.reasoning_v2 import SPLITS, curriculum
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.losses import LossWeights
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.direct_bundle import audit_bundle, prepare_bundle
 from ayaka.training.direct_state import (
@@ -64,7 +64,7 @@ def fixture(tmp_path, *, checkpointed=False):
 
 
 def trainer(recipe, tcfg):
-    model = ElectraDecisionModel.from_config(ElectraConfig(**recipe["model"]), dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(AyakaConfig(**recipe["model"]), dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     return Trainer(model, ToyTokenizer(), tcfg, "cpu")

@@ -12,7 +12,7 @@ from ayaka.eval.recovery_v2 import (
     verified_trace_readout,
 )
 from ayaka.eval.v2 import typed_row
-from ayaka.model.electra import PRIMITIVE_INDEX, ElectraDecisionModel
+from ayaka.model.decision import PRIMITIVE_INDEX, AyakaDecisionModel
 from ayaka.model.ragged import ragged_softmax
 from ayaka.primitives import QuestionSpec
 from ayaka.reasoning_pipeline import TraceGenerator, readout_suffix
@@ -106,7 +106,7 @@ def test_screen_accepts_large_paired_gain_with_better_probability_quality():
 
 def test_verified_trace_cache_matches_full_forward_without_generation():
     torch.set_num_threads(1)
-    model = ElectraDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
     tok = ToyTokenizer()
     generator = TraceGenerator(model, tok, apply_temperature=False)
     spec = QuestionSpec("choice", "Select", ["a", "b", "c"])

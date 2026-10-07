@@ -13,7 +13,7 @@ from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
 
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.direct_verification import VERSION as VERIFIER_VERSION
 from ..data.direct_verification import verify_authored_gold
 from ..data.reasoning_v2 import SPLITS
@@ -579,7 +579,7 @@ def audit_bundle(
         raise ValueError("direct recipe must retain the original-input off objective")
     if type(recipe.get("allow_tiny")) is not bool or recipe["allow_tiny"] and not allow_tiny:
         raise ValueError("auditing a tiny bundle requires explicit mechanics-only mode")
-    cfg = ElectraConfig(**recipe["model"])
+    cfg = AyakaConfig(**recipe["model"])
     _validate_schedule(recipe.get("schedule"))
     if recipe.get("model_policy") != _model_policy(cfg, allow_tiny=allow_tiny):
         raise ValueError("declared model policy changed")
@@ -729,7 +729,7 @@ def main(argv=None):
             if getattr(args, field) is not None:
                 encoding[field] = getattr(args, field)
         encoding = normalize_input_encoding(encoding)
-        cfg = ElectraConfig(**json.loads(args.config.read_bytes()))
+        cfg = AyakaConfig(**json.loads(args.config.read_bytes()))
         tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only, native_path=args.native_path)
         splits = {
             split: [

@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.contract_nli import SOURCE as CONTRACT_SOURCE
 from ..data.contract_nli import ContractGoldRegistry
 from ..data.decontam import Decontaminator, jevbench_public_dir
@@ -450,7 +450,7 @@ def main(argv=None):
     if args.out.exists():
         raise ValueError("choose a new output; existing corpus records must remain intact")
     cfg_file = FileGuard(args.config)
-    cfg = ElectraConfig(**json.loads(cfg_file.raw))
+    cfg = AyakaConfig(**json.loads(cfg_file.raw))
     if args.command == "prepare":
         plan_file = FileGuard(args.plan, args.expected_plan_file_sha256)
         plan = validate_plan(json.loads(plan_file.raw))

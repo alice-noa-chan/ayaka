@@ -21,12 +21,12 @@ from dataclasses import asdict
 
 import torch
 
-from .config import ElectraConfig
+from .config import AyakaConfig
 from .input_contract import checkpoint_metadata, read_contract
-from .model.electra import ElectraDecisionModel
+from .model.decision import AyakaDecisionModel
 
 
-def apply_lora(model: ElectraDecisionModel) -> ElectraDecisionModel:
+def apply_lora(model: AyakaDecisionModel) -> AyakaDecisionModel:
     from peft import LoraConfig, get_peft_model
 
     cfg = model.cfg
@@ -82,7 +82,7 @@ def load_head(path: str, device="cpu") -> dict:
     return torch.load(os.path.join(path, "head.pt"), map_location=device, weights_only=True)
 
 
-def save_checkpoint(model: ElectraDecisionModel, path: str, meta: dict | None = None) -> str:
+def save_checkpoint(model: AyakaDecisionModel, path: str, meta: dict | None = None) -> str:
     meta = checkpoint_metadata(model, meta)
     os.makedirs(path, exist_ok=True)
     write_config({**asdict(model.cfg), "input_contract_required": "input_encoding" in meta}, path)
@@ -119,11 +119,11 @@ def resolve_checkpoint(path_or_repo: str, revision: str | None = None) -> str:
     return snapshot_download(repo_id=path_or_repo, revision=revision)
 
 
-def load_config(path: str) -> ElectraConfig:
+def load_config(path: str) -> AyakaConfig:
     with open(config_path(path)) as f:
         d = json.load(f)
     d["lora_targets"] = tuple(d.get("lora_targets", ()))
-    return ElectraConfig(**d)
+    return AyakaConfig(**d)
 
 
 def load_checkpoint(
@@ -136,7 +136,7 @@ def load_checkpoint(
     backbone_path: str | None = None,
     local_files_only: bool = False,
     strict_loading: bool = False,
-) -> ElectraDecisionModel:
+) -> AyakaDecisionModel:
     """Rebuild a model from a checkpoint dir. ``trainable`` keeps the
     adapter unmerged and trainable (resume / continue training)."""
     cfg = load_config(path)
@@ -152,7 +152,7 @@ def load_checkpoint(
             checkpoint_fingerprint(path, include_calibration=False),
             input_recipe_sha256=contract["input_recipe_sha256"] if contract else None,
         )
-    model = ElectraDecisionModel.from_config(
+    model = AyakaDecisionModel.from_config(
         cfg,
         dtype=dtype,
         device=device,

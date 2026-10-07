@@ -217,7 +217,7 @@ def inspect_model(cfg, *, offline=True):
     from transformers import AutoConfig, AutoModelForImageTextToText, AutoProcessor
 
     from ..checkpoint import apply_lora
-    from ..model.electra import ElectraDecisionModel
+    from ..model.decision import AyakaDecisionModel
     from ..tokenization import HFTokenizer
 
     if (
@@ -241,7 +241,7 @@ def inspect_model(cfg, *, offline=True):
         text = native.language_model
         if native_lm.get_output_embeddings().weight is not text.get_input_embeddings().weight:
             text.add_module("_ayaka_lm_head", native_lm.get_output_embeddings())
-        model = ElectraDecisionModel(cfg, text, config.text_config)
+        model = AyakaDecisionModel(cfg, text, config.text_config)
         base_count = sum(p.numel() for p in native_lm.parameters())
         model.backbone.requires_grad_(False)
         apply_lora(model)

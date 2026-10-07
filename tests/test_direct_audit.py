@@ -19,7 +19,7 @@ from ayaka.checkpoint import apply_lora
 from ayaka.config import tiny_config
 from ayaka.data.natural_training_v2 import partition_sources
 from ayaka.eval.read_artifact import fingerprint
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import HFTokenizer, ToyTokenizer
 from ayaka.training import direct_audit, direct_bundle
 from ayaka.training.direct_audit import audit_snapshot, create_audit_receipt, load_audited_bundle
@@ -107,7 +107,7 @@ def test_exact_rows_prefix_aliases_schedule_and_actual_trainer_gradient_parity(
     actual = list(training_batches(cached.recipe, cached.inventory, cached.groups))
     expected = list(training_batches(full.recipe, full.inventory, full.groups))
     assert [[asdict(x) for x in b] for b in actual] == [[asdict(x) for x in b] for b in expected]
-    model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+    model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     trainer = Trainer(

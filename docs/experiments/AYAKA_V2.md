@@ -6,7 +6,7 @@ is claimed merely from implementation or procedural training.
 
 ## Controls
 
-New v2 checkpoints (`ElectraConfig.version=2`) default to `auto`/`medium`.
+New v2 checkpoints (`AyakaConfig.version=2`) default to `auto`/`medium`.
 Old checkpoints remain direct by default. The old `--reasoning` CLI switch
 retains its frozen v1 worked-steps route. New controls start the v2 backend:
 

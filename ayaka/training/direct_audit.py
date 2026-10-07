@@ -15,7 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..collate import EncodedQuestion
-from ..config import ElectraConfig
+from ..config import AyakaConfig
 from ..data.direct_natural import verify_raw_binding
 from ..data.schema import Sample
 from ..eval.read_artifact import fingerprint
@@ -126,7 +126,7 @@ def audit_snapshot(
     """Full regeneration with stable payload/source/tokenizer snapshots, CPU only."""
     before = _payloads(path, expected_manifest_sha256)
     recipe = json.loads(before[2]["recipe.json"])
-    cfg = ElectraConfig(**recipe["model"])
+    cfg = AyakaConfig(**recipe["model"])
     bundles._model_policy(cfg, allow_tiny=allow_tiny)
     native_root = bundles.bound_native_root(cfg, recipe, native_path=native_path)
     tok = (
@@ -213,7 +213,7 @@ def create_audit_receipt(
         expected_manifest_sha256=expected_manifest_sha256,
         native_path=native_path,
     )
-    cfg = ElectraConfig(**snapshot.recipe["model"])
+    cfg = AyakaConfig(**snapshot.recipe["model"])
     native_root = bundles.bound_native_root(cfg, snapshot.recipe, native_path=native_path)
     if native_root is not None and (
         destination == native_root or native_root in destination.parents
@@ -303,7 +303,7 @@ def load_audited_bundle(
         raise ValueError("bundle training source differs from the CPU audit")
     recipe = json.loads(payloads["recipe.json"])
     corpus_plan = recipe_plan(recipe)
-    cfg = ElectraConfig(**recipe["model"])
+    cfg = AyakaConfig(**recipe["model"])
     if recipe["allow_tiny"] and not allow_tiny:
         raise ValueError("audited tiny bundles require explicit mechanics-only mode")
     if recipe["model_policy"] != bundles._model_policy(cfg, allow_tiny=allow_tiny):

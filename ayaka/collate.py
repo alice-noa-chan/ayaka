@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import torch
 
-from .model.electra import PRIMITIVE_INDEX, DecisionBatch
+from .model.decision import PRIMITIVE_INDEX, DecisionBatch
 from .prompt import QuestionView, RenderedQuestion, render_prefix, render_question
 from .tokenization import Tokenizer
 

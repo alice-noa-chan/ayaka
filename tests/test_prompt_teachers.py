@@ -17,7 +17,7 @@ from test_teacher_artifacts import IDENTITY, REVISION
 from ayaka.config import tiny_config
 from ayaka.eval.read_artifact import fingerprint
 from ayaka.losses import LossWeights
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.swift.collect import collect, load_reads
 from ayaka.swift.readers import HFReader, logmass_probs, token_input
 from ayaka.tokenization import HFTokenizer
@@ -382,7 +382,7 @@ def test_gold_gain_filter_and_actual_direct_backward_keep_the_gold_and_short_con
     assert items[0].teacher == original_teacher
     assert report["items"][0]["teacher_readout_binding"] == original_binding
     _, text = native_model("granite")
-    model = ElectraDecisionModel(values[2], text, text.config)
+    model = AyakaDecisionModel(values[2], text, text.config)
     trainer = Trainer(
         model,
         values[1],

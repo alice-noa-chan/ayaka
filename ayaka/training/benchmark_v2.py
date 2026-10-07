@@ -15,7 +15,7 @@ from ..config import tiny_config
 from ..data.candidate_v2 import candidate_curriculum
 from ..data.multimodal_v2 import image_curriculum
 from ..data.reasoning_v2 import curriculum
-from ..model.electra import ElectraDecisionModel
+from ..model.decision import AyakaDecisionModel
 from ..multimodal import ImageBackend
 from ..tokenization import ToyTokenizer
 from .prepare_v2 import canonical, prepared_items
@@ -78,7 +78,7 @@ def run_benchmark(*, repeats=5):
         Gemma4Config(text_config=text, vision_config=vision, image_token_id=510)
     ).model
     cfg = tiny_config(version=2, max_seq_len=4096, lora_dropout=0)
-    model = ElectraDecisionModel(cfg, native.language_model, text)
+    model = AyakaDecisionModel(cfg, native.language_model, text)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     tok = ImageTokenizer()

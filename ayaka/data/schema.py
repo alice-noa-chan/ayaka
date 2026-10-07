@@ -1,4 +1,4 @@
-"""Canonical Electra training schema (docs.md section 31 + A3/A5).
+"""Canonical Ayaka training schema (docs.md section 31 + A3/A5).
 
 Every source dataset is converted into this schema before the model
 ever sees it — raw dataset formats are never exposed to the model.

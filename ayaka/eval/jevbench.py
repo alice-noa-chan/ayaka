@@ -411,7 +411,7 @@ def main(argv: list[str] | None = None) -> dict:
     from ..checkpoint import load_checkpoint
     from ..config import model_config
     from ..evidence_pipeline import reasoning_decision
-    from ..model.electra import ElectraDecisionModel
+    from ..model.decision import AyakaDecisionModel
     from ..tokenization import HFTokenizer, ToyTokenizer
 
     ap = argparse.ArgumentParser(description="JevBench public-tier evaluator")
@@ -458,7 +458,7 @@ def main(argv: list[str] | None = None) -> dict:
             resolve_checkpoint(args.ckpt), device=args.device, dtype=dtype, merge=not args.reasoning
         )
     else:
-        model = ElectraDecisionModel.from_config(
+        model = AyakaDecisionModel.from_config(
             model_config(args.zero_shot), dtype=dtype, device=args.device
         )
     if tok is None:

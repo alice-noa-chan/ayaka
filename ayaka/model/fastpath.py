@@ -4,7 +4,7 @@ Gemma 4 E2B/E4B end with ``num_kv_shared_layers`` layers that compute no
 keys/values of their own: they attend with the K/V stored by the last
 non-shared layer of the same attention type. So from the first shared
 layer on, a token's hidden state influences nothing except that token's
-own output. Electra reads only a few positions (the answer position and
+own output. Ayaka reads only a few positions (the answer position and
 the option spans), so every other position can be dropped there without
 changing a single output value. Option spans are read from the states
 just below the shared layers (``span_layer``), so in the shared layers
@@ -193,7 +193,7 @@ def prefix_cache(
 def prefill_last(text, input_ids, attention_mask=None, position_ids=None):
     """Native generation prefill with only the final shared-layer query.
 
-    This is the same source-prefix optimization as Electra's serving path.
+    This is the same source-prefix optimization as Ayaka's serving path.
     It supports left-padded batches; the complete attention mask must also be
     provided on later cached generation calls. Returns (last hidden, cache).
     """

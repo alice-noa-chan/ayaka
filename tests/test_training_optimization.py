@@ -10,7 +10,7 @@ from ayaka.backbone import detach_text_backbone
 from ayaka.checkpoint import apply_lora
 from ayaka.config import tiny_config
 from ayaka.data.schema import Question, Sample
-from ayaka.model.electra import ElectraDecisionModel
+from ayaka.model.decision import AyakaDecisionModel
 from ayaka.tokenization import ToyTokenizer
 from ayaka.training.batching import sample_to_items
 from ayaka.training.optimization import (
@@ -69,9 +69,9 @@ def fixture(unified=False):
             pad_token_id=0,
         )
         lm = Gemma4UnifiedForCausalLM(text_cfg)
-        model = ElectraDecisionModel(cfg, detach_text_backbone(lm), text_cfg)
+        model = AyakaDecisionModel(cfg, detach_text_backbone(lm), text_cfg)
     else:
-        model = ElectraDecisionModel.from_config(cfg, dtype=torch.float32)
+        model = AyakaDecisionModel.from_config(cfg, dtype=torch.float32)
     model.backbone.requires_grad_(False)
     apply_lora(model)
     samples = [

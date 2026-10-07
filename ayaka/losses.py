@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import torch
 
-from .model.electra import SCORE, DecisionOutput
+from .model.decision import SCORE, DecisionOutput
 from .model.ragged import per_question_sum, ragged_max, seg_ids
 
 

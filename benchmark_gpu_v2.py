@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from ayaka.config import ElectraConfig
+from ayaka.config import AyakaConfig
 from ayaka.training.prepare_v2 import canonical, prepared_items, sha256, validate_bundle
 from ayaka.training.run_v2 import (
     fresh_image_backend,
@@ -160,7 +160,7 @@ def main():
         torch.manual_seed(recipe["training"]["seed"])
         torch.set_num_threads(4)
         config = {**recipe["model"], "lora_targets": tuple(recipe["model"]["lora_targets"])}
-        cfg = ElectraConfig(**config)
+        cfg = AyakaConfig(**config)
         model, tok, backend = fresh_image_backend(cfg, "cuda", offline=True)
         trainer = Trainer(
             model, tok, TrainConfig(steps=1, **recipe["training"]), "cuda", image_backend=backend

@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from ayaka.backbone import tiny_text_config
-from ayaka.config import ELECTRA_LARGE, tiny_config
+from ayaka.config import AYAKA_LARGE, tiny_config
 from ayaka.training.direct_preflight import inspect_direct_model
 
 
@@ -47,7 +47,7 @@ def test_cached_untied_head_and_actual_lora_positions_are_counted(tmp_path, monk
 
     monkeypatch.setattr(AutoConfig, "from_pretrained", config)
     cfg = replace(
-        ELECTRA_LARGE,
+        AYAKA_LARGE,
         readout="lm",
         pointer_dim=32,
         set_mixer_heads=2,
@@ -93,7 +93,7 @@ def test_full_weight_count_plus_real_adapter_must_fit_limit():
         tiny_config(readout="hybrid"),
         tiny_config(readout="lm", lora_r=0),
         tiny_config(readout="lm", max_seq_len=10_000_000),
-        replace(ELECTRA_LARGE, readout="lm", backbone_revision="main"),
+        replace(AYAKA_LARGE, readout="lm", backbone_revision="main"),
     ],
 )
 def test_rejects_bad_model_requests_before_configuration_or_parameter_creation(monkeypatch, cfg):

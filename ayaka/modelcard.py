@@ -1,4 +1,4 @@
-"""Hugging Face model card for an Electra export folder.
+"""Hugging Face model card for an Ayaka export folder.
 
 All metrics in the card are read from run artifacts: the checkpoint's
 meta.json (steps, run config, held-out metrics,
@@ -169,7 +169,7 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
     body = [
         f"# {info['name']}",
         "",
-        f"An **Electra** decision model: give it a state (text or JSON) and typed questions — "
+        f"An **Ayaka** decision model: give it a state (text or JSON) and typed questions — "
         f"`noul` (yes/no), `choice` (runtime options) or `score` (ordered levels) — and it returns a "
         f"calibrated probability distribution per question in one forward pass, with no text "
         f"generation. Backbone: [`{base}`](https://huggingface.co/{base}) with a LoRA adapter "
@@ -237,7 +237,7 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
     body += [
         "## Speed",
         "",
-        "Gemma 4 E2B/E4B end in KV-shared layers; Electra runs only the answer position through "
+        "Gemma 4 E2B/E4B end in KV-shared layers; Ayaka runs only the answer position through "
         "them, encodes the constant prompt head once and computes sliding-window attention "
         "block-wise. All three are exact (tests match the stock forward). Measured on zero-shot "
         "E2B, 8-core x86 CPU, bf16: JevBench easy p50 2.44 s → 0.69 s, hard 42.3 s → 11.8 s. "
@@ -248,7 +248,7 @@ def build_card(export_dir: str, code_url: str = "<code-url>") -> str:
         "",
         f"- steps: {ck.get('steps', '—')}, questions/step: {run.get('questions_per_step', '—')}, "
         f"LoRA lr: {run.get('lr', '—')}, restricted data included: {run.get('include_restricted', False)}",
-        f"- distilled from a larger Electra teacher: {bool(run.get('teacher_labels'))}",
+        f"- distilled from a larger Ayaka teacher: {bool(run.get('teacher_labels'))}",
         "- losses: soft-target NLL (KL to teacher when distilling), Brier, RPS (score), "
         "missing-evidence overconfidence penalty, auxiliary pointer NLL",
         "- every sample sharing a 13-gram with a JevBench public item was removed before training "
