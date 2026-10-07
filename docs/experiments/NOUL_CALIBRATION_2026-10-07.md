@@ -127,6 +127,12 @@ into a leaderboard position. The
 [official model guide](https://www.benchmarkheaven.com/jev-models/how-to-choose)
 also distinguishes Intelligence from the composite.
 
+A paired-model transfer between benchmark releases can support a conditional
+estimate once Ayaka is anchored to the old JevBench scale. The
+[paired version analysis](JEVBENCH_VERSION_TRANSFER_2026-10-07.md) measures
+that transfer and identifies the additional public-reference evaluation
+needed to connect this separate development corpus to it.
+
 The next calibration-only work should use more independent, representative
 Noul cases and fresh validation cases, without retuning this candidate on the
 now-observed development answers. Reasoned outputs need their own reserved
