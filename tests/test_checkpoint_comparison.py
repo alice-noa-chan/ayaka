@@ -2,6 +2,7 @@
 
 import copy
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -13,6 +14,7 @@ from ayaka.eval.checkpoint_comparison import (
     collect_rows,
     compare,
     make_protocol,
+    questions,
 )
 from ayaka.eval.matched_execution import full_decision_context
 from ayaka.tokenization import ToyTokenizer
@@ -94,6 +96,28 @@ def test_collection_preserves_candidate_ids_and_resumes_without_new_reads(tmp_pa
         collect_rows(observation("v2_off", calls=calls), samples, protocol, "v2_off", path) == first
     )
     assert len(calls) == 3 and path.read_bytes() == before
+
+
+def test_schema_loaded_decimal_levels_remain_exact_json_numbers(tmp_path, cohort):
+    samples, _ = cohort
+    score = samples[-1].questions[0]
+    score.candidates[0].ordinal = Decimal("9")
+    score.candidates[1].ordinal = Decimal("9.25")
+    samples = [Sample.from_json(sample.to_json()) for sample in samples]
+    protocol = make_protocol(samples, "a" * 64, "b" * 64)
+    rows = collect_rows(observation("v2_off"), samples, protocol, "v2_off", tmp_path / "off.jsonl")
+    assert rows[-1]["ordinals"] == [9, 9.25]
+    assert json.loads((tmp_path / "off.jsonl").read_text().splitlines()[-1])["ordinals"] == [
+        9,
+        9.25,
+    ]
+
+
+def test_decimal_levels_that_would_lose_precision_are_rejected(cohort):
+    samples, _ = cohort
+    samples[-1].questions[0].candidates[0].ordinal = Decimal("0.1234567890123456789")
+    with pytest.raises(ValueError, match="represented exactly"):
+        questions(samples)
 
 
 @pytest.mark.parametrize(

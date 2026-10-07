@@ -12,6 +12,7 @@ import json
 import math
 import time
 from dataclasses import asdict, replace
+from decimal import Decimal
 from pathlib import Path
 
 from ..data.schema import Sample
@@ -27,6 +28,18 @@ VERSION = "ayaka-trained-checkpoint-comparison-dev-1"
 SYSTEMS = ("v1_on", "v2_off", "v2_on")
 
 
+def _json_ordinal(value):
+    """Retain exact numeric Score levels when schema loading creates Decimals."""
+    if not isinstance(value, Decimal):
+        return value
+    if value == value.to_integral_value():
+        return int(value)
+    number = float(value)
+    if not math.isfinite(number) or Decimal(str(number)) != value:
+        raise ValueError("Score ordinal cannot be represented exactly in comparison JSON")
+    return number
+
+
 def questions(samples):
     """Retain original candidate IDs and complete canonical development inputs."""
     expected = _canonical_questions(samples)
@@ -35,7 +48,13 @@ def questions(samples):
         for question in sample.questions:
             key = sample.metadata["source_example_id"] + "/" + question.id
             spec, fields = expected[key]
-            spec = replace(spec, candidate_ids=fields["candidate_ids"])
+            ordinals = (
+                [_json_ordinal(value) for value in spec.ordinals]
+                if spec.ordinals is not None
+                else None
+            )
+            fields = {**fields, "ordinals": ordinals}
+            spec = replace(spec, candidate_ids=fields["candidate_ids"], ordinals=ordinals)
             binding = fingerprint({"state": sample.state, "question": asdict(spec), **fields})
             prepared.append(
                 (
