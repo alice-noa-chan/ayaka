@@ -149,6 +149,9 @@ prompt-head cache; that alone does not explain a 12x difference. The cause is
 not established from saved data. It matters for the Speed axis and needs a
 profiled run before any serving claim.
 
+*Update:* the [CPU cause checks](CAUSE_CHECKS_CPU_2026-10-07.md) traced it to
+repeated full tokenizer serialization on every Swift read, fixed in `9a4a0c9`.
+
 ## Recommendations, in order
 
 1. **Change the development question from "v2 direct beats v1 with

@@ -50,7 +50,7 @@ these items in either checkpoint.
 | E4 | A direct read cannot do the arithmetic | **Confirmed for test 1** (AUC about 0.5 on 480 questions). Test 2's v2 direct still ranks its 17 calculation items fairly (AUC 0.79) but credits only 5; forced reasoning reaches AUC 1.00 and credits all 17. |
 | ko Noul | Korean intent abstentions | **A confidence problem, not a ranking problem.** v2 direct has AUC 1.00 on the 16 Korean items yet credits 10; its gold-true mean is 0.62. Forced reasoning makes it worse: gold-true mean 0.38, 5 wrong. |
 | A6 | The same checkpoint scores differently by evaluation path | **Confirmed, cause open.** Training-time and comparison reads of the same 376 questions have identical token counts but probabilities that differ by up to 0.111 (median 0.003; 53 questions above 0.01). The adapter is stored in float32 and loaded without a dtype change. Kernel selection or batch shape remain candidates and need a GPU check. |
-| H1 | v2 direct collection takes 2.13 s per question | **Cause found.** Each Swift-contract encode calls `input_serving_recipe`, which reserializes the full 262K-vocabulary tokenizer (about 0.7 s on this CPU). The comparison path encodes every question twice, adding about 1.4–2.8 s. `ayaka.training.tokenizer_identity.tokenizer_identity_scope` already provides reuse but the serving paths do not use it. This affects serving speed, not quality. |
+| H1 | v2 direct collection takes 2.13 s per question | **Cause found.** Each Swift-contract encode calls `input_serving_recipe`, which reserializes the full 262K-vocabulary tokenizer (about 0.7 s on this CPU). The comparison path encodes every question twice, adding about 1.4–2.8 s. This affects serving speed, not quality. **Fixed** in `9a4a0c9`: `Decision` and `SwiftTraceGenerator` pin the tokenizer once at startup (`TokenizerPin`); `encode_serving` p50 fell from 1.316 s to 0.0048 s with the real tokenizer. |
 | D2 / D6 | Under-training | **Inconclusive.** Training NLL fell across the run (0.69 in steps 26–40, 0.48 in 41–55, 0.42 in 56–74) with no held-out curve (`eval_every` 0). The gradient norm stayed between about 15 and 171 against a clip of 1.0, so every update was clipped. |
 | G2 | Noul temperature fit is thin | **Confirmed.** The Noul temperature 0.683 comes from 64 calibration questions, all in the short bucket. |
 | F5 | Reasoning traces truncated at 384 tokens | **Minor.** 15 of 376 hit the limit, 11 of them HelpSteer2 Score; on the 4 classification items credit is 0.75 against 0.88 for completed traces. |
@@ -68,8 +68,8 @@ these items in either checkpoint.
    them in a single pass.
 4. Test 1's soft-target items should be reported separately from benchmark
    comparisons; they do not exist in JevBench's public Noul set.
-5. The repeated tokenizer serialization is a serving latency bug worth
-   fixing independently of model quality.
+5. The repeated tokenizer serialization was a serving latency bug,
+   independent of model quality; it is now fixed (`9a4a0c9`).
 
 Still requiring a GPU: the candidate-order test (E2), the A6 kernel check, a
 validated v2 router and reasoned-route temperatures (F1, F2: no reasoned
