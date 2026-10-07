@@ -1,0 +1,401 @@
+{
+  "scope": "frozen calibration-only fit; deterministic replay of saved GPU probabilities on matched development cohort",
+  "weights_updated": false,
+  "optimizer_updates": 0,
+  "calibration": {
+    "model_id": "752534912fd83f3753b9b8d25e97cd66bc68a686faf371e321417818f20e3f01",
+    "calibration": {
+      "version": 1,
+      "route": "direct",
+      "modality": "text",
+      "scale": 1.5430069725604798,
+      "bias": 0.5011419993194093,
+      "input_temperatures": {
+        "noul@short": 0.6826692223548889,
+        "noul@long": 0.6826692223548889
+      },
+      "long_threshold": 1024,
+      "report": {
+        "status": "selected",
+        "questions": 64,
+        "independent_cases": 43,
+        "folds": 5,
+        "selection_split": "calibration",
+        "thresholds": [
+          0.2,
+          0.8
+        ],
+        "regularization_candidates": [
+          0.01,
+          0.05
+        ],
+        "out_of_fold_baseline": {
+          "nll": 0.33802894527095917,
+          "brier": 0.10516017931100727,
+          "credit": 0.609375,
+          "abstentions": 23
+        },
+        "out_of_fold_candidates": {
+          "0.01": {
+            "nll": 0.3269619207582345,
+            "brier": 0.09586229916851138,
+            "credit": 0.625,
+            "abstentions": 22
+          },
+          "0.05": {
+            "nll": 0.3257530520764834,
+            "brier": 0.09957265995121986,
+            "credit": 0.59375,
+            "abstentions": 24
+          }
+        },
+        "regularization": 0.01
+      }
+    },
+    "development_results_used_for_fit": false,
+    "optimizer_updates": 0
+  },
+  "original": {
+    "v1_on": {
+      "method": "jevbench-v1.5-headline-A-equal-types-local",
+      "official_composite": null,
+      "sealed": false,
+      "n": 376,
+      "by_type": {
+        "choice": {
+          "n": 200,
+          "cc": 70.23953544640695,
+          "nll": 0.5800975442628074,
+          "ece": 0.0636907833814621,
+          "brier": 0.3079820930172742
+        },
+        "noul": {
+          "n": 64,
+          "cc": 56.25,
+          "nll": 0.3429688375635573,
+          "ece": 0.12176678257901585,
+          "brier": 0.1118324265614905,
+          "abstentions": 7
+        },
+        "score": {
+          "n": 112,
+          "cc": 62.77559722378113,
+          "nll": 0.9049495065543526,
+          "ece": 0.09679486003837415,
+          "brier": 0.5005989625585163,
+          "rps": 0.09260221384951041
+        }
+      },
+      "cc_equal_types": 63.08837755672936,
+      "proper_loss": 0.338556198558625,
+      "p50_s": 0.19192829146049917,
+      "p95_s": 5.399441067012958,
+      "reasoning_tokens": 4902
+    },
+    "v2_off": {
+      "method": "jevbench-v1.5-headline-A-equal-types-local",
+      "official_composite": null,
+      "sealed": false,
+      "n": 376,
+      "by_type": {
+        "choice": {
+          "n": 200,
+          "cc": 78.22405032663922,
+          "nll": 0.35707770727648985,
+          "ece": 0.050714889019727705,
+          "brier": 0.19671610469367387
+        },
+        "noul": {
+          "n": 64,
+          "cc": 31.25,
+          "nll": 0.35971467034187465,
+          "ece": 0.11131141225268948,
+          "brier": 0.10899657882967115,
+          "abstentions": 18
+        },
+        "score": {
+          "n": 112,
+          "cc": 64.31346748720263,
+          "nll": 0.8750535588531124,
+          "ece": 0.12788463197648528,
+          "brier": 0.48240893889532427,
+          "rps": 0.08527913130512459
+        }
+      },
+      "cc_equal_types": 57.929172604613946,
+      "proper_loss": 0.267357169641163,
+      "p50_s": 2.1294613699428737,
+      "p95_s": 2.812649909639731,
+      "reasoning_tokens": 0
+    },
+    "v2_on": {
+      "method": "jevbench-v1.5-headline-A-equal-types-local",
+      "official_composite": null,
+      "sealed": false,
+      "n": 376,
+      "by_type": {
+        "choice": {
+          "n": 200,
+          "cc": 81.12751028308732,
+          "nll": 0.5284056528487352,
+          "ece": 0.10631591007113457,
+          "brier": 0.23108934549181753
+        },
+        "noul": {
+          "n": 64,
+          "cc": 81.25,
+          "nll": 0.5391899475720034,
+          "ece": 0.09142251801628731,
+          "brier": 0.09017985917527449,
+          "abstentions": 0
+        },
+        "score": {
+          "n": 112,
+          "cc": 71.24438880023811,
+          "nll": 1.4076789545178607,
+          "ece": 0.3099320669259344,
+          "brier": 0.6534610775206527,
+          "rps": 0.09721754960164598
+        }
+      },
+      "cc_equal_types": 77.87396636110847,
+      "proper_loss": 0.3882710500074616,
+      "p50_s": 17.227527649141848,
+      "p95_s": 27.634729462559335,
+      "reasoning_tokens": 83235
+    }
+  },
+  "calibrated_v2_off": {
+    "method": "jevbench-v1.5-headline-A-equal-types-local",
+    "official_composite": null,
+    "sealed": false,
+    "n": 376,
+    "by_type": {
+      "choice": {
+        "n": 200,
+        "cc": 78.22405032663922,
+        "nll": 0.35707770727648985,
+        "ece": 0.050714889019727705,
+        "brier": 0.19671610469367387
+      },
+      "noul": {
+        "n": 64,
+        "cc": 31.25,
+        "nll": 0.33512093480491795,
+        "ece": 0.08022445252510545,
+        "brier": 0.09887292457794142,
+        "abstentions": 19
+      },
+      "score": {
+        "n": 112,
+        "cc": 64.31346748720263,
+        "nll": 0.8750535588531124,
+        "ece": 0.12788463197648528,
+        "brier": 0.48240893889532427,
+        "rps": 0.08527913130512459
+      }
+    },
+    "cc_equal_types": 57.929172604613946,
+    "proper_loss": 0.2591592577955108,
+    "p50_s": 2.1294613699428737,
+    "p95_s": 2.812649909639731,
+    "reasoning_tokens": 0
+  },
+  "paired": {
+    "fixed": 2,
+    "broken": 2,
+    "score_improved": 0,
+    "score_worsened": 0,
+    "score_count_tolerance": 1e-06,
+    "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+    "mean_nll_gain": 0.004186167750971381,
+    "cc_delta_95ci": [
+      -4.232804232804227,
+      4.104166666666664
+    ],
+    "bootstrap_seed": 15,
+    "bootstrap_replicates": 2000,
+    "bootstrap_unit": "underlying_case",
+    "independent_cases": 99
+  },
+  "v1_comparison": {
+    "fixed": 28,
+    "broken": 25,
+    "score_improved": 57,
+    "score_worsened": 55,
+    "score_count_tolerance": 1e-06,
+    "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+    "mean_nll_gain": 0.12886856201158342,
+    "cc_delta_95ci": [
+      -15.177133921617267,
+      4.245149677085691
+    ],
+    "bootstrap_seed": 15,
+    "bootstrap_replicates": 2000,
+    "bootstrap_unit": "underlying_case",
+    "independent_cases": 99
+  },
+  "v2_on_comparison": {
+    "fixed": 29,
+    "broken": 9,
+    "score_improved": 71,
+    "score_worsened": 41,
+    "score_count_tolerance": 1e-06,
+    "counts_definition": "classification thresholded correctness; separate Score nMAE changes",
+    "mean_nll_gain": -0.2845214102287089,
+    "cc_delta_95ci": [
+      11.08046347813334,
+      29.3990978059237
+    ],
+    "bootstrap_seed": 15,
+    "bootstrap_replicates": 2000,
+    "bootstrap_unit": "underlying_case",
+    "independent_cases": 99
+  },
+  "version": "ayaka-direct-noul-calibration-trial-1",
+  "deployment": {
+    "status": "rejected_validation",
+    "active_checkpoint_unchanged": true,
+    "active_checkpoint_sha256": "752534912fd83f3753b9b8d25e97cd66bc68a686faf371e321417818f20e3f01",
+    "correction": {
+      "version": 1,
+      "route": "direct",
+      "modality": "text",
+      "scale": 1.5430069725604798,
+      "bias": 0.5011419993194093,
+      "input_temperatures": {
+        "noul@short": 0.6826692223548889,
+        "noul@long": 0.6826692223548889
+      },
+      "long_threshold": 1024,
+      "report": {
+        "status": "rejected_validation",
+        "questions": 64,
+        "independent_cases": 43,
+        "folds": 5,
+        "selection_split": "calibration",
+        "thresholds": [
+          0.2,
+          0.8
+        ],
+        "regularization_candidates": [
+          0.01,
+          0.05
+        ],
+        "out_of_fold_baseline": {
+          "nll": 0.33802894527095917,
+          "brier": 0.10516017931100727,
+          "credit": 0.609375,
+          "abstentions": 23
+        },
+        "out_of_fold_candidates": {
+          "0.01": {
+            "nll": 0.3269619207582345,
+            "brier": 0.09586229916851138,
+            "credit": 0.625,
+            "abstentions": 22
+          },
+          "0.05": {
+            "nll": 0.3257530520764834,
+            "brier": 0.09957265995121986,
+            "credit": 0.59375,
+            "abstentions": 24
+          }
+        },
+        "regularization": 0.01,
+        "source_groups_sha256": [
+          "01a189734a1ca57377e35f73e38645f8083d54c4873a0f99a81ba8c3f682e900",
+          "20179166c3f6f2d01cc0e7cb3dc4d35c3411a45a8e6b5610bd6ea16eec188808",
+          "21656af9bd84637c0ea6e0cff5c3e39f20f433c9222307ff1bddead9d7cdcdaa",
+          "27ca225ec012e6bcbbddd457c31c33bf1dbd5fd0433cbb9838ee681ac77f3dd3",
+          "2bdcceed8e1bb591b0afdadfa8a9709df8ece815ac2192864aea8ba0f26c6a19",
+          "36d381884d3e1cb4d4a48cbd5b0edce7357904cb2e0247e1387729a3a9a9792e",
+          "3dfe5b7984c89951672eb4cf2f0011454491d2566fe5dd11585c3bee748263cf",
+          "481a4f13dd1c685d50e5daa3eac24caa2fc5642d61d6fae425281f490bc7ab62",
+          "5546fc75452800d0dcc57dac4f6e0b9e05dbd80acc5ca881907fe69f7815ebc7",
+          "594c59c93cc3d16d6066d62119ce4c8fa1630feebc39596fb44b386b17e1f379",
+          "6268fe574e34dd9c067d825f3fddbc3939028689fa88b1a65415bcad79af2807",
+          "62bf0e7575e0d975174ecf51ab91fbeae4020660db9cbfa898b3964dea64791b",
+          "632769888bb72df0a218527124f79637b9f9f5a4b029e82c6f5516ca6bc628fd",
+          "668940d54b98c4222da865f07502885be963f2248dac1f622c56f8e9e4498a51",
+          "6c33ff83a6d3dabef38ab4b6bb9b0659620ee4b149a38ceea16fb044058096af",
+          "76ea7d393ccec4103e35a166509d8a73f04c0049958b71c17fe25018ee782255",
+          "782d3ec121de196acebe3b7621ebb9a852853a0570d706c663686e0769fc3c75",
+          "79833ae98f95fcd7b7001fadbe8c44f8df0496eaf69e70f0f5d83af61845b097",
+          "7ccc54dd646e00cc9d64d77e1aa7c58cfad959a0502095e53681a7db51512f43",
+          "7ebc3603ff86bfba5b5c4deeccdf31394e8a2fb9484cf20c0b1b9ea4a82b39d6",
+          "837067751e89c5d501a47fc6a332be1c4b7282d3eef4abdeafce44650d52c8a4",
+          "869afbebfff9be51a381d90d4fe34dcc2678ddc913ae0d958f75b25eed985224",
+          "891ba4b1bc8179aa6fed023c1825bf4d23fe7b681530b85b3bc78315139e64b9",
+          "90f831c77cf95cc960b66df224f2f199374854eaea7bf9b8a73570f7c7725ccd",
+          "96f2bee906a980a6921f18797cda3171d3b5ade9753071939a7eaf1befd77f37",
+          "9c737132e12932a5f27aed3a9ea690f2eedf660c5790af5c04f85259ba24bbbe",
+          "a4060345a3f9313b9b7826c8e7b5ec4afa53fdf9a66c7725025c05306da19173",
+          "b16ab3de55a4b9b5f567a228ec0d30049ce76287dc22ec15871ce06c78001cb4",
+          "b3ca2720300a98815cbacac26475a38a762db9eaa3c93b67db5b46100b37e3e1",
+          "b72c0ff69b5394827ed4b707d53bd45239492293804eea9cfdb5be5a2812951c",
+          "d05dc8152b122e65494552efb9899e89bdb2a509186e8d8a2218d6dcb6c558ee",
+          "d58506f879c7ff5e6621cc87e1146fc3b444326b48f9c9089c7b795b53fd1b06",
+          "d89f6321fa91203ac0fc4cebfb31218c94ee5ce812b0233795a1dbfb6410fbbb",
+          "e1740650e19d2cd12fbf776b9e353a3e3f3fb34305faba67839da1a4df6de915",
+          "e497211f997f371aa3234d20304c3d8198068baaf6f53f507c93d8709a89fc22",
+          "e811de0c3686a4b025f33059cf17a6478fe6278325eb0c81ab084227c267d83d",
+          "e89a90ab43cdc131948bd4bc9967093622f306c66d8e1515da903f515bc94dc9",
+          "f5e88197c9c70e75880ee6e4f4a1c992efefa9b16c25ffd7aeebfc085e5dc9ec",
+          "fa971ce55b3c1dcd96b15279c1b6b2b9ee6c18362381c268ad88b9248bae93bc",
+          "fb6277a2a9d73f0d1d740322db8c6ed770e68e5594db83a6f472efaa9332fa5f",
+          "fdbf66a4d590d55f2c44be3f74b823a85ccb25cb0b582ad8326ffc04cae631c9",
+          "fef5d6b8694f39739c949b13c63f0b18f52d0b0ebdf4872d7655efdde93de793",
+          "ff7a3c13b3207a46f86be9299ca879dee71172055d86cc6752a46bf42837ae7e"
+        ],
+        "validation": {
+          "questions": 64,
+          "independent_cases": 43,
+          "baseline": {
+            "nll": 0.3597146635652898,
+            "brier": 0.10899657882967116,
+            "credit": 0.65625,
+            "abstentions": 18
+          },
+          "corrected": {
+            "nll": 0.3351209348049177,
+            "brier": 0.0988729245779414,
+            "credit": 0.65625,
+            "abstentions": 19
+          }
+        }
+      }
+    },
+    "parameters_retuned_after_development": false
+  },
+  "provenance": {
+    "raw_calibration_sha256": "388f85927069234e115b28b1aa9e7d9ada6ab7c0f3e5798b0e70622ee0cef1ac",
+    "development_sha256": "f4a1b8d124a5c80c737ed4b5f7a2f2463c8e1d18eefd37220efa600c538b296b",
+    "frozen_parameters_sha256": "11eb11e80b4a536afb50f66dabe2d3588213705766997754e0a115b0f0b7bde3",
+    "original_off_outputs_sha256": "eeafdabf2e647f46fea74bad172839da8703af321da1d23690a50990a91a0f8f",
+    "input_recipe_sha256": "5d22a0d65b5a096a0f9d2e15c0b8df9ea771946d055394256ae25ec732499c0d",
+    "calibration_development_groups_disjoint": true,
+    "gpu_instances_created": 0,
+    "optimizer_updates": 0,
+    "checkpoint_files_sha256": {
+      "ayaka_config.json": "6f526cea7f0d4f405170e19d4d41aba7d6b93ba3c65c60374d54d45ce1a20bd3",
+      "head.safetensors": "ec5e7b09daf6c881b68877623b4800d6248d80d3b951d09612e554e24de0e05e",
+      "adapter/adapter_config.json": "dae549d292ba1211dabe79bf8a45db8bd93f977b34c394b68af558fcee4e468c",
+      "adapter/adapter_model.safetensors": "1cfc7d97463b175f3ce80d3a07bacda0085e44850f34957491768f0a58d4185f"
+    }
+  },
+  "development_noul_diagnostics": {
+    "hard_true_targets": 32,
+    "hard_false_targets": 32,
+    "original_abstentions": 18,
+    "correct_argmax_withheld": 14,
+    "candidate_abstentions": 19
+  },
+  "official_rank": {
+    "status": "unmeasured",
+    "benchmark": "JevBench v1.6.1",
+    "as_of": "2026-10-07",
+    "scope_mismatch": "376-question local development competence cannot rank on the official 1500-item pool and scorer",
+    "source": "https://www.benchmarkheaven.com/jev-models"
+  }
+}
