@@ -39,12 +39,18 @@ def _model_id(value):
     return value
 
 
-def _canonical_questions(samples):
+# Reserved evaluation and tuning splits; the private test split is never read here.
+READ_SPLITS = ("dev", "calibration", "router_train")
+
+
+def _canonical_questions(samples, split="dev"):
+    if split not in READ_SPLITS:
+        raise ValueError(f"reads are limited to {READ_SPLITS}; test stays unopened")
     expected = {}
     for sample in samples:
         metadata = sample.metadata
-        if metadata.get("split") != "dev":
-            raise ValueError("hierarchy screening requires dev samples; test stays unopened")
+        if metadata.get("split") != split:
+            raise ValueError(f"every sample must belong to the {split} split; test stays unopened")
         for original in sample.questions:
             q = _noul_canonical(original)
             identifier = metadata["source_example_id"] + "/" + q.id
@@ -63,7 +69,7 @@ def _canonical_questions(samples):
                     "candidate_ids": [c.id for c in q.candidates],
                     "ordinals": ordinals,
                     "cluster_id": metadata["source_lineage"],
-                    "split": "dev",
+                    "split": split,
                     "language": metadata["language"],
                     "family": metadata["task_family"],
                     "source": metadata.get("source", metadata["task_family"]),

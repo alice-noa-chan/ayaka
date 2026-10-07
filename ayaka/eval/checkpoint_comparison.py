@@ -21,7 +21,7 @@ from ..evidence_pipeline import FROZEN_REASONING_POLICY
 from ..reasoning import ReasoningSettings
 from .matched_contract import BACKBONE_REVISION, CHECKPOINT_REPO, CHECKPOINT_REVISION
 from .pretraining_v2 import cohort_fingerprint
-from .quality_hierarchy import RULE, _canonical_questions, _comparison, _model_id
+from .quality_hierarchy import READ_SPLITS, RULE, _canonical_questions, _comparison, _model_id
 from .read_artifact import fingerprint
 from .v2 import summarize, typed_row
 
@@ -42,9 +42,9 @@ def _json_ordinal(value):
     return number
 
 
-def questions(samples):
-    """Retain original candidate IDs and complete canonical development inputs."""
-    expected = _canonical_questions(samples)
+def questions(samples, split="dev"):
+    """Retain original candidate IDs and complete canonical inputs of one split."""
+    expected = _canonical_questions(samples, split)
     prepared = []
     for sample in samples:
         for question in sample.questions:
@@ -73,14 +73,16 @@ def questions(samples):
     return prepared
 
 
-def make_protocol(samples, v1_model_id, v2_model_id):
-    questions(samples)
+def make_protocol(samples, v1_model_id, v2_model_id, split="dev"):
+    """Fixed reading recipe. ``dev`` evaluates; ``calibration`` and ``router_train``
+    collect tuning reads that are never scored against development results."""
+    questions(samples, split)
     ids = {"v1": _model_id(v1_model_id), "v2": _model_id(v2_model_id)}
     if ids["v1"] == ids["v2"]:
         raise ValueError("v1 and v2 require distinct checkpoint identities")
     return {
         "version": VERSION,
-        "split": "dev",
+        "split": split,
         "cohort_sha256": cohort_fingerprint(samples),
         "model_ids": ids,
         "backbone_revision": BACKBONE_REVISION,
@@ -105,7 +107,12 @@ def make_protocol(samples, v1_model_id, v2_model_id):
 
 
 def validate_protocol(protocol, samples):
-    expected = make_protocol(samples, protocol["model_ids"]["v1"], protocol["model_ids"]["v2"])
+    split = protocol.get("split")
+    if split not in READ_SPLITS:
+        raise ValueError(f"protocol split must be one of {READ_SPLITS}")
+    expected = make_protocol(
+        samples, protocol["model_ids"]["v1"], protocol["model_ids"]["v2"], split
+    )
     if fingerprint(expected) != fingerprint(protocol):
         raise ValueError("comparison protocol differs from its fixed development recipe")
 
@@ -163,7 +170,9 @@ def checked_rows(rows, samples, protocol, system, *, complete=True):
     validate_protocol(protocol, samples)
     if system not in SYSTEMS:
         raise ValueError("unknown comparison system")
-    expected = {fields["id"]: (spec, fields) for _, spec, fields in questions(samples)}
+    expected = {
+        fields["id"]: (spec, fields) for _, spec, fields in questions(samples, protocol["split"])
+    }
     seen, checked = set(), []
     for row in rows:
         key = row.get("id")
@@ -189,7 +198,7 @@ def collect_rows(predict, samples, protocol, system, output):
     done = {row["id"] for row in checked}
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("a", encoding="utf-8", newline="\n") as stream:
-        for state, spec, fields in questions(samples):
+        for state, spec, fields in questions(samples, protocol["split"]):
             if fields["id"] in done:
                 continue
             start = time.perf_counter()
@@ -306,7 +315,12 @@ class ContentTokenCounter:
         return self.inner.decode(ids)
 
 
-def predictor(model, tok, system):
+NOUL_ORDER_NAMES = {"false_first": ("false", "true"), "true_first": ("true", "false")}
+
+
+def predictor(model, tok, system, noul_order="false_first"):
+    if noul_order != "false_first" and system != "v2_off":
+        raise ValueError("a reversed Noul order is a v2 direct-read diagnostic only")
     if system == "v1_on":
         from ..evidence_pipeline import reasoning_decision
         from .matched_execution import FullContextDecision
@@ -334,6 +348,7 @@ def predictor(model, tok, system):
     from ..reasoning_pipeline import controlled_decision
 
     decision = controlled_decision(model, tok, 8192)
+    decision.original.noul_order = NOUL_ORDER_NAMES[noul_order]
     setting = ReasoningSettings(mode="off" if system == "v2_off" else "on", effort="medium")
 
     def predict(state, spec):
@@ -347,6 +362,9 @@ def predictor(model, tok, system):
             "finish_reason": reasoning["finish_reason"],
             "input_tokens": reasoning["input_tokens"],
             "readout_execution": reasoning.get("readout_execution"),
+            # Direct reads keep the auto-router inputs so tuning cohorts can fit it.
+            "routing_features": reasoning.get("routing_features"),
+            "noul_order": noul_order,
         }
 
     return predict
@@ -354,9 +372,14 @@ def predictor(model, tok, system):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("collect", "compare", "breakdown"))
-    for name in ("samples", "protocol", "out"):
+    parser.add_argument("action", choices=("protocol", "collect", "compare", "breakdown"))
+    for name in ("samples", "out"):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--protocol", type=Path)
+    parser.add_argument("--split", choices=READ_SPLITS, default="dev")
+    parser.add_argument("--v1-model-id", help="external SHA-256 of the v1 checkpoint")
+    parser.add_argument("--v2-model-id", help="external SHA-256 of the v2 checkpoint")
+    parser.add_argument("--noul-order", choices=tuple(NOUL_ORDER_NAMES), default="false_first")
     parser.add_argument("--system", choices=SYSTEMS)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--backbone", type=Path)
@@ -371,6 +394,20 @@ def main(argv=None):
         for line in args.samples.read_bytes().splitlines()
         if line.strip()
     ]
+    if args.action == "protocol":
+        if args.out.exists():
+            raise ValueError("protocols must use a new output file")
+        if args.v1_model_id is None or args.v2_model_id is None:
+            raise ValueError("a protocol needs both external checkpoint identities")
+        protocol = make_protocol(samples, args.v1_model_id, args.v2_model_id, args.split)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(
+            json.dumps(protocol, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        return
+    if args.protocol is None:
+        raise ValueError(f"{args.action} requires --protocol")
     protocol = json.loads(args.protocol.read_bytes())
     validate_protocol(protocol, samples)
     if args.action in ("compare", "breakdown"):
@@ -433,7 +470,11 @@ def main(argv=None):
             model.cfg.backbone,
         )
         rows = collect_rows(
-            predictor(model, tok, args.system), samples, protocol, args.system, args.out
+            predictor(model, tok, args.system, args.noul_order),
+            samples,
+            protocol,
+            args.system,
+            args.out,
         )
         if checkpoint_fingerprint(args.checkpoint) != wanted:
             raise ValueError("checkpoint files changed during collection")

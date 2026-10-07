@@ -14,7 +14,9 @@ from ayaka.eval.checkpoint_comparison import (
     collect_rows,
     compare,
     gate_breakdown,
+    main,
     make_protocol,
+    predictor,
     questions,
 )
 from ayaka.eval.matched_execution import full_decision_context
@@ -210,8 +212,40 @@ def test_protocol_rejects_test_inputs_and_identical_checkpoint_identities(cohort
         make_protocol(samples, "a" * 64, "a" * 64)
     changed = copy.deepcopy(samples)
     changed[0].metadata["split"] = "test"
-    with pytest.raises(ValueError, match="dev samples"):
+    with pytest.raises(ValueError, match="dev split"):
         make_protocol(changed, "a" * 64, "b" * 64)
+
+
+def test_tuning_splits_get_their_own_protocol_and_test_stays_unreadable(cohort, tmp_path):
+    samples, _ = cohort
+    tuning = copy.deepcopy(samples)
+    for sample in tuning:
+        sample.metadata["split"] = "calibration"
+    protocol = make_protocol(tuning, "a" * 64, "b" * 64, "calibration")
+    assert protocol["split"] == "calibration"
+    rows = collect_rows(observation("v2_off"), tuning, protocol, "v2_off", tmp_path / "off.jsonl")
+    assert {row["split"] for row in rows} == {"calibration"}
+    with pytest.raises(ValueError, match="calibration split"):
+        make_protocol(samples, "a" * 64, "b" * 64, "calibration")
+    with pytest.raises(ValueError, match="test stays unopened"):
+        make_protocol(samples, "a" * 64, "b" * 64, "test")
+    altered = {**protocol, "split": "test"}
+    with pytest.raises(ValueError, match="protocol split"):
+        checked_rows(rows, tuning, altered, "v2_off")
+
+
+def test_protocol_cli_writes_once_and_reversed_order_is_v2_direct_only(cohort, tmp_path):
+    samples, protocol = cohort
+    path = tmp_path / "dev.jsonl"
+    path.write_text("".join(json.dumps(s.to_json()) + "\n" for s in samples))
+    out = tmp_path / "protocol.json"
+    args = ["protocol", "--samples", str(path), "--out", str(out)]
+    main([*args, "--v1-model-id", "a" * 64, "--v2-model-id", "b" * 64])
+    assert json.loads(out.read_text()) == protocol
+    with pytest.raises(ValueError, match="new output"):
+        main([*args, "--v1-model-id", "a" * 64, "--v2-model-id", "b" * 64])
+    with pytest.raises(ValueError, match="v2 direct-read diagnostic"):
+        predictor(None, None, "v1_on", "true_first")
 
 
 def test_native_counter_observes_content_without_changing_decoded_text():
