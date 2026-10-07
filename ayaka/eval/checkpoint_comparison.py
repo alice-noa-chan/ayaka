@@ -298,6 +298,7 @@ def predictor(model, tok, system):
             "reasoning_tokens": reasoning["generated_tokens"],
             "finish_reason": reasoning["finish_reason"],
             "input_tokens": reasoning["input_tokens"],
+            "readout_execution": reasoning.get("readout_execution"),
         }
 
     return predict

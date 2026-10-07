@@ -2,8 +2,9 @@
 
 The complete three-turn read is tokenized by the native chat template. Its
 common token prefix is reused from generation, never from another question.
-If a cache cannot safely roll back a changed template boundary, report the
-failure and let the controlled pipeline record its direct fallback.
+Some native templates remove generation-only channel markers when rendering
+an assistant history turn. Preserve the complete original conversation and
+explicitly reread that canonical final chat when its cache prefix changes.
 """
 
 from __future__ import annotations
@@ -60,6 +61,19 @@ class SwiftTraceGenerator(TraceGenerator):
         final = self._final_messages(messages, "")
         return max(1, len(self.prepare(final)[0]) - len(self.prepare(messages)[0]))
 
+    def conversation_tokens(self, messages):
+        """Bind the supplied conversation before the generation-only cue."""
+        validate_tokenizer(self.contract, self.tok)
+        ids = self.tok.hf.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            **{**self.encoding["chat_template_kwargs"], "return_dict": False},
+        )
+        if hasattr(ids, "keys"):
+            ids = ids["input_ids"]
+        return list(ids)
+
     @staticmethod
     def _final_messages(messages, text):
         return [
@@ -96,12 +110,25 @@ class SwiftTraceGenerator(TraceGenerator):
         common = 0
         while common < min(len(ids), len(generated)) and ids[common] == generated[common]:
             common += 1
-        # A template that rewrites the original user turn cannot use this trace
-        # cache as a continuation. Do not quietly perform a second full prefill.
+        original = self.conversation_tokens(trace.messages)
+        if (
+            not original
+            or ids[: len(original)] != original
+            or trace.input_ids[: len(original)] != original
+        ):
+            raise ValueError("Swift final template rewrites the original conversation")
+        cache = trace.cache
         if common < len(trace.input_ids):
-            raise ValueError("Swift final template rewrites the generation prefix")
-        common = min(common, len(ids) - 1)  # retain a final token to obtain answer hidden state
-        if common != len(generated):
+            # Gemma 4's empty thought channel belongs to the generation cue;
+            # its history renderer removes it. A full canonical read avoids
+            # feeding final-chat tokens into a cache from a different prefix.
+            common, cache = 0, None
+            trace.cache = None
+            trace.readout_execution = "canonical_full_read"
+        else:
+            trace.readout_execution = "cache_reuse"
+            common = min(common, len(ids) - 1)  # retain the final answer position
+        if cache is not None and common != len(generated):
             crop = getattr(trace.cache, "crop", None)
             if not callable(crop):
                 raise ValueError("Swift trace cache cannot roll back the final template boundary")
@@ -123,7 +150,5 @@ class SwiftTraceGenerator(TraceGenerator):
         trace.readout_tokens += len(rendered.suffix_ids)
         trace.readout_input_ids = ids
         trace.readout_label_ids = label_ids
-        out = self.model(
-            batch, past_key_values=trace.cache, apply_temperature=self.apply_temperature
-        )
+        out = self.model(batch, past_key_values=cache, apply_temperature=self.apply_temperature)
         return ragged_softmax(out.logits, out.cand_cu).tolist()

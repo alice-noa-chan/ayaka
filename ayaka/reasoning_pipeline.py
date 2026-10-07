@@ -306,6 +306,7 @@ class ControlledDecision:
                 result = baselines[i]
             if trace is not None:
                 extra["input_tokens"] += trace.prefill_tokens + trace.readout_tokens
+                extra["readout_execution"] = getattr(trace, "readout_execution", None)
             if self.calibration is not None:
                 result.probs = self.calibration.apply(
                     result.probs,
