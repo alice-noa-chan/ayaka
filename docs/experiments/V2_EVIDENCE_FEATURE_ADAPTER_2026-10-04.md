@@ -106,7 +106,9 @@ inputs = prepare_evidence_inputs(
     context_limit=512,
 )
 features = extract_evidence_features(
-    model.text_model(), inputs, max_forward_tokens=4096,
+    model.text_model(),
+    inputs,
+    max_forward_tokens=4096,
     max_feature_bytes=16 * 1024 * 1024,
 )
 head = EvidenceResidualHead(model.text_config.hidden_size)
