@@ -10,6 +10,11 @@ order of use keeps each split to one role:
 3. ``dev``: ``fit_router``'s own lambda/promotion validation, then a single
    scored read of every policy against v1 and against calibrated v2 direct.
 
+``adapter="merged"`` tunes v2 reads collected with the LoRA folded into the
+weights (``<system>-merged.jsonl``); v1 is always read unmerged. Merged reads
+generate different traces, so temperatures, the router and the policy are
+refitted from them rather than reused.
+
 Nothing is trained on gradients and the private test split is never opened.
 """
 
@@ -24,7 +29,7 @@ from pathlib import Path
 from ..data.schema import Sample
 from ..routing import fit_router, paired_training_rows
 from ..training.path_calibration import PathCalibration
-from .checkpoint_comparison import checked_rows, read_rows
+from .checkpoint_comparison import ADAPTERS, checked_rows, read_rows
 from .jevbench import speed_axis
 from .quality_hierarchy import _comparison
 from .v2 import summarize, typed_row
@@ -40,7 +45,7 @@ class _RowSpec:
         self.type, self.ordinals = row["type"], row.get("ordinals")
 
 
-def load_run(results, split, system, noul_order="false_first"):
+def load_run(results, split, system, noul_order="false_first", adapter="unmerged"):
     samples = [
         Sample.from_json(json.loads(line))
         for line in (results / "cohorts" / f"{split}.jsonl").read_bytes().splitlines()
@@ -48,8 +53,9 @@ def load_run(results, split, system, noul_order="false_first"):
     ]
     protocol = json.loads((results / "protocols" / f"{split}.json").read_bytes())
     suffix = "" if noul_order == "false_first" else f"-{noul_order}"
+    suffix += "" if adapter == "unmerged" else f"-{adapter}"
     rows = read_rows(results / split / f"{system}{suffix}.jsonl")
-    return checked_rows(rows, samples, protocol, system)
+    return checked_rows(rows, samples, protocol, system, adapter=adapter)
 
 
 def calibrated(rows, calibration):
@@ -132,10 +138,10 @@ def policy_rule(name, router):
     return rules[name]
 
 
-def tune(results, *, replicates=2000):
+def tune(results, *, replicates=2000, adapter="unmerged"):
     results = Path(results)
     reads = {
-        (split, system): load_run(results, split, system)
+        (split, system): load_run(results, split, system, adapter=adapter)
         for split in ("calibration", "router_train", "dev")
         for system in ("v2_off", "v2_on")
     }
@@ -181,6 +187,7 @@ def tune(results, *, replicates=2000):
         del value["rows"]
     return {
         "version": VERSION,
+        "v2_adapter": adapter,
         "path_temperatures": calibration.temperatures,
         "router": {
             "promoted": router.promoted,
@@ -209,8 +216,9 @@ def main(argv=None):
     parser.add_argument("--results", required=True, help="retrieved results/ folder")
     parser.add_argument("--out", required=True)
     parser.add_argument("--replicates", type=int, default=2000)
+    parser.add_argument("--adapter", choices=ADAPTERS, default="unmerged")
     args = parser.parse_args(argv)
-    report = tune(args.results, replicates=args.replicates)
+    report = tune(args.results, replicates=args.replicates, adapter=args.adapter)
     Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(
         json.dumps(
