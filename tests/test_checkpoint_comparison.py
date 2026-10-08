@@ -257,3 +257,20 @@ def test_native_counter_observes_content_without_changing_decoded_text():
     assert observed.decode(ids) == tok.decode(ids)
     assert observed.tokens == len(ids)
     assert observed.pad_id == tok.pad_id
+
+
+def test_adapter_mode_is_recorded_and_never_mixed_on_resume(tmp_path, cohort):
+    samples, protocol = cohort
+    path = tmp_path / "on-merged.jsonl"
+    rows = collect_rows(observation("v2_on"), samples, protocol, "v2_on", path, "merged")
+    assert {row["adapter"] for row in rows} == {"merged"}
+    assert checked_rows(rows, samples, protocol, "v2_on", adapter="merged") == rows
+    with pytest.raises(ValueError, match="different adapter"):
+        collect_rows(observation("v2_on"), samples, protocol, "v2_on", path)
+    with pytest.raises(ValueError, match="different adapter"):
+        compare({**results(tmp_path, cohort), "v2_on": rows}, samples, protocol)
+    # Rows from before the adapter was recorded count as unmerged reads.
+    legacy = [{k: v for k, v in row.items() if k != "adapter"} for row in rows]
+    assert len(checked_rows(legacy, samples, protocol, "v2_on")) == len(rows)
+    with pytest.raises(ValueError, match="merged read of v1"):
+        checked_rows([], samples, protocol, "v1_on", complete=False, adapter="merged")

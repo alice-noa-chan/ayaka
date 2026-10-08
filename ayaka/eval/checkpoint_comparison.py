@@ -28,6 +28,10 @@ from .v2 import summarize, typed_row
 VERSION = "ayaka-trained-checkpoint-comparison-dev-1"
 BREAKDOWN_VERSION = "ayaka-trained-checkpoint-gate-breakdown-dev-1"
 SYSTEMS = ("v1_on", "v2_off", "v2_on")
+# How the v2 LoRA is applied while reading. "merged" folds it into the bf16
+# weights: about 1.65x faster generation, but an approximation of the adapter,
+# so its reads are a separate system state that must be validated on its own.
+ADAPTERS = ("unmerged", "merged")
 
 
 def _json_ordinal(value):
@@ -166,10 +170,12 @@ def _checked_row(row, spec, fields, protocol, system):
     return {**row, **typed_row(spec, row["probs"], fields["target"])}
 
 
-def checked_rows(rows, samples, protocol, system, *, complete=True):
+def checked_rows(rows, samples, protocol, system, *, complete=True, adapter="unmerged"):
     validate_protocol(protocol, samples)
     if system not in SYSTEMS:
         raise ValueError("unknown comparison system")
+    if adapter not in ADAPTERS or (system == "v1_on" and adapter != "unmerged"):
+        raise ValueError("unknown adapter mode, or a merged read of v1")
     expected = {
         fields["id"]: (spec, fields) for _, spec, fields in questions(samples, protocol["split"])
     }
@@ -179,6 +185,9 @@ def checked_rows(rows, samples, protocol, system, *, complete=True):
         if key in seen or key not in expected:
             raise ValueError("duplicate or unknown comparison question")
         spec, fields = expected[key]
+        # Rows written before the adapter was recorded were all read unmerged.
+        if row.get("adapter", "unmerged") != adapter:
+            raise ValueError("comparison row was read with a different adapter mode")
         checked.append(_checked_row(row, spec, fields, protocol, system))
         seen.add(key)
     if complete and seen != set(expected):
@@ -190,11 +199,11 @@ def read_rows(path):
     return [json.loads(line) for line in Path(path).read_bytes().splitlines() if line.strip()]
 
 
-def collect_rows(predict, samples, protocol, system, output):
+def collect_rows(predict, samples, protocol, system, output, adapter="unmerged"):
     """Resume only matching rows and flush each complete observation."""
     output = Path(output)
     existing = read_rows(output) if output.exists() else []
-    checked = checked_rows(existing, samples, protocol, system, complete=False)
+    checked = checked_rows(existing, samples, protocol, system, complete=False, adapter=adapter)
     done = {row["id"] for row in checked}
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("a", encoding="utf-8", newline="\n") as stream:
@@ -211,12 +220,13 @@ def collect_rows(predict, samples, protocol, system, output):
                 "protocol_sha256": fingerprint(protocol),
                 "budget": 0 if system == "v2_off" else 384,
                 "latency_s": time.perf_counter() - start,
+                "adapter": adapter,
             }
             _checked_row(row, spec, fields, protocol, system)
             stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
             stream.flush()
             done.add(fields["id"])
-    return checked_rows(read_rows(output), samples, protocol, system)
+    return checked_rows(read_rows(output), samples, protocol, system, adapter=adapter)
 
 
 def compare(rows, samples, protocol, *, replicates=2000):
@@ -385,6 +395,12 @@ def main(argv=None):
     parser.add_argument("--backbone", type=Path)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-seconds", type=float, default=14400)
+    parser.add_argument(
+        "--adapter",
+        choices=ADAPTERS,
+        default="unmerged",
+        help="v2 only: read with the LoRA folded into the weights (recorded in every row)",
+    )
     parser.add_argument("--replicates", type=int, default=2000)
     for system in SYSTEMS:
         parser.add_argument(f"--{system.replace('_', '-')}", type=Path)
@@ -435,6 +451,8 @@ def main(argv=None):
         or destination.is_relative_to(args.backbone.resolve())
     ):
         raise ValueError("comparison output must not modify checkpoint or input files")
+    if args.system == "v1_on" and args.adapter != "unmerged":
+        raise ValueError("v1 toggles its adapter during evidence reads and cannot be merged")
     if not math.isfinite(args.max_seconds) or not 0 < args.max_seconds <= 14400:
         raise ValueError("collection requires a positive process deadline up to four hours")
     from ..training.scoped_calibration import checkpoint_fingerprint
@@ -458,7 +476,7 @@ def main(argv=None):
             str(args.checkpoint),
             device=args.device,
             dtype=torch.bfloat16,
-            merge=False,
+            merge=args.adapter == "merged",
             backbone_path=str(args.backbone),
             local_files_only=True,
             strict_loading=True,
@@ -475,6 +493,7 @@ def main(argv=None):
             protocol,
             args.system,
             args.out,
+            args.adapter,
         )
         if checkpoint_fingerprint(args.checkpoint) != wanted:
             raise ValueError("checkpoint files changed during collection")
