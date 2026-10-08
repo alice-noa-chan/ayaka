@@ -1,0 +1,25 @@
+{
+  "version": "ayaka-generation-bench-1",
+  "source_commit": "ba0a5a424645e83ccd1fe1d331274c833cc3013c",
+  "device": "NVIDIA A100-SXM4-40GB",
+  "runtime": {"torch": "2.8.0+cu128", "transformers": "5.17.0", "peft": "0.21.0", "attention": "sdpa"},
+  "questions": "first 16 dev questions of heldout-dev-20261007 after 1 warm-up question",
+  "budget": 384,
+  "bench": {
+    "baseline": {"questions": 16, "generated_tokens": 4546, "seconds": 438.76, "ms_per_token": 96.52, "tokens_per_s": 10.36},
+    "nosync": {"questions": 16, "generated_tokens": 4546, "seconds": 448.27, "ms_per_token": 98.61, "tokens_per_s": 10.14, "sync_every": 16, "exact_token_match": 16, "mean_common_prefix_fraction": 1.0}
+  },
+  "decode_profile_one_question": {
+    "unmerged_lora": {"wall_ms": 92.77, "gpu_busy_ms": 47.64, "kernel_launches": 7300.1},
+    "adapter_disabled": {"wall_ms": 74.34, "gpu_busy_ms": 37.41, "kernel_launches": 4774.5},
+    "merged": {"wall_ms": 69.91, "gpu_busy_ms": 37.42, "kernel_launches": 4774.5},
+    "parameters": {"cuda_bfloat16": 618, "cuda_float32": 686}
+  },
+  "merged_eager_ms_per_token_three_questions_128_tokens": [[59.2, 55.6, 60.1], [59.5, 56.1, 57.7], [61.3, 61.0, 55.3]],
+  "static_cache_eager": {"ms_per_token": [67.1, 61.6, 61.1], "token_match_of_128_vs_merged_dynamic": [16, 89, 88]},
+  "static_cache_torch_compile_reduce_overhead": {"ms_per_token": [295.8, 140.1, 136.0], "token_match_of_128_vs_merged_dynamic": [19, 118, 88], "note": "recompile limit hit on cumulative_length_int guards; 51 CUDA graph shapes"},
+  "not_measured": ["merged vs unmerged token agreement over the full budget", "accuracy of any variant"],
+  "rental": {"instance_id": 54837702, "elapsed_s": 2852, "cost_estimate_usd": 0.54, "destroyed": true},
+  "optimizer_updates": 0,
+  "original_private_test_opened": false
+}
