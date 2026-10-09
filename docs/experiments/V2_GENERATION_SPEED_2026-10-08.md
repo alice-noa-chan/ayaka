@@ -11,7 +11,9 @@ In the held-out comparison, reasoned reads generated at about 10 tokens/s (about
 - **Hardware:** vast.ai A100 SXM4 40GB (instance 54837702), $0.68/h.
 - **Elapsed and cost:** the rental ran 47.5 min, for an estimated cost of $0.54. It was destroyed after the measurements.
 - **Source commit:** `ba0a5a4`.
-- **Runtime:** torch 2.8.0+cu128, transformers 5.17.0, peft 0.21.0, SDPA attention. These match the held-out comparison runtime.
+- **Runtime:** torch 2.8.0+cu128, transformers 5.17.0, peft 0.21.0, SDPA attention, installed with pip on the host.
+  - This is **not** the locked runtime of the held-out comparisons (lock `a7537375…`, transformers 5.18.0, peft 0.21.2). An earlier version of this note claimed they matched; that was wrong.
+  - The merged-LoRA speed-up was later confirmed under the locked runtime itself: reasoned reads ran 1.72× faster (`V2_HELDOUT_MERGED_2026-10-09.md`).
 - **Model:** the v2 checkpoint on `google/gemma-4-12B-it` at revision `707f0a3b`. The backbone was downloaded on the host and checked against the pinned SHA-256 values.
 - **Benchmark:** `python -m ayaka.eval.generation_bench`, with 16 questions, budget 384 and one warm-up question.
 
