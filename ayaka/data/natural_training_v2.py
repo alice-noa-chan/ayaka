@@ -291,10 +291,16 @@ def partition_sources(
             counts[source, split] += 1
     if set(counts) != expected:
         raise ValueError("each natural source requires nonempty independent splits")
-    if quotas is not None and any(
-        counts[source, split] != quotas[source][split] for source, split in expected
-    ):
-        raise ValueError("natural source quota cannot be filled within its independent split")
+    short = sorted(
+        f"{source}/{split}: {counts[source, split]} of {quotas[source][split]}"
+        for source, split in expected
+        if quotas is not None and counts[source, split] != quotas[source][split]
+    )
+    if short:
+        raise ValueError(
+            "natural source quota cannot be filled within its independent split: "
+            + ", ".join(short)
+        )
     return result, {
         "counts": {f"{source}/{split}": n for (source, split), n in counts.items()},
         "removed": dict(removed),
