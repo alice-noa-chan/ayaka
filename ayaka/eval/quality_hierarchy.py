@@ -6,7 +6,8 @@ import argparse
 import hashlib
 import json
 import math
-from collections import Counter
+import random
+from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean
 
@@ -15,7 +16,7 @@ from ..primitives import QuestionSpec
 from ..reasoning import EFFORT_TOKENS
 from ..training.batching import _noul_canonical
 from .pretraining_v2 import cohort_fingerprint
-from .v2 import TIERS, paired_report, summarize, typed_row
+from .v2 import TIERS, paired_report, percentile, summarize, typed_row
 
 VERSION = "ayaka-quality-hierarchy-dev-1"
 TYPES = ("choice", "noul", "score")
@@ -27,6 +28,15 @@ RULE = {
     "minimum_independent_cases": 200,
     "regression_tolerance": 1e-8,
 }
+# How per-source and per-language CC checks are judged. "zero_tolerance" is the
+# original rule: any drop fails. "clustered_noninferiority" fails a subgroup only
+# when it is significantly worse: the upper bound of the 95% bootstrap interval
+# of its CC change, resampling whole underlying cases, is below zero. Global
+# checks (CC gain and its interval, per-type CC/NLL/Brier/RPS and nMAE) are the
+# same under both rules.
+SUBGROUP_RULES = ("zero_tolerance", "clustered_noninferiority")
+SUBGROUP_INTERVAL = (0.025, 0.975)
+SUBGROUP_SEED = 15
 
 
 def _model_id(value):
@@ -142,10 +152,38 @@ def _credit(rows):
     return 100 * mean(row["correct"] for row in rows if row["type"] != "score")
 
 
-def _comparison(before, after, *, major_gain, replicates):
+def subgroup_cc_interval(before, after, kind, replicates, seed=SUBGROUP_SEED):
+    """95% interval of the after-minus-before CC of one subgroup's ``kind`` rows.
+
+    Rows are paired by position; whole underlying cases (``cluster_id``) are
+    resampled, so the five HelpSteer2 attributes of one response or the two
+    translations of one MASSIVE utterance move together.
+    """
+    pairs = [(a, b) for a, b in zip(before, after, strict=True) if a["type"] == kind]
+    if any(a["id"] != b["id"] for a, b in pairs):
+        raise ValueError("subgroup rows must be paired in the same order")
+    clusters = defaultdict(list)
+    for a, b in pairs:
+        clusters[a.get("cluster_id", a["id"])].append((a, b))
+    units = list(clusters.values())
+    rng = random.Random(seed)
+    diffs = []
+    for _ in range(replicates):
+        chosen = [pair for _ in units for pair in rng.choice(units)]
+        old = summarize([a for a, _ in chosen])["by_type"][kind]["cc"]
+        new = summarize([b for _, b in chosen])["by_type"][kind]["cc"]
+        diffs.append(new - old)
+    return [percentile(diffs, SUBGROUP_INTERVAL[0]), percentile(diffs, SUBGROUP_INTERVAL[1])]
+
+
+def _comparison(before, after, *, major_gain, replicates, subgroup_rule="zero_tolerance"):
     old, new = summarize(before), summarize(after)
     paired = paired_report(before, after, replicates)
     delta = new["cc_equal_types"] - old["cc_equal_types"]
+    if subgroup_rule not in SUBGROUP_RULES:
+        raise ValueError(f"subgroup rule must be one of {SUBGROUP_RULES}")
+    if [row["id"] for row in before] != [row["id"] for row in after]:
+        raise ValueError("compared systems must list the same questions in the same order")
     tolerance = RULE["regression_tolerance"]
     checks = {
         "cc_gain": delta >= RULE["v2_off_cc_gain"]
@@ -176,11 +214,19 @@ def _comparison(before, after, *, major_gain, replicates):
             right = summarize([row for row in after if row[field] == value])
             groups[field][value] = {"before": left, "after": right}
             for kind in left["by_type"]:
-                checks[f"{field}:{value}/{kind}/cc_not_worse"] = (
-                    right["by_type"][kind]["cc"] >= left["by_type"][kind]["cc"] - tolerance
-                )
+                name = f"{field}:{value}/{kind}/cc_not_worse"
+                not_worse = right["by_type"][kind]["cc"] >= left["by_type"][kind]["cc"] - tolerance
+                if subgroup_rule == "zero_tolerance":
+                    checks[name] = not_worse
+                    continue
+                rows_before = [row for row in before if row[field] == value]
+                rows_after = [row for row in after if row[field] == value]
+                interval = subgroup_cc_interval(rows_before, rows_after, kind, replicates)
+                groups[field][value].setdefault("cc_delta_95ci", {})[kind] = interval
+                checks[name] = not_worse or interval[1] >= 0
     return {
         "screen_passed": all(checks.values()),
+        "subgroup_rule": subgroup_rule,
         "checks": checks,
         "before": old,
         "after": new,

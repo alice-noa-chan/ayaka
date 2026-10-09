@@ -221,9 +221,12 @@ def brief(rows):
     }
 
 
-def gate(before, after, *, major_gain, replicates):
-    result = _comparison(before, after, major_gain=major_gain, replicates=replicates)
+def gate(before, after, *, major_gain, replicates, subgroup_rule="zero_tolerance"):
+    result = _comparison(
+        before, after, major_gain=major_gain, replicates=replicates, subgroup_rule=subgroup_rule
+    )
     return {
+        "subgroup_rule": subgroup_rule,
         "cc_delta": summarize(after)["cc_equal_types"] - summarize(before)["cc_equal_types"],
         "cc_delta_95ci": result["paired"]["cc_delta_95ci"],
         "screen_passed": result["screen_passed"],
