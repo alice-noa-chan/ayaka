@@ -151,3 +151,33 @@ def test_a_routed_question_without_a_reasoned_read_is_an_error(monkeypatch, tmp_
     monkeypatch.setattr(fg, "load_run", load_run)
     with pytest.raises(ValueError, match="no reasoned read"):
         fg.final_gate(tmp_path, frozen(), replicates=50)
+
+
+def test_tune_never_chooses_a_routing_policy_without_a_promoted_router(monkeypatch, tmp_path):
+    from ayaka.eval import heldout_tuning as ht
+
+    def load_run(results, split, system, adapter="unmerged", complete=True):
+        rows = []
+        for r in reads(system):
+            if r["type"] == "choice":
+                # Reasoning fixes every Choice question, so routing everything wins.
+                good = system == "v2_on"
+                r = row(r["id"], "choice", [0.9, 0.1] if good else [0.4, 0.6], [1.0, 0.0], "c")
+            rows.append({**r, "split": split})
+        return sorted(rows, key=lambda r: r["id"])
+
+    always = router(promoted=False, penalty=0.0)
+    always.gain_weights = [1.0] + [0.0] * 9  # predicts a gain everywhere: routes everything
+    monkeypatch.setattr(ht, "load_run", load_run)
+    monkeypatch.setattr(
+        ht.PathCalibration, "fit", classmethod(lambda cls, rows: cls({"noul": 1.0}))
+    )
+    monkeypatch.setattr(ht, "paired_training_rows", lambda *args: [])
+    monkeypatch.setattr(ht, "fit_router", lambda *args: always)
+    monkeypatch.setattr(ht, "lever_section", lambda *args, **kwargs: {})
+    report = ht.tune(tmp_path, replicates=50)
+    cc = {n: v["router_train"]["cc_equal_types"] for n, v in report["policies"].items()}
+    assert cc["router"] > cc["noul_always"]  # a routing policy scores best ...
+    # ... but its router is unpromoted, so serving could not route and it is not chosen.
+    assert report["policy_chosen_on_router_train"] == "noul_always"
+    assert report["frozen"]["policy"] == "noul_always"

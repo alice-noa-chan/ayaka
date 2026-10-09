@@ -302,7 +302,10 @@ def tune(results, *, replicates=2000, adapter="unmerged", extensions=()):
             }
             if split == "dev":
                 policies[name]["rows"] = rows
-    chosen = max(POLICIES, key=lambda n: policies[n]["router_train"]["cc_equal_types"])
+    # Serving never routes with an unpromoted router, so only a promoted router
+    # makes the routing policies eligible for the choice.
+    eligible = POLICIES if router.promoted else tuple(n for n in POLICIES if "router" not in n)
+    chosen = max(eligible, key=lambda n: policies[n]["router_train"]["cc_equal_types"])
     dev_gates = {
         name: {
             "over_v1_on": gate(v1, value["rows"], major_gain=True, replicates=replicates),
