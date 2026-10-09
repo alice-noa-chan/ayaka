@@ -1,0 +1,238 @@
+{
+  "version": "ayaka-heldout-dev-cohort-1",
+  "settings": {
+    "version": "ayaka-heldout-dev-cohort-1",
+    "split": "calibration",
+    "seed": 20261109,
+    "max_input_tokens": 7680,
+    "natural": {
+      "helpsteer2": 24,
+      "commonsense_qa": 96,
+      "massive": 32,
+      "hotpotqa": 96,
+      "strategyqa": 64,
+      "contract_nli": 4
+    },
+    "synthetic": {
+      "start": 48,
+      "per_type": 32
+    }
+  },
+  "sources": {
+    "helpsteer2": {
+      "repo": "nvidia/HelpSteer2",
+      "revision": "990b2711a36180dd19d9c94b8627844866f8982a",
+      "file": "validation.jsonl.gz",
+      "sha256": "610eeb5289494d613c4c0f70aade2df8df0b499f3a24e76d232f74e6909d010a"
+    },
+    "commonsense_qa": {
+      "repo": "tau/commonsense_qa",
+      "revision": "94630fe30dad47192a8546eb75f094926d47e155",
+      "file": "data/validation-00000-of-00001.parquet",
+      "sha256": "bdbd9bf9cc4d2349b24901038b2ab2f58e10e4e507ad2fd425dca55cd3cb6660"
+    },
+    "massive_ko": {
+      "repo": "AmazonScience/massive",
+      "revision": "ed58ac423a2f4121720918bf5301577edce4ffd3",
+      "file": "ko-KR/validation/0000.parquet",
+      "sha256": "cce429518bfd53056bb83ef49a21222a2581fbeb0eed874bf9aeb426d5756d07"
+    },
+    "massive_ja": {
+      "repo": "AmazonScience/massive",
+      "revision": "ed58ac423a2f4121720918bf5301577edce4ffd3",
+      "file": "ja-JP/validation/0000.parquet",
+      "sha256": "c98ddb8e6f3c172fdc42c5a0653adc2bf8e2160ae13d4a23fef67b84bdff437e"
+    },
+    "hotpotqa": {
+      "repo": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "file": "distractor/validation-00000-of-00001.parquet",
+      "sha256": "c20b638ca82b21d04fe12e14ff417ad05153d4d215a65de54497fca4e972f7c6"
+    },
+    "strategyqa": {
+      "repo": "ChilleD/StrategyQA",
+      "revision": "705562638fe1d8ca6bb98c66fc8f94d45fda8c83",
+      "file": "data/test-00000-of-00001-bae602f3ee37f4ca.parquet",
+      "sha256": "d45b64bac89eea93147731ba4d757459e2d1cb8d7e6e73c59c6501e4e0a0dc61"
+    },
+    "contract_nli": {
+      "archive_sha256": "e03fc77bbf8b53e2976a250e81d8a294bc3d5e5fb014521e477dee9340d6287b",
+      "member": "contract-nli/dev.json",
+      "sha256": "310af7d661d2ab50ee3700169cef524c75f39fb296bbf5a515c229eb0f42e68e"
+    }
+  },
+  "excluded_cohorts": [
+    {
+      "file": "dev.jsonl",
+      "sha256": "f4a1b8d124a5c80c737ed4b5f7a2f2463c8e1d18eefd37220efa600c538b296b"
+    },
+    {
+      "file": "calibration.jsonl",
+      "sha256": "a509e8714ea43740a5fecfcfc28b5691be9c3875f0d818635ec9e684640c6de2"
+    },
+    {
+      "file": "dev.jsonl",
+      "sha256": "c4454d6b829bfe9fdd18f0d4676f812a89bd9349b8b88a641a8241e5ee23fbcb"
+    },
+    {
+      "file": "dev.jsonl",
+      "sha256": "a7de5e22b9a1ccb2cddb3f68eff11f35948da93a509f885d35df66d0e974644b"
+    },
+    {
+      "file": "dev.jsonl",
+      "sha256": "5a01c79e27329872170269eb5c45efc6cdb23ac2c5560ce0cca41260fa3b691b"
+    }
+  ],
+  "context_check": {
+    "checkpoint_config_sha256": "0823a0634d0057f79d655203fb459d6c4673fbe762c00636645a85ec3bd9a657",
+    "limit": 7680
+  },
+  "exclusions": {
+    "commonsense_qa": {
+      "reserved_overlap": 20
+    },
+    "massive": {
+      "train_text_overlap": 4
+    },
+    "hotpotqa": {
+      "reserved_overlap": 69
+    },
+    "strategyqa": {
+      "reserved_overlap": 7
+    },
+    "contract_nli": {
+      "reserved_overlap": 3
+    }
+  },
+  "summary": {
+    "questions": 668,
+    "independent_cases": 342,
+    "types": {
+      "choice": 196,
+      "noul": 320,
+      "score": 152
+    },
+    "by_source": {
+      "ayaka-v2-verified": {
+        "samples": 96,
+        "questions": 96,
+        "independent_cases": 26,
+        "types": {
+          "choice": 32,
+          "noul": 32,
+          "score": 32
+        }
+      },
+      "commonsense_qa": {
+        "samples": 96,
+        "questions": 96,
+        "independent_cases": 96,
+        "types": {
+          "choice": 96
+        }
+      },
+      "contract_nli": {
+        "samples": 4,
+        "questions": 68,
+        "independent_cases": 4,
+        "types": {
+          "choice": 68
+        }
+      },
+      "helpsteer2": {
+        "samples": 24,
+        "questions": 120,
+        "independent_cases": 24,
+        "types": {
+          "score": 120
+        }
+      },
+      "hotpotqa": {
+        "samples": 96,
+        "questions": 96,
+        "independent_cases": 96,
+        "types": {
+          "noul": 96
+        }
+      },
+      "massive_ja": {
+        "samples": 32,
+        "questions": 64,
+        "independent_cases": 32,
+        "types": {
+          "noul": 64
+        }
+      },
+      "massive_ko": {
+        "samples": 32,
+        "questions": 64,
+        "independent_cases": 32,
+        "types": {
+          "noul": 64
+        }
+      },
+      "strategyqa": {
+        "samples": 64,
+        "questions": 64,
+        "independent_cases": 64,
+        "types": {
+          "noul": 64
+        }
+      }
+    },
+    "by_data_kind": {
+      "natural": {
+        "samples": 348,
+        "questions": 572,
+        "independent_cases": 316,
+        "types": {
+          "choice": 164,
+          "noul": 288,
+          "score": 120
+        }
+      },
+      "synthetic": {
+        "samples": 96,
+        "questions": 96,
+        "independent_cases": 26,
+        "types": {
+          "choice": 32,
+          "noul": 32,
+          "score": 32
+        }
+      }
+    },
+    "by_language": {
+      "en": {
+        "samples": 380,
+        "questions": 540,
+        "independent_cases": 310,
+        "types": {
+          "choice": 196,
+          "noul": 192,
+          "score": 152
+        }
+      },
+      "ja": {
+        "samples": 32,
+        "questions": 64,
+        "independent_cases": 32,
+        "types": {
+          "noul": 64
+        }
+      },
+      "ko": {
+        "samples": 32,
+        "questions": 64,
+        "independent_cases": 32,
+        "types": {
+          "noul": 64
+        }
+      }
+    }
+  },
+  "cohort_sha256": "b58ba940560b2122d1e8a4992125d35ddf384d9447694ae13245ce860e3ca88b",
+  "dev_jsonl_sha256": "70f5931732aa196474f968140bb469b142c8dd066a6e51c946df981a7b76239f",
+  "fitted": false,
+  "scope": "development cohort; neither published v1 nor trained v2 trained on these splits"
+}
