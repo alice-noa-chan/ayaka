@@ -274,3 +274,26 @@ def test_adapter_mode_is_recorded_and_never_mixed_on_resume(tmp_path, cohort):
     assert len(checked_rows(legacy, samples, protocol, "v2_on")) == len(rows)
     with pytest.raises(ValueError, match="merged read of v1"):
         checked_rows([], samples, protocol, "v1_on", complete=False, adapter="merged")
+
+
+def test_collection_can_be_limited_to_a_question_subset(tmp_path, cohort):
+    samples, protocol = cohort
+    ids = [fields["id"] for _, _, fields in questions(samples, "dev")]
+    calls = []
+    rows = collect_rows(
+        observation("v2_on", calls=calls),
+        samples,
+        protocol,
+        "v2_on",
+        tmp_path / "on.jsonl",
+        only=[ids[1]],
+    )
+    assert [row["id"] for row in rows] == [ids[1]] and len(calls) == 1
+    with pytest.raises(ValueError, match="subset"):
+        collect_rows(
+            observation("v2_on"), samples, protocol, "v2_on", tmp_path / "x.jsonl", only=[]
+        )
+    with pytest.raises(ValueError, match="subset"):
+        collect_rows(
+            observation("v2_on"), samples, protocol, "v2_on", tmp_path / "y.jsonl", only=["nope"]
+        )

@@ -85,7 +85,7 @@ def test_router_policies_require_a_promoted_router():
 def test_final_gate_reads_final_test_once_and_applies_the_frozen_policy(monkeypatch, tmp_path):
     seen = []
 
-    def load_run(results, split, system, adapter="unmerged"):
+    def load_run(results, split, system, adapter="unmerged", complete=True):
         seen.append((split, system, adapter))
         return reads("v1_on" if system == "v1_on" else system)
 
@@ -105,7 +105,7 @@ def test_final_gate_reads_final_test_once_and_applies_the_frozen_policy(monkeypa
 
 
 def test_slow_policies_are_not_adopted_even_when_the_gate_passes(monkeypatch, tmp_path):
-    def load_run(results, split, system, adapter="unmerged"):
+    def load_run(results, split, system, adapter="unmerged", complete=True):
         rows = reads(system)
         for r in rows:
             r["latency_s"] = 60.0
@@ -119,10 +119,35 @@ def test_slow_policies_are_not_adopted_even_when_the_gate_passes(monkeypatch, tm
 
 
 def test_final_gate_refuses_misaligned_v1_reads(monkeypatch, tmp_path):
-    def load_run(results, split, system, adapter="unmerged"):
+    def load_run(results, split, system, adapter="unmerged", complete=True):
         rows = reads(system)
         return rows[:-3] if system == "v1_on" else rows
 
     monkeypatch.setattr(fg, "load_run", load_run)
     with pytest.raises(ValueError):
+        fg.final_gate(tmp_path, frozen(), replicates=50)
+
+
+def test_route_ids_and_a_reasoned_read_limited_to_them(monkeypatch, tmp_path):
+    def load_run(results, split, system, adapter="unmerged", complete=True):
+        rows = reads(system)
+        if system == "v2_on":
+            assert complete is False
+            rows = [r for r in rows if r["type"] == "noul"]
+        return rows
+
+    monkeypatch.setattr(fg, "load_run", load_run)
+    ids = fg.routed_ids(tmp_path, frozen())
+    assert ids == sorted(f"n{i}" for i in range(240))
+    report = fg.final_gate(tmp_path, frozen(), replicates=100)
+    assert report["reasoned_by_type"] == {"noul": 240}
+
+
+def test_a_routed_question_without_a_reasoned_read_is_an_error(monkeypatch, tmp_path):
+    def load_run(results, split, system, adapter="unmerged", complete=True):
+        rows = reads(system)
+        return [r for r in rows if r["id"] != "n7"] if system == "v2_on" else rows
+
+    monkeypatch.setattr(fg, "load_run", load_run)
+    with pytest.raises(ValueError, match="no reasoned read"):
         fg.final_gate(tmp_path, frozen(), replicates=50)

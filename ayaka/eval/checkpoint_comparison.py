@@ -199,16 +199,26 @@ def read_rows(path):
     return [json.loads(line) for line in Path(path).read_bytes().splitlines() if line.strip()]
 
 
-def collect_rows(predict, samples, protocol, system, output, adapter="unmerged"):
-    """Resume only matching rows and flush each complete observation."""
+def collect_rows(predict, samples, protocol, system, output, adapter="unmerged", only=None):
+    """Resume only matching rows and flush each complete observation.
+
+    ``only`` restricts collection to these question ids (for example the
+    questions a frozen policy routes on final_test); the result then covers
+    exactly that subset.
+    """
     output = Path(output)
+    if only is not None:
+        only = set(only)
+        known = {fields["id"] for _, _, fields in questions(samples, protocol["split"])}
+        if not only or only - known:
+            raise ValueError("question subset must be nonempty and name cohort questions")
     existing = read_rows(output) if output.exists() else []
     checked = checked_rows(existing, samples, protocol, system, complete=False, adapter=adapter)
     done = {row["id"] for row in checked}
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("a", encoding="utf-8", newline="\n") as stream:
         for state, spec, fields in questions(samples, protocol["split"]):
-            if fields["id"] in done:
+            if fields["id"] in done or (only is not None and fields["id"] not in only):
                 continue
             start = time.perf_counter()
             observed = predict(state, spec)
@@ -226,7 +236,14 @@ def collect_rows(predict, samples, protocol, system, output, adapter="unmerged")
             stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
             stream.flush()
             done.add(fields["id"])
-    return checked_rows(read_rows(output), samples, protocol, system, adapter=adapter)
+    if only is None:
+        return checked_rows(read_rows(output), samples, protocol, system, adapter=adapter)
+    rows = checked_rows(
+        read_rows(output), samples, protocol, system, complete=False, adapter=adapter
+    )
+    if {row["id"] for row in rows} != only:
+        raise ValueError("collected rows differ from the requested question subset")
+    return rows
 
 
 def compare(rows, samples, protocol, *, replicates=2000):
@@ -401,6 +418,11 @@ def main(argv=None):
         default="unmerged",
         help="v2 only: read with the LoRA folded into the weights (recorded in every row)",
     )
+    parser.add_argument(
+        "--question-ids",
+        type=Path,
+        help="collect only the question ids listed in this JSON array",
+    )
     parser.add_argument("--replicates", type=int, default=2000)
     for system in SYSTEMS:
         parser.add_argument(f"--{system.replace('_', '-')}", type=Path)
@@ -494,6 +516,7 @@ def main(argv=None):
             args.system,
             args.out,
             args.adapter,
+            only=json.loads(args.question_ids.read_bytes()) if args.question_ids else None,
         )
         if checkpoint_fingerprint(args.checkpoint) != wanted:
             raise ValueError("checkpoint files changed during collection")

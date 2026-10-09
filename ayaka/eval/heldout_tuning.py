@@ -65,7 +65,7 @@ class _RowSpec:
         self.type, self.ordinals = row["type"], row.get("ordinals")
 
 
-def load_run(results, split, system, noul_order="false_first", adapter="unmerged"):
+def load_run(results, split, system, noul_order="false_first", adapter="unmerged", complete=True):
     samples = [
         Sample.from_json(json.loads(line))
         for line in (results / "cohorts" / f"{split}.jsonl").read_bytes().splitlines()
@@ -75,7 +75,7 @@ def load_run(results, split, system, noul_order="false_first", adapter="unmerged
     suffix = "" if noul_order == "false_first" else f"-{noul_order}"
     suffix += "" if adapter == "unmerged" else f"-{adapter}"
     rows = read_rows(results / split / f"{system}{suffix}.jsonl")
-    return checked_rows(rows, samples, protocol, system, adapter=adapter)
+    return checked_rows(rows, samples, protocol, system, complete=complete, adapter=adapter)
 
 
 def calibrated(rows, calibration):

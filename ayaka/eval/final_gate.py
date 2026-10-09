@@ -6,7 +6,9 @@ policy on router_train. ``frozen_fit`` records exactly those three things.
 This module then reads the final_test cohort once:
 
 1. apply the frozen temperatures to v2 direct and reasoned reads;
-2. compose the frozen policy with the frozen router;
+2. compose the frozen policy with the frozen router. ``route-ids`` lists the
+   questions it reasons on from the direct reads alone, so the reasoned
+   final_test read can be limited to them;
 3. gate the result over v1 on the same questions, with the clustered
    non-inferiority rule for per-source and per-language checks, and report
    the gate over calibrated v2 direct as a secondary check.
@@ -31,7 +33,6 @@ from .heldout_tuning import (
     POLICIES,
     brief,
     calibrated,
-    compose,
     gate,
     load_run,
     policy_rule,
@@ -80,18 +81,45 @@ def validate_frozen(frozen):
     return frozen
 
 
+def _direct(results, frozen):
+    off = load_run(Path(results), FINAL_SPLIT, "v2_off", adapter=frozen["adapter"])
+    calibration = PathCalibration(frozen["path_temperatures"])
+    return sorted(calibrated(off, calibration), key=lambda row: row["id"]), calibration
+
+
+def routed_ids(results, frozen):
+    """Question ids the frozen policy reasons on, decided from direct reads only."""
+    frozen = validate_frozen(frozen)
+    direct, _ = _direct(results, frozen)
+    use = policy_rule(frozen["policy"], BenefitRouter(**frozen["router"]))
+    return [row["id"] for row in direct if use(row)]
+
+
+def compose_routed(direct, reasoned, use):
+    """``heldout_tuning.compose`` for a reasoned read that may cover only routed questions."""
+    by_id = {row["id"]: row for row in reasoned}
+    rows = []
+    for row in direct:
+        if not use(row):
+            rows.append(row)
+            continue
+        if row["id"] not in by_id:
+            raise ValueError("a question the frozen policy routes has no reasoned read")
+        rows.append(
+            {**by_id[row["id"]], "latency_s": row["latency_s"] + by_id[row["id"]]["latency_s"]}
+        )
+    return rows
+
+
 def final_gate(results, frozen, *, replicates=2000):
     frozen = validate_frozen(frozen)
     results = Path(results)
-    adapter = frozen["adapter"]
-    off = load_run(results, FINAL_SPLIT, "v2_off", adapter=adapter)
-    on = load_run(results, FINAL_SPLIT, "v2_on", adapter=adapter)
+    direct, calibration = _direct(results, frozen)
+    on = load_run(results, FINAL_SPLIT, "v2_on", adapter=frozen["adapter"], complete=False)
     v1 = sorted(load_run(results, FINAL_SPLIT, "v1_on"), key=lambda row: row["id"])
-    calibration = PathCalibration(frozen["path_temperatures"])
     router = BenefitRouter(**frozen["router"])
-    direct = sorted(calibrated(off, calibration), key=lambda row: row["id"])
     reasoned = calibrated(on, calibration)
-    rows = compose(direct, reasoned, policy_rule(frozen["policy"], router))
+    rows = compose_routed(direct, reasoned, policy_rule(frozen["policy"], router))
     if [row["id"] for row in rows] != [row["id"] for row in v1]:
         raise ValueError("v1 and v2 final_test reads must cover the same questions")
     over_v1 = gate(v1, rows, major_gain=True, replicates=replicates, subgroup_rule=SUBGROUP_RULE)
@@ -117,13 +145,19 @@ def final_gate(results, frozen, *, replicates=2000):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("action", choices=("route-ids", "gate"))
     parser.add_argument("--results", required=True, help="results/ folder with final_test reads")
     parser.add_argument("--frozen", required=True, type=Path, help="frozen tuning JSON")
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--replicates", type=int, default=2000)
     args = parser.parse_args(argv)
     if args.out.exists():
-        raise ValueError("the final gate report must be a new file")
+        raise ValueError("the final gate output must be a new file")
+    if args.action == "route-ids":
+        ids = routed_ids(args.results, json.loads(args.frozen.read_bytes()))
+        args.out.write_text(json.dumps(ids, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"routed_questions": len(ids)}))
+        return
     report = final_gate(
         args.results, json.loads(args.frozen.read_bytes()), replicates=args.replicates
     )
