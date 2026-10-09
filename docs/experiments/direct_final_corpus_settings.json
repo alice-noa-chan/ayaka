@@ -1,0 +1,15 @@
+{
+  "natural_sample_quotas": {
+    "helpsteer2": {"train": 3000, "router_train": 32, "dev": 32, "calibration": 32, "test": 16},
+    "commonsense_qa": {"train": 6400, "router_train": 128, "dev": 128, "calibration": 128, "test": 32},
+    "massive_ko": {"train": 3000, "router_train": 48, "dev": 48, "calibration": 48, "test": 8},
+    "massive_ja": {"train": 3000, "router_train": 48, "dev": 48, "calibration": 48, "test": 8},
+    "contract_nli": {"train": 108, "router_train": 4, "dev": 4, "calibration": 4, "test": 4},
+    "strategyqa": {"train": 1036, "router_train": 48, "dev": 48, "calibration": 48, "test": 16}
+  },
+  "authored_per_type": {"train": 256, "router_train": 32, "dev": 32, "calibration": 32, "test": 32},
+  "epochs": 2,
+  "rows_per_step": 32,
+  "seed": 20261010,
+  "minimum_english_question_fraction": 0.6
+}
