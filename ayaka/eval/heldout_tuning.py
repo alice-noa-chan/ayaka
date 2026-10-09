@@ -316,6 +316,8 @@ def tune(results, *, replicates=2000, adapter="unmerged", extensions=()):
     for value in policies.values():
         del value["rows"]
     levers = lever_section(reads, calibration, tuned, router, v1, replicates=replicates)
+    from .final_gate import frozen_fit
+
     return {
         "version": VERSION,
         "v2_adapter": adapter,
@@ -339,6 +341,7 @@ def tune(results, *, replicates=2000, adapter="unmerged", extensions=()):
         },
         "policies": policies,
         "policy_chosen_on_router_train": chosen,
+        "frozen": frozen_fit(calibration, router, chosen, adapter),
         "dev_gates": dev_gates,
         "levers": levers,
         "optimizer_updates": 0,
@@ -407,11 +410,18 @@ def main(argv=None):
         default=[],
         help="results/ folder of an extension cohort; its calibration and router_train reads are added",
     )
+    parser.add_argument(
+        "--frozen-out", help="also write the frozen serving fit for final_gate and packaging"
+    )
     args = parser.parse_args(argv)
     report = tune(
         args.results, replicates=args.replicates, adapter=args.adapter, extensions=args.extension
     )
     Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    if args.frozen_out:
+        Path(args.frozen_out).write_text(
+            json.dumps(report["frozen"], indent=2) + "\n", encoding="utf-8"
+        )
     print(
         json.dumps(
             {
