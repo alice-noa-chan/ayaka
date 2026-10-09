@@ -153,3 +153,20 @@ def test_lever_policy_reasons_on_noul_and_choice():
     rule = tuning.policy_rule("noul+choice_always+router", Never())
     assert rule(row(1)) and rule(row(2, kind="choice"))
     assert not rule(row(3, kind="score"))
+
+
+def test_tuning_reads_join_extension_cohorts_and_refuse_repeats(monkeypatch, tmp_path):
+    parts = {
+        tmp_path / "main": [row(1), row(2)],
+        tmp_path / "ext": [row(3)],
+        tmp_path / "repeat": [row(2)],
+    }
+    monkeypatch.setattr(tuning, "load_run", lambda results, *args, **kwargs: parts[results])
+    joined = tuning.tuning_reads(
+        tmp_path / "main", [tmp_path / "ext"], "calibration", "v2_off", "merged"
+    )
+    assert [r["id"] for r in joined] == ["q1", "q2", "q3"]
+    with pytest.raises(ValueError, match="repeat"):
+        tuning.tuning_reads(
+            tmp_path / "main", [tmp_path / "repeat"], "calibration", "v2_off", "merged"
+        )

@@ -10,6 +10,10 @@ order of use keeps each split to one role:
 3. ``dev``: ``fit_router``'s own lambda/promotion validation, then a single
    scored read of every policy against v1 and against calibrated v2 direct.
 
+``--extension`` adds the calibration and router_train reads of further cohorts
+of the same splits (read under their own protocols) to the tuning splits; dev
+always comes from ``--results`` alone.
+
 ``adapter="merged"`` tunes v2 reads collected with the LoRA folded into the
 weights (``<system>-merged.jsonl``); v1 is always read unmerged. Merged reads
 generate different traces, so temperatures, the router and the policy are
@@ -244,10 +248,27 @@ def policy_rule(name, router):
     return rules[name]
 
 
-def tune(results, *, replicates=2000, adapter="unmerged"):
+def tuning_reads(results, extensions, split, system, adapter):
+    """One tuning split's reads: the main cohort followed by each extension cohort.
+
+    An extension is a separate cohort of the same split, read under its own
+    protocol, so every part is checked on its own before the parts are joined.
+    """
+    rows = load_run(results, split, system, adapter=adapter)
+    for extension in extensions:
+        rows = rows + load_run(extension, split, system, adapter=adapter)
+    if len({row["id"] for row in rows}) != len(rows):
+        raise ValueError(f"{split}: extension cohorts repeat a question of another part")
+    return rows
+
+
+def tune(results, *, replicates=2000, adapter="unmerged", extensions=()):
     results = Path(results)
+    extensions = [Path(path) for path in extensions]
     reads = {
-        (split, system): load_run(results, split, system, adapter=adapter)
+        (split, system): tuning_reads(results, extensions, split, system, adapter)
+        if split != "dev"
+        else load_run(results, split, system, adapter=adapter)
         for split in ("calibration", "router_train", "dev")
         for system in ("v2_off", "v2_on")
     }
@@ -295,6 +316,10 @@ def tune(results, *, replicates=2000, adapter="unmerged"):
     return {
         "version": VERSION,
         "v2_adapter": adapter,
+        "tuning_questions": {
+            split: len(reads[split, "v2_off"]) for split in ("calibration", "router_train")
+        },
+        "extension_results": len(extensions),
         "path_temperatures": calibration.temperatures,
         "router": {
             "promoted": router.promoted,
@@ -373,8 +398,16 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--replicates", type=int, default=2000)
     parser.add_argument("--adapter", choices=ADAPTERS, default="unmerged")
+    parser.add_argument(
+        "--extension",
+        action="append",
+        default=[],
+        help="results/ folder of an extension cohort; its calibration and router_train reads are added",
+    )
     args = parser.parse_args(argv)
-    report = tune(args.results, replicates=args.replicates, adapter=args.adapter)
+    report = tune(
+        args.results, replicates=args.replicates, adapter=args.adapter, extensions=args.extension
+    )
     Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(
         json.dumps(
