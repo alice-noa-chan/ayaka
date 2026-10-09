@@ -28,6 +28,7 @@ from ..model.decision import AyakaDecisionModel
 from ..primitives import QuestionSpec
 from .batching import _noul_canonical
 from .calibrate import apply_temperatures, fit_temperatures
+from .checkpoint_selection import CheckpointSelector
 from .direct_audit import audit_snapshot, load_audited_bundle
 from .direct_budget import STAGES, admit_workflow
 from .direct_budget import VERSION as BUDGET_VERSION
@@ -192,6 +193,10 @@ def run_pipeline(
     snapshot_path=None,
     checkpoint_every=100,
     resume=None,
+    select_every=None,
+    select_patience=None,
+    select_min_delta=0.0,
+    select_split="router_train",
     paid_elapsed_seconds=None,
     expected_bundle_sha256=None,
     saved_base_reads=None,
@@ -259,6 +264,14 @@ def run_pipeline(
         raise ValueError("native execution requires an externally pinned bundle manifest digest")
     if type(checkpoint_every) is not int or checkpoint_every < 1:
         raise ValueError("checkpoint interval must be positive")
+    if (select_every is None) != (select_patience is None):
+        raise ValueError("checkpoint selection needs both an interval and a patience")
+    if select_every is not None and select_split not in ("router_train", "dev"):
+        raise ValueError("checkpoint selection reads a reserved development split only")
+    if select_every is not None and checkpoint_every % select_every:
+        # Optimizer states then always land on a validation read, so a resumed
+        # run restores a selection history that matches its weights.
+        raise ValueError("checkpoint interval must be a multiple of the selection interval")
     if action == "profile" and resume is not None:
         raise ValueError("zero-update profiling cannot resume optimizer state")
     admitted = admit_workflow(
@@ -383,13 +396,39 @@ def run_pipeline(
         raise ValueError("measured complete workflow does not fit; no optimizer updates executed")
     if resume is not None:
         load_training_state(trainer, resume, binding)
+    selector = None
+    if select_every is not None:
+        selector = CheckpointSelector(
+            lambda tr: evaluate_direct(
+                tr,
+                splits[select_split],
+                select_split,
+                input_encoding=recipe["input_encoding"],
+                apply_temperature=False,
+            ),
+            split=select_split,
+            every=select_every,
+            patience=select_patience,
+            min_delta=select_min_delta,
+            root=root,
+        )
+        if resume is not None:
+            selector.load(Path(resume).parent, resumed_step=trainer.step_i)
 
     def save_progress(step, record):
-        if step == 1 or step % checkpoint_every == 0 or step == tcfg.steps:
+        final = step == tcfg.steps
+        stop = selector is not None and selector(trainer, step, final=final)
+        if step == 1 or step % checkpoint_every == 0 or final or stop:
             save_training_state(trainer, root / f"state-{step:08d}", binding)
+        return stop
 
     history = train_fixed_schedule(trainer, recipe, inventory, groups, on_step=save_progress)
     _write(root, "history.json", history)
+    selection = None
+    if selector is not None:
+        selection = selector.report(trainer.step_i)
+        selector.restore(trainer)
+        _write(root, "checkpoint_selection_report.json", selection)
     application.rollback()  # calibration/export use portable native inference kernels
     raw_calibration = evaluate_direct(
         trainer,
@@ -445,6 +484,8 @@ def run_pipeline(
         "binding": binding,
         "optimizer_steps": trainer.step_i,
         "complete_schedule": trainer.step_i == tcfg.steps,
+        "selected_step": selection["best"]["step"] if selection else trainer.step_i,
+        "checkpoint_selection": selection,
         "inference_mode": "off",
         "input_encoding": recipe["input_encoding"],
         "input_recipe": recipe["input_recipe"],
@@ -528,6 +569,16 @@ def main(argv=None):
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-every", default=100, type=int)
     parser.add_argument(
+        "--select-every",
+        type=int,
+        help="read the reserved selection split every N steps and keep the best weights",
+    )
+    parser.add_argument(
+        "--select-patience", type=int, help="stop after this many reads without improvement"
+    )
+    parser.add_argument("--select-min-delta", type=float, default=0.0)
+    parser.add_argument("--select-split", choices=("router_train", "dev"), default="router_train")
+    parser.add_argument(
         "--paid-elapsed-seconds",
         type=float,
         help="all already billed time including pod setup, downloads and teacher collection",
@@ -559,6 +610,10 @@ def main(argv=None):
         snapshot_path=args.snapshot_path,
         resume=args.resume,
         checkpoint_every=args.checkpoint_every,
+        select_every=args.select_every,
+        select_patience=args.select_patience,
+        select_min_delta=args.select_min_delta,
+        select_split=args.select_split,
         paid_elapsed_seconds=args.paid_elapsed_seconds,
         expected_bundle_sha256=args.expected_bundle_sha256,
         saved_base_reads=read(args.base_reads),

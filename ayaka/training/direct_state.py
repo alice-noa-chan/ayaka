@@ -325,18 +325,24 @@ def load_training_state(trainer, source, binding):
 
 
 def train_fixed_schedule(trainer, recipe, inventory, groups, *, on_step=None):
-    """Consume every prepared optimizer step; exhaustion or route leakage is an error."""
+    """Consume every prepared optimizer step; exhaustion or route leakage is an error.
+
+    ``on_step`` may return True to stop early (validation-based checkpoint
+    selection); any other return value continues the schedule.
+    """
     validate_training_config(recipe, trainer.cfg)
     if any(item.direct_distillation is not True for group in groups for item in group):
         raise ValueError("every prepared row in a direct run must be marked direct-distillation")
     history = []
+    stopped = False
     for batch in training_batches(recipe, inventory, groups, start_step=trainer.step_i):
         if len(batch) != trainer.cfg.questions_per_step:
             raise ValueError("prepared batch differs from the fixed row count")
         record = trainer.train_step(batch)
         history.append(record)
-        if on_step is not None:
-            on_step(trainer.step_i, record)
-    if trainer.step_i != trainer.cfg.steps:
+        if on_step is not None and on_step(trainer.step_i, record) is True:
+            stopped = True
+            break
+    if not stopped and trainer.step_i != trainer.cfg.steps:
         raise ValueError("direct run did not complete its entire prepared schedule")
     return history
