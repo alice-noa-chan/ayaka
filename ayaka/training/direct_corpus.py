@@ -20,7 +20,7 @@ from ..data.contract_nli import SOURCE as CONTRACT_SOURCE
 from ..data.contract_nli import ContractGoldRegistry
 from ..data.decontam import Decontaminator, jevbench_public_dir
 from ..data.direct_natural import NaturalGoldRegistry
-from ..data.natural_training_v2 import partition_sources
+from ..data.natural_training_v2 import EXTRA_SOURCES, partition_sources
 from ..data.reasoning_v2 import SPLITS, curriculum
 from ..data.reserved_evidence import ReservedEvidenceBlocker
 from ..data.schema import Sample
@@ -31,6 +31,7 @@ from ..losses import LossWeights
 from .direct_audit import create_audit_receipt
 from .direct_bundle import _tokenizer_identity, local_tokenizer, prepare_bundle
 from .direct_corpus_plan import (
+    FINAL_VERSION,
     MARKER,
     POLICY_SELECTION,
     POLICY_VERSION,
@@ -183,7 +184,11 @@ def create_plan(settings, cfg, tok, registry, input_encoding, reserved, *, nativ
         raise ValueError("corpus plan requires all pinned human source inventories")
     reserved.verify()
     plan = {
-        "version": POLICY_VERSION if CONTRACT_SOURCE in registry.source_names else VERSION,
+        "version": FINAL_VERSION
+        if set(registry.source_names) & set(EXTRA_SOURCES)
+        else POLICY_VERSION
+        if CONTRACT_SOURCE in registry.source_names
+        else VERSION,
         "settings": copy.deepcopy(settings),
         "selection_policy": copy.deepcopy(
             POLICY_SELECTION if CONTRACT_SOURCE in registry.source_names else SELECTION
@@ -258,7 +263,9 @@ def select_corpus(plan, cfg, tok, registry, input_encoding, reserved):
     blocked = set(indices[len(authored) :])
     public = Decontaminator.from_jevbench()
     private = (
-        ReservedEvidenceBlocker(reserved.samples) if plan["version"] == POLICY_VERSION else None
+        ReservedEvidenceBlocker(reserved.samples)
+        if plan["version"] in (POLICY_VERSION, FINAL_VERSION)
+        else None
     )
     if any(
         index in blocked
@@ -423,6 +430,13 @@ def main(argv=None):
             type=Path,
             help="pinned original train.json with sibling LICENSE; enables corpus plan2",
         )
+        sub.add_argument(
+            "--extra-natural",
+            action="append",
+            choices=sorted(EXTRA_SOURCES),
+            default=[],
+            help="opt-in extra human source; with --contractnli-train enables corpus plan3",
+        )
         sub.add_argument("--mechanics-only", action="store_true")
         private = sub.add_mutually_exclusive_group(required=True)
         private.add_argument("--reserved-manifest", type=Path)
@@ -467,10 +481,11 @@ def main(argv=None):
         encoding.update(prompt_variant=args.prompt_variant, state_format=args.state_format)
     encoding = normalize_input_encoding(encoding)
     tok = local_tokenizer(cfg, allow_tiny=args.mechanics_only, native_path=args.native_path)
-    registry = (
-        NaturalGoldRegistry(policy_registry=ContractGoldRegistry(args.contractnli_train))
+    registry = NaturalGoldRegistry(
+        policy_registry=ContractGoldRegistry(args.contractnli_train)
         if args.contractnli_train is not None
-        else NaturalGoldRegistry()
+        else None,
+        extra_sources=args.extra_natural,
     )
     if args.command == "plan":
         plan = create_plan(

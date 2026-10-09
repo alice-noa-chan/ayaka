@@ -713,16 +713,30 @@ def main(argv=None):
     )
     prepare.add_argument("--liger", action="store_true")
     prepare.add_argument("--contractnli-train", type=Path)
+    prepare.add_argument(
+        "--extra-natural",
+        action="append",
+        choices=("strategyqa",),
+        default=[],
+        help="opt-in extra human source of corpus plan3",
+    )
     audit = commands.add_parser("audit")
     audit.add_argument("--bundle", required=True, type=Path)
     audit.add_argument("--mechanics-only", action="store_true")
     audit.add_argument("--expected-manifest-sha256")
     audit.add_argument("--native-path", type=Path)
     audit.add_argument("--contractnli-train", type=Path)
+    audit.add_argument(
+        "--extra-natural",
+        action="append",
+        choices=("strategyqa",),
+        default=[],
+        help="opt-in extra human source of corpus plan3",
+    )
     args = parser.parse_args(argv)
     from ..data.direct_natural import explicit_policy_registry
 
-    registry = explicit_policy_registry(args.contractnli_train)
+    registry = explicit_policy_registry(args.contractnli_train, args.extra_natural)
     if args.command == "prepare":
         encoding = {"encoder": args.input_encoder}
         for field in ("prompt_variant", "state_format"):

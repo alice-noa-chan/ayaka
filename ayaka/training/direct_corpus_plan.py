@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from ..data.contract_nli import SOURCE as CONTRACT_SOURCE
 from ..data.decontam import POLICY
-from ..data.natural_training_v2 import POLICY_SOURCES, SOURCES
+from ..data.natural_training_v2 import FINAL_SOURCES, POLICY_SOURCES, SOURCES
 from ..data.reasoning_v2 import SPLITS
 from ..data.reserved_evidence import POLICY as RESERVED_POLICY
 from ..eval.read_artifact import fingerprint
@@ -23,6 +23,8 @@ from .workload import scheduled_batches
 
 VERSION = "ayaka-direct-corpus-plan-1"
 POLICY_VERSION = "ayaka-direct-corpus-plan-2"
+# Plan2 plus the opt-in extra natural sources (StrategyQA).
+FINAL_VERSION = "ayaka-direct-corpus-plan-3"
 MARKER = "corpus_plan_sha256"
 AUTHORED = "ayaka-v2-verified"
 TYPES = ("choice", "noul", "score")
@@ -40,6 +42,7 @@ SOURCE_WIDTHS = {
     "massive_ko": (2, "noul"),
     "massive_ja": (2, "noul"),
     CONTRACT_SOURCE: (17, "choice"),
+    "strategyqa": (1, "noul"),
 }
 SETTINGS = {
     "natural_sample_quotas",
@@ -78,9 +81,13 @@ def _exact(value, keys, name):
 def validate_settings(settings):
     _exact(settings, SETTINGS, "settings")
     quotas = settings["natural_sample_quotas"]
-    if not isinstance(quotas, dict) or set(quotas) not in (set(SOURCES), set(POLICY_SOURCES)):
+    if not isinstance(quotas, dict) or set(quotas) not in (
+        set(SOURCES),
+        set(POLICY_SOURCES),
+        set(FINAL_SOURCES),
+    ):
         raise ValueError(
-            "corpus natural sources require the four-source or policy-source inventory"
+            "corpus natural sources require the four-source, policy or final inventory"
         )
     for limits in quotas.values():
         _exact(limits, SPLITS, "sample quotas")
@@ -106,6 +113,8 @@ def validate_plan(plan):
         if plan["version"] == VERSION
         else (POLICY_SOURCES, POLICY_SELECTION)
         if plan["version"] == POLICY_VERSION
+        else (FINAL_SOURCES, POLICY_SELECTION)
+        if plan["version"] == FINAL_VERSION
         else (None, None)
     )
     if expected_sources is None or plan["selection_policy"] != selection:
@@ -168,7 +177,7 @@ def split_summary(samples, expected_plan_sha256):
         if sample.metadata.get(MARKER) != expected_plan_sha256:
             raise ValueError("every corpus sample must retain its exact plan marker")
         source = sample.metadata.get("source")
-        if source not in {*POLICY_SOURCES, AUTHORED}:
+        if source not in {*FINAL_SOURCES, AUTHORED}:
             raise ValueError("corpus contains an unplanned source")
         row = sources.setdefault(source, {"samples": 0, "questions": 0, "types": Counter()})
         row["samples"] += 1
@@ -188,6 +197,7 @@ def validate_summary(summary):
     if not isinstance(summary["sources"], dict) or set(summary["sources"]) not in (
         {*SOURCES, AUTHORED},
         {*POLICY_SOURCES, AUTHORED},
+        {*FINAL_SOURCES, AUTHORED},
     ):
         raise ValueError("corpus selected sources differ from the approved inventory")
     for row in summary["sources"].values():

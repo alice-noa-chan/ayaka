@@ -41,6 +41,25 @@ SOURCES = {
     ),
 }
 POLICY_SOURCES = {**SOURCES, CONTRACT_SOURCE: CONTRACT_POLICY}
+# Opt-in human-labelled sources of the final corpus plan. The original
+# four-source and policy inventories above are unchanged.
+EXTRA_SOURCES = {
+    "strategyqa": (
+        "ChilleD/StrategyQA",
+        "705562638fe1d8ca6bb98c66fc8f94d45fda8c83",
+        "data/train-00000-of-00001-506370352f622815.parquet",
+        "en",
+    ),
+}
+FINAL_SOURCES = {**POLICY_SOURCES, **EXTRA_SOURCES}
+# Sources whose recorded license marker is not the historical CC-BY-4.0 one.
+SOURCE_LICENSES = {"strategyqa": "MIT"}
+
+
+def source_license(source):
+    return SOURCE_LICENSES.get(source, "CC-BY-4.0")
+
+
 SPLITS = ("train", "router_train", "dev", "calibration", "test")
 
 
@@ -51,11 +70,11 @@ def digest(value):
 
 
 def valid_provenance(metadata):
-    source = POLICY_SOURCES.get(metadata.get("source"))
+    source = FINAL_SOURCES.get(metadata.get("source"))
     return bool(
         source
         and metadata.get("revision") == source[1]
-        and metadata.get("license") == "CC-BY-4.0"
+        and metadata.get("license") == source_license(metadata.get("source"))
         and metadata.get("label_source") == "human"
         and metadata.get("original_split") == "train"
     )

@@ -516,6 +516,13 @@ def main(argv=None):
         help="pinned train/license for full regeneration only; omit with --audit-receipt",
     )
     parser.add_argument(
+        "--extra-natural",
+        action="append",
+        choices=("strategyqa",),
+        default=[],
+        help="opt-in extra human source of corpus plan3; full regeneration only",
+    )
+    parser.add_argument(
         "--base-reads", type=Path, help="original frozen native reads, required for replay resume"
     )
     parser.add_argument("--resume", type=Path)
@@ -528,8 +535,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.action != "audit" and args.out is None:
         parser.error("profile/train require --out")
-    if args.audit_receipt is not None and args.contractnli_train is not None:
-        parser.error("--contractnli-train is for full regeneration, not portable receipt loading")
+    if args.audit_receipt is not None and (args.contractnli_train or args.extra_natural):
+        parser.error(
+            "--contractnli-train/--extra-natural are for full regeneration, "
+            "not portable receipt loading"
+        )
 
     from ..data.direct_natural import explicit_policy_registry
 
@@ -554,7 +564,7 @@ def main(argv=None):
         saved_base_reads=read(args.base_reads),
         audit_receipt=args.audit_receipt,
         expected_audit_receipt_sha256=args.expected_audit_receipt_sha256,
-        natural_registry=explicit_policy_registry(args.contractnli_train),
+        natural_registry=explicit_policy_registry(args.contractnli_train, args.extra_natural),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

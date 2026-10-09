@@ -399,6 +399,13 @@ def main(argv=None):
     parser.add_argument("--mechanics-only", action="store_true")
     parser.add_argument("--native-path", type=Path)
     parser.add_argument("--contractnli-train", type=Path)
+    parser.add_argument(
+        "--extra-natural",
+        action="append",
+        choices=("strategyqa",),
+        default=[],
+        help="opt-in extra human source of corpus plan3",
+    )
     args = parser.parse_args(argv)
     from ..data.direct_natural import explicit_policy_registry
 
@@ -408,7 +415,7 @@ def main(argv=None):
         expected_manifest_sha256=args.expected_manifest_sha256,
         allow_tiny=args.mechanics_only,
         native_path=args.native_path,
-        natural_registry=explicit_policy_registry(args.contractnli_train),
+        natural_registry=explicit_policy_registry(args.contractnli_train, args.extra_natural),
     )
     print(json.dumps({k: v for k, v in result.items() if k != "source_sha256"}, indent=2))
 

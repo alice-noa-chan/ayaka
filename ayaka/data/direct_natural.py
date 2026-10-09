@@ -16,22 +16,34 @@ from pathlib import Path
 from ..eval.read_artifact import fingerprint
 from .contract_nli import SOURCE as CONTRACT_SOURCE
 from .contract_nli import ContractGoldRegistry
-from .natural_training_v2 import SOURCES, digest, evidence, valid_provenance
+from .natural_training_v2 import (
+    EXTRA_SOURCES,
+    FINAL_SOURCES,
+    SOURCES,
+    digest,
+    evidence,
+    source_license,
+    valid_provenance,
+)
 from .schema import Candidate, Question, Sample
-from .transforms import HELPSTEER_LEVELS
+from .transforms import HELPSTEER_LEVELS, strategyqa_noul
 from .transforms import helpsteer2_target as _ordinal_target
 
 VERSION = "ayaka-raw-human-direct-gold-1"
 POLICY_VERSION = "ayaka-raw-human-policy-direct-gold-2"
+# Binding of a registry that adds opt-in EXTRA_SOURCES to the original inventory.
+FINAL_VERSION = "ayaka-raw-human-final-direct-gold-3"
+STRATEGYQA_VIEW = {"task_family": "implicit_yes_no", "task_view": "strategyqa-facts-yes-no-v1"}
 PINNED_RAW_SHA256 = {
     "helpsteer2": "c0d7e91d738d42e8a08070db26c4c09a9c7631308e1f0fd380ff43d130c9f713",
     "commonsense_qa": "b0449767ed986bfc2ca52b1244a46ef12f732756727f3cb0a4ab69ac8b3d282b",
     "massive_ko": "3b5e11303fb75aa42d70b5be42b5052192c17911363388c8c15749f61a9c6d00",
     "massive_ja": "90fb4b86ba1b6ff76d07deb21c9b4d08a5fba329e09f79c14ae64a5c01fb1c6e",
+    "strategyqa": "82262246f9f669cc69128c64d96e81860d232482565ecb9d9c63e7ee2c6574a7",
 }
 
 
-def local_raw_sources():
+def local_raw_sources(names=tuple(SOURCES)):
     """Original immutable training files only; no model API or network requests."""
     import pyarrow.parquet as pq
     from huggingface_hub import hf_hub_download
@@ -39,7 +51,8 @@ def local_raw_sources():
     from ..training.direct_state import file_digest
 
     result = {}
-    for source, (repo, revision, filename, _) in SOURCES.items():
+    for source in names:
+        repo, revision, filename, _ = FINAL_SOURCES[source]
         path = Path(
             hf_hub_download(
                 repo, filename, repo_type="dataset", revision=revision, local_files_only=True
@@ -79,10 +92,10 @@ def verify_raw_binding(binding, *, registry=None):
     """Recheck bound cached files without reparsing the complete human corpus."""
     if binding is None:
         return
-    if binding.get("version") == POLICY_VERSION:
+    if binding.get("version") in (POLICY_VERSION, FINAL_VERSION):
         if (
             not isinstance(registry, NaturalGoldRegistry)
-            or registry.policy_registry is None
+            or (registry.policy_registry is None and binding["version"] == POLICY_VERSION)
             or binding != registry.binding
         ):
             raise ValueError("policy raw binding requires its explicit pinned composite registry")
@@ -194,6 +207,10 @@ def task_view(source, row, intent_names=None):
                 "original_ontology_size": len(names),
             },
         )
+    if source == "strategyqa":
+        # The held-out cohort reads StrategyQA through this same transform.
+        (sample,) = strategyqa_noul(row)
+        return sample.state, sample.questions, dict(STRATEGYQA_VIEW)
     raise ValueError(f"no approved task view for source {source}")
 
 
@@ -214,19 +231,26 @@ class NaturalGoldRegistry:
     are checked independently of converter output and teacher observations.
     """
 
-    def __init__(self, raw_sources=None, *, policy_registry=None):
+    def __init__(self, raw_sources=None, *, policy_registry=None, extra_sources=()):
         if policy_registry is not None and not isinstance(policy_registry, ContractGoldRegistry):
             raise ValueError("policy gold requires the pinned ContractNLI registry")
+        extra_sources = tuple(sorted(set(extra_sources)))
+        if set(extra_sources) - set(EXTRA_SOURCES):
+            raise ValueError("extra natural sources must belong to the pinned opt-in policy")
         self.policy_registry = policy_registry
+        self.extra_sources = extra_sources
+        self._expected = set(SOURCES) | set(extra_sources)
         self._raw_local_files_verified = raw_sources is None
         self.local_files_verified = self._raw_local_files_verified and (
             policy_registry is None or policy_registry.local_files_verified
         )
-        self.raw = local_raw_sources() if raw_sources is None else raw_sources
-        if not self.raw or set(self.raw) - set(SOURCES):
+        self.raw = (
+            local_raw_sources((*SOURCES, *extra_sources)) if raw_sources is None else raw_sources
+        )
+        if not self.raw or set(self.raw) - self._expected:
             raise ValueError("raw human sources must belong to the pinned source policy")
         for source, data in self.raw.items():
-            repo, revision, filename, _ = SOURCES[source]
+            repo, revision, filename, _ = FINAL_SOURCES[source]
             p = data["provenance"]
             if (p.get("repo"), p.get("revision"), p.get("file")) != (repo, revision, filename) or (
                 not isinstance(p.get("sha256"), str)
@@ -235,7 +259,11 @@ class NaturalGoldRegistry:
             ):
                 raise ValueError("raw source provenance must match the immutable file policy")
         self.binding = {
-            "version": POLICY_VERSION if policy_registry is not None else VERSION,
+            "version": FINAL_VERSION
+            if extra_sources
+            else POLICY_VERSION
+            if policy_registry is not None
+            else VERSION,
             "local_files_verified": self.local_files_verified,
             "sources": {name: data["provenance"] for name, data in self.raw.items()},
             "scope": "cached raw human training labels"
@@ -281,7 +309,7 @@ class NaturalGoldRegistry:
             return
         from ..training.direct_state import file_digest
 
-        if set(self.raw) != set(SOURCES):
+        if set(self.raw) != self._expected:
             raise ValueError("raw human source inventory changed")
         for source, data in self.raw.items():
             expected = PINNED_RAW_SHA256[source]
@@ -301,7 +329,7 @@ class NaturalGoldRegistry:
         return self.raw[source]["rows"][index]
 
     def _identity(self, source, index, row):
-        language = SOURCES[source][3]
+        language = FINAL_SOURCES[source][3]
         if source.startswith("massive_"):
             parent = ["massive", str(row["id"])]
         elif source == "helpsteer2":
@@ -310,9 +338,9 @@ class NaturalGoldRegistry:
             parent = [source, evidence(Sample(row["question"], []))]
         return {
             "source": source,
-            "revision": SOURCES[source][1],
+            "revision": FINAL_SOURCES[source][1],
             "language": language,
-            "license": "CC-BY-4.0",
+            "license": source_license(source),
             "label_source": "human",
             "original_split": "train",
             "data_kind": "natural",
@@ -381,14 +409,17 @@ class NaturalGoldRegistry:
             return _ordinal_target(row[q.id])
         if source == "commonsense_qa":
             return {c.id: float(c.id == row["answerKey"]) for c in q.candidates}
+        if source == "strategyqa":
+            if type(row["answer"]) is not bool:
+                raise ValueError("raw StrategyQA answer must be an original boolean")
+            return {"false": float(not row["answer"]), "true": float(row["answer"])}
         positive = int(q.id.split("/")[1]) == row["intent"]
         return {"false": float(not positive), "true": float(positive)}
 
 
-def explicit_policy_registry(train_path):
-    """CLI opt-in; absent paths keep the original four-source default."""
-    return (
-        NaturalGoldRegistry(policy_registry=ContractGoldRegistry(train_path))
-        if train_path is not None
-        else None
-    )
+def explicit_policy_registry(train_path, extra_sources=()):
+    """CLI opt-in; absent paths and extras keep the original four-source default."""
+    if train_path is None and not extra_sources:
+        return None
+    policy = ContractGoldRegistry(train_path) if train_path is not None else None
+    return NaturalGoldRegistry(policy_registry=policy, extra_sources=extra_sources)
