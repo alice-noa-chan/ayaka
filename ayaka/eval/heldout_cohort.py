@@ -43,6 +43,10 @@ from ..data.transforms import hotpot_decision, strategyqa_noul
 from .quality_hierarchy import READ_SPLITS
 from .read_artifact import fingerprint
 
+# Authored document voices a cohort may borrow; the train and private test voices
+# are never used for evaluation cohorts.
+SYNTHETIC_VOICES = ("dev", "calibration", "router_train")
+
 VERSION = "ayaka-heldout-dev-cohort-1"
 NATURAL_SOURCES = (
     "helpsteer2",
@@ -220,8 +224,11 @@ def validate_settings(settings):
     if not isinstance(natural, dict) or set(natural) != set(NATURAL_SOURCES):
         raise ValueError(f"natural quotas must name exactly {', '.join(NATURAL_SOURCES)}")
     counts = [settings["seed"], settings["max_input_tokens"], *natural.values()]
-    if not isinstance(synthetic, dict) or set(synthetic) != {"start", "per_type"}:
-        raise ValueError("synthetic settings need start and per_type")
+    if not isinstance(synthetic, dict) or set(synthetic) - {"voice"} != {"start", "per_type"}:
+        raise ValueError("synthetic settings need start and per_type, and optionally voice")
+    voice = synthetic.get("voice", settings["split"])
+    if voice not in SYNTHETIC_VOICES:
+        raise ValueError(f"synthetic voice must be one of {SYNTHETIC_VOICES}")
     counts += [synthetic["start"], synthetic["per_type"]]
     if any(type(n) is not int or n < 0 for n in counts) or settings["max_input_tokens"] < 1:
         raise ValueError("seed, token limit and quotas must be nonnegative integers")
@@ -381,15 +388,17 @@ def _overlaps_train(source, key, train):
     return key in train[source]
 
 
-def synthetic_samples(start, per_type, split="dev"):
+def synthetic_samples(start, per_type, split="dev", voice=None):
     """Verified authored questions after the first ``start`` indices of each type.
 
     The generator writes each split in its own document voice and labels the
-    samples with that split.
+    samples with ``split``. ``voice`` selects another split's voice, for a
+    cohort split such as ``final_test`` that has no voice of its own.
     """
     if per_type == 0:
         return []
-    generated = curriculum(split, start + per_type)
+    voice = split if voice is None else voice
+    generated = curriculum(voice, start + per_type)
     total = start + per_type
     result = []
     for position, (sample, traces) in enumerate(generated):
@@ -401,9 +410,10 @@ def synthetic_samples(start, per_type, split="dev"):
             tier="standard",
             data_kind="synthetic",
             label_source="verified_procedure",
-            original_split=split,
+            original_split=voice,
             heldout_cohort_version=VERSION,
             verified_traces=traces,
+            split=split,
         )
         result.append(sample)
     return result
@@ -458,7 +468,10 @@ def build_cohort(settings, units, train, *, fits=None, reserved=(), public=None)
         if taken < quota:
             raise ValueError(f"{source}: only {taken} eligible units for a quota of {quota}")
     synthetic = synthetic_samples(
-        settings["synthetic"]["start"], settings["synthetic"]["per_type"], settings["split"]
+        settings["synthetic"]["start"],
+        settings["synthetic"]["per_type"],
+        settings["split"],
+        voice=settings["synthetic"].get("voice"),
     )
     if any(public.sample_hit(s) for s in synthetic):
         raise ValueError("authored questions overlap public benchmark text; choose new indices")

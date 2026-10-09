@@ -258,3 +258,25 @@ def test_summary_counts_cases_by_lineage():
     result = cohort.summary(samples)
     assert result["independent_cases"] == 1
     assert result["by_source"]["s"]["samples"] == 2
+
+
+def test_final_test_borrows_a_voice_and_never_the_private_test_voice():
+    final = {**settings(), "split": "final_test"}
+    with pytest.raises(ValueError, match="voice"):
+        cohort.validate_settings(final)  # final_test has no voice of its own
+    for voice in ("test", "train"):
+        with pytest.raises(ValueError, match="voice"):
+            cohort.validate_settings(
+                {**final, "synthetic": {"start": 2, "per_type": 1, "voice": voice}}
+            )
+    final["synthetic"] = {"start": 2, "per_type": 1, "voice": "dev"}
+    units = cohort.natural_units(rows(), FILES, "final_test")
+    samples, _ = cohort.build_cohort(final, units, EMPTY_TRAIN, public=NO_PUBLIC)
+    assert {s.metadata["split"] for s in samples} == {"final_test"}
+    synthetic = [s for s in samples if s.metadata["data_kind"] == "synthetic"]
+    assert {s.metadata["document_voice"] for s in synthetic} == {"dev"}
+    assert {s.metadata["original_split"] for s in synthetic} == {"dev"}
+    dev = cohort.synthetic_samples(start=2, per_type=1, split="dev")
+    assert {s.metadata["source_example_id"] for s in synthetic} == {
+        s.metadata["source_example_id"] for s in dev
+    }

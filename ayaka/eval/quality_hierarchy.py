@@ -50,7 +50,10 @@ def _model_id(value):
 
 
 # Reserved evaluation and tuning splits; the private test split is never read here.
-READ_SPLITS = ("dev", "calibration", "router_train")
+# "final_test" is a held-out cohort built from original validation files that no
+# earlier cohort used; it is read once, after every fit and choice is frozen.
+FINAL_SPLIT = "final_test"
+READ_SPLITS = ("dev", "calibration", "router_train", FINAL_SPLIT)
 
 
 def _canonical_questions(samples, split="dev"):
