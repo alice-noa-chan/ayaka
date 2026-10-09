@@ -1,0 +1,19 @@
+{
+  "version": "ayaka-heldout-dev-cohort-1",
+  "split": "final_test",
+  "seed": 20261210,
+  "max_input_tokens": 7680,
+  "natural": {
+    "helpsteer2": 32,
+    "commonsense_qa": 160,
+    "massive": 48,
+    "hotpotqa": 64,
+    "strategyqa": 96,
+    "contract_nli": 4
+  },
+  "synthetic": {
+    "start": 64,
+    "per_type": 32,
+    "voice": "dev"
+  }
+}
