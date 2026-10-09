@@ -1,0 +1,841 @@
+{
+  "version": "ayaka-heldout-tuning-2",
+  "v2_adapter": "merged",
+  "tuning_questions": {
+    "calibration": 1002,
+    "router_train": 1002
+  },
+  "extension_results": 1,
+  "path_temperatures": {
+    "choice": 1.4223430698736723,
+    "choice/direct/low": 1.0388695278752957,
+    "noul": 2.0736097476273576,
+    "noul/direct/low": 1.107870153945153,
+    "score": 2.2705496500897233,
+    "score/direct/low": 1.1696493470576372,
+    "choice/reasoned/medium": 1.765147124673413,
+    "noul/reasoned/medium": 2.846236728399439,
+    "score/reasoned/medium": 2.8889103908921934
+  },
+  "router": {
+    "promoted": true,
+    "lambda": 0.0005,
+    "validation": {
+      "mean_nll_gain": 0.03763976635279782,
+      "mean_tokens": 38.76946107784431,
+      "nll_gain_95ci": [
+        0.0018200083650238709,
+        0.07471461078188472
+      ],
+      "dev_n": 668,
+      "dev_independent_questions": 668,
+      "dev_independent_cases": 342,
+      "validated_budgets": [
+        384
+      ],
+      "budget_nll_gain_95ci": {
+        "384": [
+          0.0018200083650238709,
+          0.07471461078188472
+        ]
+      },
+      "dev_ids_sha256": "768deefdff8609050799e997360c267a237a2e07156757856be274ee5d5778df",
+      "lambda_grid": [
+        {
+          "lambda": 0.0,
+          "gain": 0.041939610654546156,
+          "tokens": 70.45958083832335
+        },
+        {
+          "lambda": 0.0005,
+          "gain": 0.03763976635279782,
+          "tokens": 38.76946107784431
+        },
+        {
+          "lambda": 0.001,
+          "gain": 0.025916796885199732,
+          "tokens": 16.772455089820358
+        },
+        {
+          "lambda": 0.002,
+          "gain": 0.006857539652338212,
+          "tokens": 3.4251497005988023
+        }
+      ]
+    },
+    "note": "lambda and promotion use dev pairs, as fit_router is designed"
+  },
+  "systems_dev": {
+    "v1_on": {
+      "cc_equal_types": 67.47045663754166,
+      "by_type": {
+        "choice": {
+          "n": 196,
+          "cc": 79.14977412255297,
+          "nll": 0.4073083875675641,
+          "ece": 0.04158953896590641,
+          "brier": 0.22588100563403693
+        },
+        "noul": {
+          "n": 320,
+          "cc": 65.625,
+          "nll": 0.2231414717823152,
+          "ece": 0.04718402495698229,
+          "brier": 0.06531529975107883,
+          "abstentions": 41
+        },
+        "score": {
+          "n": 152,
+          "cc": 57.63659579007201,
+          "nll": 1.0841201237108826,
+          "ece": 0.1007388982137567,
+          "brier": 0.5919550379116923
+        }
+      },
+      "latency": {
+        "mean_s": 0.8514534996733248,
+        "p50_s": 0.25130272656679153,
+        "p95_s": 1.4761896431446075,
+        "speed_axis": 76.9365440951066
+      }
+    },
+    "v2_off": {
+      "cc_equal_types": 63.59381793739097,
+      "by_type": {
+        "choice": {
+          "n": 196,
+          "cc": 78.45476659330475,
+          "nll": 0.42612957040868954,
+          "ece": 0.05349434319199348,
+          "brier": 0.22369272309789473
+        },
+        "noul": {
+          "n": 320,
+          "cc": 52.5,
+          "nll": 0.30073840212613173,
+          "ece": 0.04813985026266891,
+          "brier": 0.0803490358419527,
+          "abstentions": 62
+        },
+        "score": {
+          "n": 152,
+          "cc": 59.82668721886816,
+          "nll": 1.055584434233938,
+          "ece": 0.0926709000609423,
+          "brier": 0.5675525653767222
+        }
+      },
+      "latency": {
+        "mean_s": 0.24682620004890207,
+        "p50_s": 0.1599356308579445,
+        "p95_s": 0.6484148874878883,
+        "speed_axis": 81.67603678772963
+      }
+    },
+    "v2_on": {
+      "cc_equal_types": 76.36880806366322,
+      "by_type": {
+        "choice": {
+          "n": 196,
+          "cc": 84.01482682729063,
+          "nll": 0.5274421524385393,
+          "ece": 0.09964966485086753,
+          "brier": 0.2173205827941031
+        },
+        "noul": {
+          "n": 320,
+          "cc": 83.125,
+          "nll": 0.46953150013481854,
+          "ece": 0.07785560567033159,
+          "brier": 0.07570154057463908,
+          "abstentions": 3
+        },
+        "score": {
+          "n": 152,
+          "cc": 61.96659736369904,
+          "nll": 1.669648298876891,
+          "ece": 0.3746150469309405,
+          "brier": 0.7829311033599587
+        }
+      },
+      "latency": {
+        "mean_s": 11.547826988142942,
+        "p50_s": 10.029582295566797,
+        "p95_s": 21.967591363936663,
+        "speed_axis": 50.50158993799611
+      }
+    },
+    "v2_off_calibrated": {
+      "cc_equal_types": 62.93509214256641,
+      "by_type": {
+        "choice": {
+          "n": 196,
+          "cc": 78.45476659330475,
+          "nll": 0.42707442321380096,
+          "ece": 0.04808631825453709,
+          "brier": 0.22373412295355427
+        },
+        "noul": {
+          "n": 320,
+          "cc": 51.25,
+          "nll": 0.2949154462348433,
+          "ece": 0.05660598555006674,
+          "brier": 0.08067841919512633,
+          "abstentions": 65
+        },
+        "score": {
+          "n": 152,
+          "cc": 59.10050983439447,
+          "nll": 1.0502660592931499,
+          "ece": 0.07511907765047719,
+          "brier": 0.5638238073844106
+        }
+      },
+      "latency": {
+        "mean_s": 0.24682620004890207,
+        "p50_s": 0.1599356308579445,
+        "p95_s": 0.6484148874878883,
+        "speed_axis": 81.67603678772963
+      }
+    },
+    "v2_on_calibrated": {
+      "cc_equal_types": 74.34866842203894,
+      "by_type": {
+        "choice": {
+          "n": 196,
+          "cc": 84.01482682729063,
+          "nll": 0.4066851383817661,
+          "ece": 0.03606381575329623,
+          "brier": 0.19628866104883055
+        },
+        "noul": {
+          "n": 320,
+          "cc": 82.5,
+          "nll": 0.23143055866058787,
+          "ece": 0.030359880500780385,
+          "brier": 0.06428939586189808,
+          "abstentions": 7
+        },
+        "score": {
+          "n": 152,
+          "cc": 56.53117843882619,
+          "nll": 1.097944237056161,
+          "ece": 0.1103420864757731,
+          "brier": 0.5726620089946433
+        }
+      },
+      "latency": {
+        "mean_s": 11.547826988142942,
+        "p50_s": 10.029582295566797,
+        "p95_s": 21.967591363936663,
+        "speed_axis": 50.50158993799611
+      }
+    }
+  },
+  "policies": {
+    "direct": {
+      "router_train": {
+        "cc_equal_types": 64.84999824757027,
+        "by_type": {
+          "choice": {
+            "n": 294,
+            "cc": 76.81965693092256,
+            "nll": 0.4391294370785082,
+            "ece": 0.038433898934958355,
+            "brier": 0.23222764423880546
+          },
+          "noul": {
+            "n": 480,
+            "cc": 54.58333333333334,
+            "nll": 0.23802494345417763,
+            "ece": 0.04508378752205518,
+            "brier": 0.06918573913212941,
+            "abstentions": 92
+          },
+          "score": {
+            "n": 228,
+            "cc": 63.14700447845494,
+            "nll": 0.8712641538993267,
+            "ece": 0.1064667575176003,
+            "brier": 0.47456031218710243
+          }
+        },
+        "latency": {
+          "mean_s": 0.23236680472596827,
+          "p50_s": 0.16106982389464974,
+          "p95_s": 0.44524734700098634,
+          "speed_axis": 83.08689658414336
+        },
+        "reasoned_by_type": {}
+      },
+      "dev": {
+        "cc_equal_types": 62.93509214256641,
+        "by_type": {
+          "choice": {
+            "n": 196,
+            "cc": 78.45476659330475,
+            "nll": 0.42707442321380096,
+            "ece": 0.04808631825453709,
+            "brier": 0.22373412295355427
+          },
+          "noul": {
+            "n": 320,
+            "cc": 51.25,
+            "nll": 0.2949154462348433,
+            "ece": 0.05660598555006674,
+            "brier": 0.08067841919512633,
+            "abstentions": 65
+          },
+          "score": {
+            "n": 152,
+            "cc": 59.10050983439447,
+            "nll": 1.0502660592931499,
+            "ece": 0.07511907765047719,
+            "brier": 0.5638238073844106
+          }
+        },
+        "latency": {
+          "mean_s": 0.24682620004890207,
+          "p50_s": 0.1599356308579445,
+          "p95_s": 0.6484148874878883,
+          "speed_axis": 81.67603678772963
+        },
+        "reasoned_by_type": {}
+      }
+    },
+    "router": {
+      "router_train": {
+        "cc_equal_types": 76.3571799918072,
+        "by_type": {
+          "choice": {
+            "n": 294,
+            "cc": 81.45572554473803,
+            "nll": 0.3865717200903033,
+            "ece": 0.0415210392861905,
+            "brier": 0.19746921557564578
+          },
+          "noul": {
+            "n": 480,
+            "cc": 84.16666666666666,
+            "nll": 0.15322531290370847,
+            "ece": 0.028069578908175078,
+            "brier": 0.038493659601434825,
+            "abstentions": 23
+          },
+          "score": {
+            "n": 228,
+            "cc": 63.449147764016914,
+            "nll": 0.8678531031856086,
+            "ece": 0.1198334057312845,
+            "brier": 0.46936154601092833
+          }
+        },
+        "latency": {
+          "mean_s": 2.9170439355623743,
+          "p50_s": 0.19592265039682388,
+          "p95_s": 14.985157020390034,
+          "speed_axis": 67.87265193142647
+        },
+        "reasoned_by_type": {
+          "choice": 38,
+          "noul": 174,
+          "score": 14
+        }
+      },
+      "dev": {
+        "cc_equal_types": 73.94180316932362,
+        "by_type": {
+          "choice": {
+            "n": 196,
+            "cc": 82.62481176879415,
+            "nll": 0.41370131439903235,
+            "ece": 0.02502920758492505,
+            "brier": 0.2060674061635395
+          },
+          "noul": {
+            "n": 320,
+            "cc": 80.0,
+            "nll": 0.22604336480120396,
+            "ece": 0.029174182043945944,
+            "brier": 0.06285124590850118,
+            "abstentions": 12
+          },
+          "score": {
+            "n": 152,
+            "cc": 59.20059773917675,
+            "nll": 1.0470873189167704,
+            "ece": 0.0823514033618127,
+            "brier": 0.5581593393866916
+          }
+        },
+        "latency": {
+          "mean_s": 2.5695631241838552,
+          "p50_s": 0.19840967655181885,
+          "p95_s": 11.762968353927135,
+          "speed_axis": 68.87848952908428
+        },
+        "reasoned_by_type": {
+          "choice": 29,
+          "noul": 123,
+          "score": 9
+        }
+      }
+    },
+    "noul_always": {
+      "router_train": {
+        "cc_equal_types": 75.54444269201473,
+        "by_type": {
+          "choice": {
+            "n": 294,
+            "cc": 76.81965693092256,
+            "nll": 0.4391294370785082,
+            "ece": 0.038433898934958355,
+            "brier": 0.23222764423880546
+          },
+          "noul": {
+            "n": 480,
+            "cc": 86.66666666666667,
+            "nll": 0.1847654263158332,
+            "ece": 0.0366476079005625,
+            "brier": 0.04817360914081106,
+            "abstentions": 9
+          },
+          "score": {
+            "n": 228,
+            "cc": 63.14700447845494,
+            "nll": 0.8712641538993267,
+            "ece": 0.1064667575176003,
+            "brier": 0.47456031218710243
+          }
+        },
+        "latency": {
+          "mean_s": 5.178972093711427,
+          "p50_s": 0.6651806049048901,
+          "p95_s": 15.514105224050581,
+          "speed_axis": 63.35781119187091
+        },
+        "reasoned_by_type": {
+          "noul": 480
+        }
+      },
+      "dev": {
+        "cc_equal_types": 73.35175880923308,
+        "by_type": {
+          "choice": {
+            "n": 196,
+            "cc": 78.45476659330475,
+            "nll": 0.42707442321380096,
+            "ece": 0.04808631825453709,
+            "brier": 0.22373412295355427
+          },
+          "noul": {
+            "n": 320,
+            "cc": 82.5,
+            "nll": 0.23143055866058787,
+            "ece": 0.030359880500780385,
+            "brier": 0.06428939586189808,
+            "abstentions": 7
+          },
+          "score": {
+            "n": 152,
+            "cc": 59.10050983439447,
+            "nll": 1.0502660592931499,
+            "ece": 0.07511907765047719,
+            "brier": 0.5638238073844106
+          }
+        },
+        "latency": {
+          "mean_s": 4.483885567306268,
+          "p50_s": 1.1682644598186016,
+          "p95_s": 12.111278496682644,
+          "speed_axis": 62.175053907013975
+        },
+        "reasoned_by_type": {
+          "noul": 320
+        }
+      }
+    },
+    "noul_always+router": {
+      "router_train": {
+        "cc_equal_types": 77.19051332514054,
+        "by_type": {
+          "choice": {
+            "n": 294,
+            "cc": 81.45572554473803,
+            "nll": 0.3865717200903033,
+            "ece": 0.0415210392861905,
+            "brier": 0.19746921557564578
+          },
+          "noul": {
+            "n": 480,
+            "cc": 86.66666666666667,
+            "nll": 0.1847654263158332,
+            "ece": 0.0366476079005625,
+            "brier": 0.04817360914081106,
+            "abstentions": 9
+          },
+          "score": {
+            "n": 228,
+            "cc": 63.449147764016914,
+            "nll": 0.8678531031856086,
+            "ece": 0.1198334057312845,
+            "brier": 0.46936154601092833
+          }
+        },
+        "latency": {
+          "mean_s": 5.893000198637383,
+          "p50_s": 6.56417459435761,
+          "p95_s": 16.49380280263722,
+          "speed_axis": 53.56534789852524
+        },
+        "reasoned_by_type": {
+          "choice": 38,
+          "noul": 480,
+          "score": 14
+        }
+      },
+      "dev": {
+        "cc_equal_types": 74.77513650265696,
+        "by_type": {
+          "choice": {
+            "n": 196,
+            "cc": 82.62481176879415,
+            "nll": 0.41370131439903235,
+            "ece": 0.02502920758492505,
+            "brier": 0.2060674061635395
+          },
+          "noul": {
+            "n": 320,
+            "cc": 82.5,
+            "nll": 0.23143055866058787,
+            "ece": 0.030359880500780385,
+            "brier": 0.06428939586189808,
+            "abstentions": 7
+          },
+          "score": {
+            "n": 152,
+            "cc": 59.20059773917675,
+            "nll": 1.0470873189167704,
+            "ece": 0.0823514033618127,
+            "brier": 0.5581593393866916
+          }
+        },
+        "latency": {
+          "mean_s": 5.064540282014512,
+          "p50_s": 5.6580124869942665,
+          "p95_s": 13.17790012806654,
+          "speed_axis": 55.17246195764696
+        },
+        "reasoned_by_type": {
+          "choice": 29,
+          "noul": 320,
+          "score": 9
+        }
+      }
+    }
+  },
+  "policy_chosen_on_router_train": "noul_always+router",
+  "dev_gates": {
+    "router": {
+      "over_v1_on": {
+        "cc_delta": 6.471346531781961,
+        "cc_delta_95ci": [
+          1.527415328051053,
+          11.051322367742543
+        ],
+        "screen_passed": false,
+        "failed_checks": [
+          "choice/nll_not_worse",
+          "noul/nll_not_worse",
+          "source:ayaka-v2-verified/choice/cc_not_worse",
+          "source:commonsense_qa/choice/cc_not_worse",
+          "source:helpsteer2/score/cc_not_worse"
+        ]
+      },
+      "over_v2_off_calibrated": {
+        "cc_delta": 11.006711026757209,
+        "cc_delta_95ci": [
+          7.495620550159371,
+          14.709842186864377
+        ],
+        "screen_passed": false,
+        "failed_checks": [
+          "source:contract_nli/choice/cc_not_worse"
+        ]
+      }
+    },
+    "noul_always": {
+      "over_v1_on": {
+        "cc_delta": 5.8813021716914164,
+        "cc_delta_95ci": [
+          0.42158468755404926,
+          10.410757375696166
+        ],
+        "screen_passed": false,
+        "failed_checks": [
+          "choice/cc_not_worse",
+          "choice/nll_not_worse",
+          "noul/nll_not_worse",
+          "source:ayaka-v2-verified/choice/cc_not_worse",
+          "source:commonsense_qa/choice/cc_not_worse",
+          "source:helpsteer2/score/cc_not_worse",
+          "language:en/choice/cc_not_worse"
+        ]
+      },
+      "over_v2_off_calibrated": {
+        "cc_delta": 10.416666666666664,
+        "cc_delta_95ci": [
+          7.384049079754603,
+          13.333333333333336
+        ],
+        "screen_passed": true,
+        "failed_checks": []
+      }
+    },
+    "noul_always+router": {
+      "over_v1_on": {
+        "cc_delta": 7.304679865115304,
+        "cc_delta_95ci": [
+          2.68562457939401,
+          11.67529132653644
+        ],
+        "screen_passed": false,
+        "failed_checks": [
+          "choice/nll_not_worse",
+          "noul/nll_not_worse",
+          "source:ayaka-v2-verified/choice/cc_not_worse",
+          "source:commonsense_qa/choice/cc_not_worse",
+          "source:helpsteer2/score/cc_not_worse"
+        ]
+      },
+      "over_v2_off_calibrated": {
+        "cc_delta": 11.840044360090552,
+        "cc_delta_95ci": [
+          8.179088565526063,
+          15.800699938745524
+        ],
+        "screen_passed": false,
+        "failed_checks": [
+          "source:contract_nli/choice/cc_not_worse"
+        ]
+      }
+    }
+  },
+  "levers": {
+    "predeclaration": "docs/experiments/V2_GATE_BLOCKERS_PREDECLARATION_2026-10-09.md",
+    "noul_pool_weights": {
+      "direct": 0.25,
+      "reasoned": 0.35
+    },
+    "score_direct_temperature": 0.8,
+    "score_nll_tolerance": 0.05,
+    "policies": {
+      "noul_always+router": {
+        "router_train": {
+          "cc_equal_types": 77.56551535996,
+          "by_type": {
+            "choice": {
+              "n": 294,
+              "cc": 81.45572554473803,
+              "nll": 0.3865717200903033,
+              "ece": 0.0415210392861905,
+              "brier": 0.19746921557564578
+            },
+            "noul": {
+              "n": 480,
+              "cc": 85.41666666666667,
+              "nll": 0.16557784567275088,
+              "ece": 0.026576755692103774,
+              "brier": 0.045521482032013144,
+              "abstentions": 13
+            },
+            "score": {
+              "n": 228,
+              "cc": 65.82415386847529,
+              "nll": 0.8581642060388307,
+              "ece": 0.0788883739480213,
+              "brier": 0.4671277893935834
+            }
+          },
+          "latency": {
+            "mean_s": 5.893000198637383,
+            "p50_s": 6.56417459435761,
+            "p95_s": 16.49380280263722,
+            "speed_axis": 53.56534789852524
+          }
+        },
+        "dev": {
+          "cc_equal_types": 74.56550080747282,
+          "by_type": {
+            "choice": {
+              "n": 196,
+              "cc": 82.62481176879415,
+              "nll": 0.41370131439903235,
+              "ece": 0.02502920758492505,
+              "brier": 0.2060674061635395
+            },
+            "noul": {
+              "n": 320,
+              "cc": 80.62499999999997,
+              "nll": 0.22740426874859013,
+              "ece": 0.040844568178060384,
+              "brier": 0.06322987736756773,
+              "abstentions": 12
+            },
+            "score": {
+              "n": 152,
+              "cc": 60.446690653624344,
+              "nll": 1.0837967945100009,
+              "ece": 0.10570688845379586,
+              "brier": 0.5742290708338976
+            }
+          },
+          "latency": {
+            "mean_s": 5.064540282014512,
+            "p50_s": 5.6580124869942665,
+            "p95_s": 13.17790012806654,
+            "speed_axis": 55.17246195764696
+          }
+        }
+      },
+      "noul+choice_always+router": {
+        "router_train": {
+          "cc_equal_types": 78.4927290827231,
+          "by_type": {
+            "choice": {
+              "n": 294,
+              "cc": 84.23736671302731,
+              "nll": 0.4304903213343173,
+              "ece": 0.08672486923891448,
+              "brier": 0.19934229956348545
+            },
+            "noul": {
+              "n": 480,
+              "cc": 85.41666666666667,
+              "nll": 0.16557784567275088,
+              "ece": 0.026576755692103774,
+              "brier": 0.045521482032013144,
+              "abstentions": 13
+            },
+            "score": {
+              "n": 228,
+              "cc": 65.82415386847529,
+              "nll": 0.8581642060388307,
+              "ece": 0.0788883739480213,
+              "brier": 0.4671277893935834
+            }
+          },
+          "latency": {
+            "mean_s": 9.820097109750415,
+            "p50_s": 9.692642978392541,
+            "p95_s": 21.838772552087903,
+            "speed_axis": 50.67433081844786
+          }
+        },
+        "dev": {
+          "cc_equal_types": 75.02883916030498,
+          "by_type": {
+            "choice": {
+              "n": 196,
+              "cc": 84.01482682729063,
+              "nll": 0.4066851383817661,
+              "ece": 0.03606381575329623,
+              "brier": 0.19628866104883055
+            },
+            "noul": {
+              "n": 320,
+              "cc": 80.62499999999997,
+              "nll": 0.22740426874859013,
+              "ece": 0.040844568178060384,
+              "brier": 0.06322987736756773,
+              "abstentions": 12
+            },
+            "score": {
+              "n": 152,
+              "cc": 60.446690653624344,
+              "nll": 1.0837967945100009,
+              "ece": 0.10570688845379586,
+              "brier": 0.5742290708338976
+            }
+          },
+          "latency": {
+            "mean_s": 8.412465507147868,
+            "p50_s": 8.31848968937993,
+            "p95_s": 19.380111318081617,
+            "speed_axis": 51.84963727308021
+          }
+        }
+      }
+    },
+    "policy_chosen_on_router_train": "noul+choice_always+router",
+    "dev_gates": {
+      "noul_always+router": {
+        "role": "secondary, not adoptable",
+        "over_v1_on": {
+          "cc_delta": 7.095044169931157,
+          "cc_delta_95ci": [
+            2.4838184237721146,
+            11.670449370491584
+          ],
+          "screen_passed": false,
+          "failed_checks": [
+            "choice/nll_not_worse",
+            "noul/nll_not_worse",
+            "source:ayaka-v2-verified/choice/cc_not_worse",
+            "source:commonsense_qa/choice/cc_not_worse",
+            "source:helpsteer2/score/cc_not_worse"
+          ]
+        },
+        "over_v2_off_calibrated": {
+          "cc_delta": 11.145220380038474,
+          "cc_delta_95ci": [
+            7.513941352451416,
+            15.098544367626204
+          ],
+          "screen_passed": false,
+          "failed_checks": [
+            "score/cc_not_worse",
+            "score/nmae_not_worse",
+            "source:ayaka-v2-verified/score/cc_not_worse",
+            "source:contract_nli/choice/cc_not_worse",
+            "language:en/score/cc_not_worse"
+          ]
+        }
+      },
+      "noul+choice_always+router": {
+        "role": "predeclared",
+        "over_v1_on": {
+          "cc_delta": 7.558382522763324,
+          "cc_delta_95ci": [
+            3.084008089286232,
+            11.998585879013778
+          ],
+          "screen_passed": false,
+          "failed_checks": [
+            "noul/nll_not_worse",
+            "source:commonsense_qa/choice/cc_not_worse",
+            "source:helpsteer2/score/cc_not_worse"
+          ]
+        },
+        "over_v2_off_calibrated": {
+          "cc_delta": 11.608558732870641,
+          "cc_delta_95ci": [
+            7.6264536453391125,
+            15.86615335699175
+          ],
+          "screen_passed": false,
+          "failed_checks": [
+            "score/cc_not_worse",
+            "score/nmae_not_worse",
+            "source:ayaka-v2-verified/score/cc_not_worse",
+            "source:contract_nli/choice/cc_not_worse",
+            "language:en/score/cc_not_worse"
+          ]
+        }
+      }
+    }
+  },
+  "optimizer_updates": 0,
+  "original_private_test_opened": false,
+  "promotable": false
+}
