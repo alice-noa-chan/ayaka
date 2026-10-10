@@ -17,6 +17,7 @@ from .matched_contract import (
     BACKBONE_REVISION,
     CHECKPOINT_REPO,
     CHECKPOINT_REVISION,
+    V1_FAMILY,
     fingerprint,
     validate_protocol,
 )
@@ -68,7 +69,9 @@ def verify_checkpoint_files(root, hashes):
             raise ValueError(f"{name}: actual checkpoint bytes differ from external pins")
 
 
-def checkpoint_config(root):
+def checkpoint_config(root, size="large"):
+    """The config of a published v1 checkpoint of one size, checked against its pins."""
+    pins = V1_FAMILY[size]
     root = Path(root)
     configs = [
         json.loads((root / name).read_bytes())
@@ -79,18 +82,18 @@ def checkpoint_config(root):
         raise ValueError("preferred and legacy checkpoint config disagree")
     c = configs[0]
     if (
-        c.get("backbone") != "google/gemma-4-12B-it"
-        or c.get("backbone_revision") != BACKBONE_REVISION
+        c.get("backbone") != pins["backbone"]
+        or c.get("backbone_revision") != pins["backbone_revision"]
         or c.get("readout", "hybrid") != "hybrid"
         or c.get("version", 1) != 1
-        or c.get("lora_r", 64) != 64
+        or c.get("lora_r", 64) != pins["lora_r"]
     ):
         raise ValueError("checkpoint is not the pinned published v1 hybrid config")
     adapter = json.loads((root / "adapter/adapter_config.json").read_bytes())
     if (
         adapter.get("base_model_name_or_path") != c["backbone"]
-        or adapter.get("revision") not in (None, BACKBONE_REVISION)
-        or adapter.get("r") != 64
+        or adapter.get("revision") not in (None, pins["backbone_revision"])
+        or adapter.get("r") != pins["lora_r"]
     ):
         raise ValueError("checkpoint adapter differs from the pinned v1 recipe")
     cfg = AyakaConfig(**{**c, "lora_targets": tuple(c.get("lora_targets", ()))})

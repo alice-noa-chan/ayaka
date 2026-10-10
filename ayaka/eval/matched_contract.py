@@ -24,6 +24,31 @@ SCOPE = "matched comparison on an exposed cohort; not a fresh independent confir
 CHECKPOINT_REPO = "alice-noa-chan/ayaka-large"
 CHECKPOINT_REVISION = "267605ee22f2b5f934d81e5fbee691952d2e6f55"
 BACKBONE_REVISION = "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7"
+# Every published v1 checkpoint with its pinned backbone. A v2 model of one
+# size is compared against the v1 model of the same size on the same backbone.
+V1_FAMILY = {
+    "large": {
+        "checkpoint_repo": CHECKPOINT_REPO,
+        "checkpoint_revision": CHECKPOINT_REVISION,
+        "backbone": "google/gemma-4-12B-it",
+        "backbone_revision": BACKBONE_REVISION,
+        "lora_r": 64,
+    },
+    "base": {
+        "checkpoint_repo": "alice-noa-chan/ayaka-base",
+        "checkpoint_revision": "064eac5e89c8fe31824f3279df1e610c75d75b0e",
+        "backbone": "google/gemma-4-E4B-it",
+        "backbone_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+        "lora_r": 32,
+    },
+    "small": {
+        "checkpoint_repo": "alice-noa-chan/ayaka-small",
+        "checkpoint_revision": "9277bdccf1e650141c7d0d796e5a77663b3cedcb",
+        "backbone": "google/gemma-4-E2B-it",
+        "backbone_revision": "3e22461f65e89153144f8adb70e3b8c2cc9845a7",
+        "lora_r": 32,
+    },
+}
 COHORT = {
     "procedural": "abf80932e93b1236296af3e79c399b6ce1b517bbe3ffe7f4eda6bbb31db4c92d",
     "hard_calibration": "01f17bc9a454e69f771f4afb0d3d73cf415b09609f6dded36517da36b261b58c",

@@ -19,7 +19,7 @@ from pathlib import Path
 from ..data.schema import Sample
 from ..evidence_pipeline import FROZEN_REASONING_POLICY
 from ..reasoning import ReasoningSettings
-from .matched_contract import BACKBONE_REVISION, CHECKPOINT_REPO, CHECKPOINT_REVISION
+from .matched_contract import V1_FAMILY
 from .pretraining_v2 import cohort_fingerprint
 from .quality_hierarchy import READ_SPLITS, RULE, _canonical_questions, _comparison, _model_id
 from .read_artifact import fingerprint
@@ -77,22 +77,28 @@ def questions(samples, split="dev"):
     return prepared
 
 
-def make_protocol(samples, v1_model_id, v2_model_id, split="dev"):
+def make_protocol(samples, v1_model_id, v2_model_id, split="dev", size="large"):
     """Fixed reading recipe. ``dev`` evaluates; ``calibration`` and ``router_train``
-    collect tuning reads that are never scored against development results."""
+    collect tuning reads that are never scored against development results.
+
+    ``size`` picks the published v1 model and backbone both systems read
+    with. Large protocols carry no size field, so earlier ones stay valid."""
     questions(samples, split)
     ids = {"v1": _model_id(v1_model_id), "v2": _model_id(v2_model_id)}
     if ids["v1"] == ids["v2"]:
         raise ValueError("v1 and v2 require distinct checkpoint identities")
+    pins = V1_FAMILY[size]
+    sized = {} if size == "large" else {"model_size": size}
     return {
         "version": VERSION,
         "split": split,
+        **sized,
         "cohort_sha256": cohort_fingerprint(samples),
         "model_ids": ids,
-        "backbone_revision": BACKBONE_REVISION,
+        "backbone_revision": pins["backbone_revision"],
         "v1": {
-            "checkpoint_repo": CHECKPOINT_REPO,
-            "checkpoint_revision": CHECKPOINT_REVISION,
+            "checkpoint_repo": pins["checkpoint_repo"],
+            "checkpoint_revision": pins["checkpoint_revision"],
             "policy": asdict(FROZEN_REASONING_POLICY),
             "reasoner_adapter": "off",
             "max_new_tokens": 384,
@@ -114,8 +120,11 @@ def validate_protocol(protocol, samples):
     split = protocol.get("split")
     if split not in READ_SPLITS:
         raise ValueError(f"protocol split must be one of {READ_SPLITS}")
+    size = protocol.get("model_size", "large")
+    if size not in V1_FAMILY or "model_size" in protocol and size == "large":
+        raise ValueError("protocol names an unknown model size")
     expected = make_protocol(
-        samples, protocol["model_ids"]["v1"], protocol["model_ids"]["v2"], split
+        samples, protocol["model_ids"]["v1"], protocol["model_ids"]["v2"], split, size
     )
     if fingerprint(expected) != fingerprint(protocol):
         raise ValueError("comparison protocol differs from its fixed development recipe")
@@ -404,6 +413,12 @@ def main(argv=None):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--protocol", type=Path)
     parser.add_argument("--split", choices=READ_SPLITS, default="dev")
+    parser.add_argument(
+        "--model-size",
+        choices=tuple(V1_FAMILY),
+        default="large",
+        help="protocol only: the published v1 size and backbone both systems read with",
+    )
     parser.add_argument("--v1-model-id", help="external SHA-256 of the v1 checkpoint")
     parser.add_argument("--v2-model-id", help="external SHA-256 of the v2 checkpoint")
     parser.add_argument("--noul-order", choices=tuple(NOUL_ORDER_NAMES), default="false_first")
@@ -437,7 +452,9 @@ def main(argv=None):
             raise ValueError("protocols must use a new output file")
         if args.v1_model_id is None or args.v2_model_id is None:
             raise ValueError("a protocol needs both external checkpoint identities")
-        protocol = make_protocol(samples, args.v1_model_id, args.v2_model_id, args.split)
+        protocol = make_protocol(
+            samples, args.v1_model_id, args.v2_model_id, args.split, args.model_size
+        )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(
             json.dumps(protocol, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
@@ -485,7 +502,7 @@ def main(argv=None):
     if args.system == "v1_on":
         from .matched_execution import checkpoint_config
 
-        checkpoint_config(args.checkpoint)
+        checkpoint_config(args.checkpoint, protocol.get("model_size", "large"))
     import torch
     from transformers import AutoTokenizer
 
@@ -503,7 +520,7 @@ def main(argv=None):
             local_files_only=True,
             strict_loading=True,
         )
-        if model.cfg.backbone_revision != BACKBONE_REVISION:
+        if model.cfg.backbone_revision != protocol["backbone_revision"]:
             raise ValueError("checkpoint uses a different native backbone revision")
         tok = HFTokenizer(
             AutoTokenizer.from_pretrained(str(args.backbone), local_files_only=True),

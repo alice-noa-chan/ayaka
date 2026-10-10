@@ -19,6 +19,7 @@ from ayaka.eval.checkpoint_comparison import (
     predictor,
     questions,
 )
+from ayaka.eval.matched_contract import V1_FAMILY
 from ayaka.eval.matched_execution import full_decision_context
 from ayaka.tokenization import ToyTokenizer
 
@@ -297,3 +298,17 @@ def test_collection_can_be_limited_to_a_question_subset(tmp_path, cohort):
         collect_rows(
             observation("v2_on"), samples, protocol, "v2_on", tmp_path / "y.jsonl", only=["nope"]
         )
+
+
+def test_smaller_sizes_bind_their_own_v1_and_backbone(cohort):
+    samples, large = cohort
+    assert "model_size" not in large
+    small = make_protocol(samples, "a" * 64, "b" * 64, size="small")
+    assert small["model_size"] == "small"
+    assert small["backbone_revision"] == V1_FAMILY["small"]["backbone_revision"]
+    assert small["v1"]["checkpoint_repo"] == "alice-noa-chan/ayaka-small"
+    rows = checked_rows([], samples, small, "v2_off", complete=False)
+    assert rows == []
+    for forged in ({**small, "model_size": "base"}, {**large, "model_size": "large"}):
+        with pytest.raises(ValueError):
+            checked_rows([], samples, forged, "v2_off", complete=False)

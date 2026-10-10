@@ -352,3 +352,15 @@ def test_complete_fake_execution_receipt_is_required_by_real_scoring_entrypoint(
     rows = matched_v1.load_reads([args.output])
     comparison = checked_compare(matched[1], rows, items, protocol, matched[4].read_bytes(), report)
     assert comparison["systems"]["v1_on"]["n"] == 3
+
+
+def test_smaller_v1_configs_are_checked_against_their_own_pins(tmp_path):
+    root = tmp_path / "small"
+    (root / "adapter").mkdir(parents=True)
+    (root / "ayaka_config.json").write_text(json.dumps(asdict(model_config("electra-small"))))
+    adapter = {"base_model_name_or_path": "google/gemma-4-E2B-it", "revision": None, "r": 32}
+    (root / "adapter/adapter_config.json").write_text(json.dumps(adapter))
+    assert execution.checkpoint_config(root, "small").backbone == "google/gemma-4-E2B-it"
+    for size in ("large", "base"):
+        with pytest.raises(ValueError, match="pinned published v1"):
+            execution.checkpoint_config(root, size)
