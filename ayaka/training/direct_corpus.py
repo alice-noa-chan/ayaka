@@ -48,6 +48,7 @@ from .optimization import OptimizationConfig
 from .prepare_v2 import canonical, sha256
 from .swift_direct import encode_direct_sample, normalize_input_encoding
 from .tokenizer_identity import tokenizer_identity_scope
+from .v2_recipe import add_extra_natural_arguments, extra_natural
 
 RESERVED_VERSION = "ayaka-direct-reserved-inputs-1"
 
@@ -430,13 +431,7 @@ def main(argv=None):
             type=Path,
             help="pinned original train.json with sibling LICENSE; enables corpus plan2",
         )
-        sub.add_argument(
-            "--extra-natural",
-            action="append",
-            choices=sorted(EXTRA_SOURCES),
-            default=[],
-            help="opt-in extra human source; with --contractnli-train enables corpus plan3",
-        )
+        add_extra_natural_arguments(sub, sorted(EXTRA_SOURCES))
         sub.add_argument("--mechanics-only", action="store_true")
         private = sub.add_mutually_exclusive_group(required=True)
         private.add_argument("--reserved-manifest", type=Path)
@@ -485,7 +480,7 @@ def main(argv=None):
         policy_registry=ContractGoldRegistry(args.contractnli_train)
         if args.contractnli_train is not None
         else None,
-        extra_sources=args.extra_natural,
+        extra_sources=extra_natural(args),
     )
     if args.command == "plan":
         plan = create_plan(

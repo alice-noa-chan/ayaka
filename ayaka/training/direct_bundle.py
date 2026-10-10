@@ -46,6 +46,7 @@ from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .swift_direct import encode_direct_sample, input_serving_recipe, normalize_input_encoding
 from .tokenizer_identity import backend_fingerprints, scoped_tokenizer_preparation
+from .v2_recipe import add_extra_natural_arguments, extra_natural
 from .workload import describe_rows, finite_workload, scheduled_batches
 
 VERSION = "ayaka-direct-bundle-6"
@@ -713,30 +714,18 @@ def main(argv=None):
     )
     prepare.add_argument("--liger", action="store_true")
     prepare.add_argument("--contractnli-train", type=Path)
-    prepare.add_argument(
-        "--extra-natural",
-        action="append",
-        choices=("strategyqa",),
-        default=[],
-        help="opt-in extra human source of corpus plan3",
-    )
+    add_extra_natural_arguments(prepare, ("strategyqa",))
     audit = commands.add_parser("audit")
     audit.add_argument("--bundle", required=True, type=Path)
     audit.add_argument("--mechanics-only", action="store_true")
     audit.add_argument("--expected-manifest-sha256")
     audit.add_argument("--native-path", type=Path)
     audit.add_argument("--contractnli-train", type=Path)
-    audit.add_argument(
-        "--extra-natural",
-        action="append",
-        choices=("strategyqa",),
-        default=[],
-        help="opt-in extra human source of corpus plan3",
-    )
+    add_extra_natural_arguments(audit, ("strategyqa",))
     args = parser.parse_args(argv)
     from ..data.direct_natural import explicit_policy_registry
 
-    registry = explicit_policy_registry(args.contractnli_train, args.extra_natural)
+    registry = explicit_policy_registry(args.contractnli_train, extra_natural(args))
     if args.command == "prepare":
         encoding = {"encoder": args.input_encoder}
         for field in ("prompt_variant", "state_format"):

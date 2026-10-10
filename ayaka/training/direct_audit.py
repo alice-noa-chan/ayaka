@@ -28,6 +28,7 @@ from .optimization import OptimizationConfig
 from .prepare_v2 import audit_splits, canonical, sha256
 from .swift_direct import input_serving_recipe, validate_direct_input_items
 from .tokenizer_identity import configuration_fingerprint
+from .v2_recipe import add_extra_natural_arguments, extra_natural
 from .workload import describe_rows, finite_workload
 
 VERSION = "ayaka-direct-cpu-audit-1"
@@ -399,13 +400,7 @@ def main(argv=None):
     parser.add_argument("--mechanics-only", action="store_true")
     parser.add_argument("--native-path", type=Path)
     parser.add_argument("--contractnli-train", type=Path)
-    parser.add_argument(
-        "--extra-natural",
-        action="append",
-        choices=("strategyqa",),
-        default=[],
-        help="opt-in extra human source of corpus plan3",
-    )
+    add_extra_natural_arguments(parser, ("strategyqa",))
     args = parser.parse_args(argv)
     from ..data.direct_natural import explicit_policy_registry
 
@@ -415,7 +410,7 @@ def main(argv=None):
         expected_manifest_sha256=args.expected_manifest_sha256,
         allow_tiny=args.mechanics_only,
         native_path=args.native_path,
-        natural_registry=explicit_policy_registry(args.contractnli_train, args.extra_natural),
+        natural_registry=explicit_policy_registry(args.contractnli_train, extra_natural(args)),
     )
     print(json.dumps({k: v for k, v in result.items() if k != "source_sha256"}, indent=2))
 
