@@ -163,3 +163,15 @@ One vast.ai RTX PRO 6000 (96 GB), price cap $1.60/h; the previous v2 training ra
 - final_test is read once, after `frozen.json` exists.
 - Dev has been gated four times before; it is now only a tuning split for the router's lambda and promotion.
 - No dataset rows are committed; reports contain aggregates only.
+
+## Amendment before any optimizer update (2026-10-10)
+
+The first rental (instance 55120004, RTX PRO 6000 S) stopped at run_direct's whole-workflow admission, **before its first optimizer update**. No model was trained and no cohort was read.
+
+- **Why it stopped:**
+  - The admission charged each of the 2,315 steps the slowest sampled scheduled batch: 53.4 s, against a 3.1 s median. That batch held long ContractNLI documents and had backed off after CUDA OOM.
+  - The forecast was therefore 34 h of training and $74 for the workflow, against $32.66 of credit.
+- **Realistic rate:** the 22 schedule samples processed 1,836 tokens/s in aggregate. At that rate the 25.87M-token schedule needs about 3.9 h, in line with the original estimate.
+- **Change:** commit `8cc7433` adds `run_direct --forecast-basis token_rate`. It divides every scheduled token by the sampled scheduled token rate. The 1.25 safety factor and the credit admission are unchanged.
+- **What did not change:** corpus, plan, schedule, model, selection, tuning, final_test and decision rule. Only the source commit, and so the bundle and audit anchors, change.
+- **Rental time limit:** raised from 16 h to 20 h, to cover the rental time already used. The compute ceiling becomes about $27.5 at $1.38/h.
