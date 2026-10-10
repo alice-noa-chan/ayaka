@@ -260,6 +260,18 @@ def serve(
     )
 
 
+def _frozen_tuning(choice, folder, explicit):
+    """The frozen tuning to serve with: an explicit file, or the folder's own."""
+    from .frozen_tuning import find_frozen, load_frozen
+
+    if choice == "off":
+        return None
+    if choice != "auto":
+        return load_frozen(choice)
+    path = None if explicit else find_frozen(folder)
+    return load_frozen(path) if path is not None else None
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
     import os
@@ -292,6 +304,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--max-reasoning-tokens", type=int)
     ap.add_argument("--reasoning-router", help="promoted v2 router JSON")
     ap.add_argument("--reasoning-calibration", help="v2 path-temperature JSON")
+    ap.add_argument(
+        "--frozen-tuning",
+        default="auto",
+        help="frozen held-out tuning JSON (temperatures, router, policy); 'auto' uses the "
+        "model folder's frozen_tuning.json when present, 'off' ignores it",
+    )
     ap.add_argument("--image-calibration", help="model-bound native image temperature artifact")
     ap.add_argument("--image-router", help="model-bound, dev-promoted native image router")
     ap.add_argument(
@@ -350,7 +368,12 @@ def main(argv: list[str] | None = None) -> None:
         torch.set_num_threads(args.threads)
     if args.reasoning and args.reasoner_adapter == "off" and not args.ckpt:
         ap.error("--reasoning with --reasoner-adapter off needs --ckpt (exports are merged)")
-    image_decision = None
+    explicit_reasoning = bool(
+        args.reasoning or args.images or args.reasoning_router or args.reasoning_calibration
+    )
+    if args.frozen_tuning not in ("auto", "off") and explicit_reasoning:
+        ap.error("--frozen-tuning already fixes the reasoning policy, router and calibration")
+    image_decision, frozen = None, None
     if args.images:
         from .checkpoint import resolve_checkpoint
         from .multimodal import load_image_decision
@@ -384,12 +407,20 @@ def main(argv: list[str] | None = None) -> None:
         from .tokenization import HFTokenizer
 
         args.ckpt = resolve_checkpoint(args.ckpt, args.revision)
+        frozen = _frozen_tuning(args.frozen_tuning, args.ckpt, explicit_reasoning or overrides)
         model = load_checkpoint(
-            args.ckpt, device=args.device, dtype=getattr(torch, args.dtype), merge=False
+            args.ckpt,
+            device=args.device,
+            dtype=getattr(torch, args.dtype),
+            # The frozen fit was measured on reads of the adapter mode it names.
+            merge=frozen is not None and frozen["adapter"] == "merged",
         ).eval()
         tok = HFTokenizer.for_config(model.cfg)
         name = os.path.basename(os.path.normpath(os.path.dirname(os.path.abspath(args.ckpt))))
     else:
+        frozen = _frozen_tuning(args.frozen_tuning, args.model, explicit_reasoning or overrides)
+        if frozen is not None and frozen["adapter"] != "merged":
+            ap.error("exports are merged, but the frozen tuning was fitted on unmerged reads")
         model, tok = load_exported(
             args.model,
             device=args.device,
@@ -399,6 +430,11 @@ def main(argv: list[str] | None = None) -> None:
         name = os.path.basename(os.path.normpath(args.model))
     if image_decision is not None:
         decision = image_decision
+    elif frozen is not None:
+        from .frozen_tuning import frozen_decision
+
+        decision = frozen_decision(model, tok, frozen, max_seq_len=args.max_seq_len or None)
+        print(f"[serve] frozen tuning: policy {frozen['policy']}", flush=True)
     elif args.reasoning:
         from .evidence_pipeline import reasoning_decision
 
