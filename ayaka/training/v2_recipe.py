@@ -4,8 +4,11 @@
 needed settings that used to be passed by hand. This module holds them so
 the training CLIs apply them by default:
 
-- the large model config: LoRA rank 64, LM readout, 4096-token training
-  rows, 8192-token serving prompts;
+- the model configs: LM readout, 4096-token training rows and 8192-token
+  serving prompts on every size. Each size keeps the backbone, LoRA rank
+  and head dimensions of its v1 counterpart (large: Gemma 4 12B, rank 64;
+  base: E4B, rank 32; small: E2B, rank 32). Only large was trained in the
+  final run; base and small apply the same recipe unvalidated;
 - StrategyQA as the extra human source of corpus plan 3 whenever ContractNLI
   enables plan 2 or later;
 - the learning rates that trained without divergence (LoRA 3e-5, head
@@ -22,6 +25,7 @@ without Liger stays the default of the corpus and bundle preparers.
 Usage::
 
     python -m ayaka.training.v2_recipe model-config --out direct-config.json
+    python -m ayaka.training.v2_recipe model-config --size small --out small-config.json
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from ..config import AYAKA_LARGE, AyakaConfig
+from ..config import AYAKA_BASE, AYAKA_LARGE, AYAKA_SMALL, AyakaConfig
 
 LORA_LR = 3e-5
 HEAD_LR = 1.5e-4
@@ -41,19 +45,26 @@ SELECT_SPLIT = "router_train"
 FORECAST_BASIS = "token_rate"
 PLAN3_EXTRA_NATURAL = ("strategyqa",)
 
-LARGE_MODEL = AyakaConfig(
-    **{
-        **asdict(AYAKA_LARGE),
-        "name": "ayaka-v2-final-direct",
-        "readout": "lm",
-        "version": 2,
-        "max_seq_len": 4096,
-        "serve_max_seq_len": 8192,
-        "long_prompt_tokens": 1024,
-        "input_contract_required": False,
-    }
-)
-MODELS = {"large": LARGE_MODEL}
+
+def _v2(v1, name):
+    return AyakaConfig(
+        **{
+            **asdict(v1),
+            "name": name,
+            "readout": "lm",
+            "version": 2,
+            "max_seq_len": 4096,
+            "serve_max_seq_len": 8192,
+            "long_prompt_tokens": 1024,
+            "input_contract_required": False,
+        }
+    )
+
+
+LARGE_MODEL = _v2(AYAKA_LARGE, "ayaka-v2-final-direct")
+BASE_MODEL = _v2(AYAKA_BASE, "ayaka-v2-base-direct")
+SMALL_MODEL = _v2(AYAKA_SMALL, "ayaka-v2-small-direct")
+MODELS = {"large": LARGE_MODEL, "base": BASE_MODEL, "small": SMALL_MODEL}
 
 
 def add_extra_natural_arguments(parser, choices):

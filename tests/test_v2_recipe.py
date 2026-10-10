@@ -70,3 +70,21 @@ def test_explicit_and_disabled_extra_sources_conflict():
 def test_recipe_learning_rates_are_below_the_diverged_ones():
     assert (v2_recipe.LORA_LR, v2_recipe.HEAD_LR) == (3e-5, 1.5e-4)
     assert v2_recipe.SELECT_EVERY == 250 and v2_recipe.SELECT_PATIENCE == 3
+
+
+@pytest.mark.parametrize(
+    ("size", "backbone", "rank", "pointer"),
+    [("base", "google/gemma-4-E4B-it", 32, 384), ("small", "google/gemma-4-E2B-it", 32, 256)],
+)
+def test_smaller_sizes_keep_their_v1_backbone_and_head(tmp_path, size, backbone, rank, pointer):
+    out = tmp_path / f"{size}.json"
+    v2_recipe.main(["model-config", "--size", size, "--out", str(out)])
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert (written["backbone"], written["lora_r"], written["pointer_dim"]) == (
+        backbone,
+        rank,
+        pointer,
+    )
+    shared = {"readout", "version", "max_seq_len", "serve_max_seq_len", "long_prompt_tokens"}
+    assert {k: written[k] for k in shared} == {k: FINAL_RUN_MODEL[k] for k in shared}
+    assert written["name"] == f"ayaka-v2-{size}-direct"
