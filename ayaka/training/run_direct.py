@@ -49,6 +49,16 @@ from .prepare_v2 import canonical
 from .swift_direct import direct_readout_binding, encode_direct_sample
 from .throughput import completion_plan, profile_overheads, profile_production
 from .trainer import TrainConfig, Trainer
+from .v2_recipe import (
+    FORECAST_BASIS,
+    HEAD_LR,
+    LORA_LR,
+    SELECT_EVERY,
+    SELECT_PATIENCE,
+    SELECT_SPLIT,
+    add_extra_natural_arguments,
+    extra_natural,
+)
 from .workload import stress_indices
 
 
@@ -61,6 +71,9 @@ def training_config(recipe, values=None):
         "questions_per_step": recipe["schedule"]["rows_per_step"],
         "seed": recipe["schedule"]["seed"],
         "loss_weights": LossWeights(**recipe["loss_weights"]),
+        # The validated v2 recipe; a training config may still override them.
+        "lr": LORA_LR,
+        "head_lr": HEAD_LR,
         "reasoning_ce_weight": 0,
         "proposal_ce_weight": 0,
     }
@@ -565,32 +578,31 @@ def main(argv=None):
         type=Path,
         help="pinned train/license for full regeneration only; omit with --audit-receipt",
     )
-    parser.add_argument(
-        "--extra-natural",
-        action="append",
-        choices=("strategyqa",),
-        default=[],
-        help="opt-in extra human source of corpus plan3; full regeneration only",
-    )
+    add_extra_natural_arguments(parser, ("strategyqa",))
     parser.add_argument(
         "--base-reads", type=Path, help="original frozen native reads, required for replay resume"
     )
     parser.add_argument("--resume", type=Path)
-    parser.add_argument("--checkpoint-every", default=100, type=int)
+    parser.add_argument("--checkpoint-every", default=SELECT_EVERY, type=int)
     parser.add_argument(
         "--select-every",
         type=int,
-        help="read the reserved selection split every N steps and keep the best weights",
+        default=SELECT_EVERY,
+        help="read the reserved selection split every N steps and keep the best weights "
+        "(0 disables selection)",
     )
     parser.add_argument(
-        "--select-patience", type=int, help="stop after this many reads without improvement"
+        "--select-patience",
+        type=int,
+        default=SELECT_PATIENCE,
+        help="stop after this many reads without improvement",
     )
     parser.add_argument("--select-min-delta", type=float, default=0.0)
-    parser.add_argument("--select-split", choices=("router_train", "dev"), default="router_train")
+    parser.add_argument("--select-split", choices=("router_train", "dev"), default=SELECT_SPLIT)
     parser.add_argument(
         "--forecast-basis",
         choices=("max", "token_rate"),
-        default="max",
+        default=FORECAST_BASIS,
         help="training-time forecast for admission: slowest sampled batch per step, or "
         "schedule tokens at the sampled token rate",
     )
@@ -607,6 +619,12 @@ def main(argv=None):
             "--contractnli-train/--extra-natural are for full regeneration, "
             "not portable receipt loading"
         )
+    try:
+        extra_sources = extra_natural(args)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.select_every == 0:
+        args.select_every = args.select_patience = None
 
     from ..data.direct_natural import explicit_policy_registry
 
@@ -636,7 +654,7 @@ def main(argv=None):
         saved_base_reads=read(args.base_reads),
         audit_receipt=args.audit_receipt,
         expected_audit_receipt_sha256=args.expected_audit_receipt_sha256,
-        natural_registry=explicit_policy_registry(args.contractnli_train, args.extra_natural),
+        natural_registry=explicit_policy_registry(args.contractnli_train, extra_sources),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
