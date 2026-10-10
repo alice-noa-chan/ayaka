@@ -32,7 +32,7 @@ The v1 model, [`alice-noa-chan/ayaka-large`](https://huggingface.co/alice-noa-ch
 is unchanged and remains available.
 
 Code, training pipeline and documentation:
-<https://github.com/alice-noa-chan/ayaka> (branch `ayaka-v2-experiments`).
+<https://github.com/alice-noa-chan/ayaka>.
 
 ## What's new in v2
 
