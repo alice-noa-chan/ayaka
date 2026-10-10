@@ -1,0 +1,23 @@
+{
+  "status": "complete_results_verified_rental_destroyed",
+  "instance_id": 55160604,
+  "label": "ayaka-v2-final-20261010",
+  "rental_absent": true,
+  "rows_per_run": {
+    "calibration/v2_off-merged": 334,
+    "router_train/v2_off-merged": 334,
+    "dev/v2_off-merged": 668,
+    "final_test/v2_off-merged": 836,
+    "dev/v1_on": 668,
+    "final_test/v1_on": 836,
+    "calibration/v2_on-merged": 334,
+    "router_train/v2_on-merged": 334,
+    "dev/v2_on-merged": 668,
+    "final_test/v2_on-merged": 566
+  },
+  "rental_elapsed_seconds": 27237.663627386093,
+  "compute_cost_estimate_usd": 10.999756717736242,
+  "credit_after_destroy_usd": 16.489027289920813,
+  "cost_is_final_invoice": false,
+  "other_instances_present": []
+}

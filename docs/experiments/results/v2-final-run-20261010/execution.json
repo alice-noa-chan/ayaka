@@ -1,0 +1,122 @@
+{
+  "status": "complete",
+  "runs": [
+    {
+      "run": "calibration/v2_off-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 73.48051953315735
+        }
+      ],
+      "complete": true,
+      "rows": 334
+    },
+    {
+      "run": "router_train/v2_off-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 70.27070808410645
+        }
+      ],
+      "complete": true,
+      "rows": 334
+    },
+    {
+      "run": "dev/v2_off-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 126.91510009765625
+        }
+      ],
+      "complete": true,
+      "rows": 668
+    },
+    {
+      "run": "final_test/v2_off-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 134.84736704826355
+        }
+      ],
+      "complete": true,
+      "rows": 836
+    },
+    {
+      "run": "dev/v1_on",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 380.49776434898376
+        }
+      ],
+      "complete": true,
+      "rows": 668
+    },
+    {
+      "run": "final_test/v1_on",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 360.1388826370239
+        }
+      ],
+      "complete": true,
+      "rows": 836
+    },
+    {
+      "run": "calibration/v2_on-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 1756.1971628665924
+        }
+      ],
+      "complete": true,
+      "rows": 334
+    },
+    {
+      "run": "router_train/v2_on-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 1760.5834188461304
+        }
+      ],
+      "complete": true,
+      "rows": 334
+    },
+    {
+      "run": "dev/v2_on-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 3444.4496262073517
+        }
+      ],
+      "complete": true,
+      "rows": 668
+    },
+    {
+      "run": "final_test/v2_on-merged",
+      "attempts": [
+        {
+          "return_code": 0,
+          "seconds": 2800.259070634842
+        }
+      ],
+      "complete": true,
+      "rows": 566
+    }
+  ],
+  "v2_model_id": "fdbc47aa61ec43c1d3684510e06ef09a97cb8332f0cf41b2a973a27de63cd85f",
+  "trained_dir": "train",
+  "routed_final_test_questions": 566,
+  "adopted": false,
+  "optimizer_updates_outside_training": 0,
+  "original_private_test_opened": false,
+  "elapsed_job_seconds": 25598.95859193802
+}
