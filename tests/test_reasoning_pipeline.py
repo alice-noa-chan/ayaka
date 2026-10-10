@@ -228,3 +228,47 @@ def test_calibration_cannot_change_router_features_and_direct_uses_zero_budget()
     assert report["rows"]["off"][0]["probs"] == [0.5, 0.5]
     assert seen == [("direct", 0), ("direct", 0)]
     assert report["rows"]["auto"][0]["finish_reason"] == "no_validated_router"
+
+
+def test_always_types_reason_without_asking_the_router():
+    asked = []
+
+    class Router:
+        def should_reason(self, state, spec, baseline, tok, budget):
+            asked.append(spec.type)
+            return False
+
+    o, g = Original(), Generator()
+    d = ControlledDecision(o, g, Router(), always_types=("noul",))
+    noul, choice = (
+        QuestionSpec("noul", "Hi?", ["no", "yes"]),
+        QuestionSpec("choice", "Pick", ["a", "b"]),
+    )
+    results = d.decide("Hello", [noul, choice])
+    assert asked == ["choice"]
+    assert g.budgets == [384]
+    assert [r.extras["reasoning"]["route"] for r in results] == ["reasoned", "direct"]
+    assert results[0].extras["reasoning"]["router"] == "always"
+
+
+@pytest.mark.parametrize("mode", ["off", "on"])
+def test_always_types_never_override_an_explicit_mode(mode):
+    o, g = Original(), Generator()
+    d = ControlledDecision(o, g, always_types=("noul",))
+    result = d.decide(
+        "Hello",
+        [QuestionSpec("noul", "Hi?", ["no", "yes"])],
+        reasoning=[ReasoningSettings(mode=mode)],
+    )[0]
+    assert result.extras["reasoning"]["route"] == ("reasoned" if mode == "on" else "direct")
+
+
+def test_direct_correction_can_stay_on_under_path_calibration():
+    from ayaka.reasoning_pipeline import controlled_decision
+
+    model = AyakaDecisionModel.from_config(tiny_config(version=2), dtype=torch.float32).eval()
+    calibration = SimpleNamespace(apply=lambda probs, *args: probs)
+    default = controlled_decision(model, Tok(), calibration=calibration)
+    kept = controlled_decision(model, Tok(), calibration=calibration, direct_correction=True)
+    assert default.original.apply_probability_calibration is False
+    assert kept.original.apply_probability_calibration is True

@@ -164,11 +164,14 @@ class TraceGenerator:
 class ControlledDecision:
     supports_reasoning = True
 
-    def __init__(self, original, generator, router=None, calibration=None):
+    def __init__(self, original, generator, router=None, calibration=None, always_types=()):
         self.original, self.generator, self.router = original, generator, router
         self.model, self.tok = original.model, original.tok
         self.max_seq_len = original.max_seq_len
         self.calibration = calibration
+        # Primitive types that ``auto`` always reasons on, whatever the router
+        # says: the "noul_always" part of a frozen held-out serving policy.
+        self.always_types = frozenset(always_types)
 
     def _settings(self):
         cfg = self.model.cfg
@@ -238,7 +241,9 @@ class ControlledDecision:
                     state, spec, baselines[i], self.tok, budget=setting.budget
                 )
             use = setting.budget > 0
-            if use and setting.mode == "auto":
+            if use and setting.mode == "auto" and spec.type in self.always_types:
+                extra["router"] = "always"
+            elif use and setting.mode == "auto":
                 baseline = baselines[i]
                 if self.router is not None:
                     use = self.router.should_reason(
@@ -326,10 +331,26 @@ class ControlledDecision:
         return results
 
 
-def controlled_decision(model, tok, max_seq_len=None, router=None, calibration=None):
+def controlled_decision(
+    model,
+    tok,
+    max_seq_len=None,
+    router=None,
+    calibration=None,
+    always_types=(),
+    direct_correction=None,
+):
+    """Build the v2 reasoning-controlled decision.
+
+    By default an explicit path calibration replaces the model's automatic
+    direct correction. ``direct_correction=True`` keeps both: the frozen
+    held-out fit was measured on reads that had the automatic correction, and
+    its path temperatures apply on top of it.
+    """
     original = Decision(model, tok, max_seq_len)
-    # Explicit path calibration replaces the automatic direct correction.
-    original.apply_probability_calibration = calibration is None
+    original.apply_probability_calibration = (
+        calibration is None if direct_correction is None else direct_correction
+    )
     contract = original.input_contract
     if contract is not None and contract["input_encoding"]["encoder"] == "swift_canonical":
         from .swift_continuation import SwiftTraceGenerator
@@ -337,4 +358,4 @@ def controlled_decision(model, tok, max_seq_len=None, router=None, calibration=N
         generator = SwiftTraceGenerator(model, tok, contract)
     else:
         generator = TraceGenerator(model, tok)
-    return ControlledDecision(original, generator, router, calibration)
+    return ControlledDecision(original, generator, router, calibration, always_types)
