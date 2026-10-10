@@ -58,6 +58,53 @@ def test_completion_plan_accounts_for_every_step_and_rejects_insufficient_time()
         completion_plan({"max_seconds": float("inf")}, 1200, 14400)
 
 
+def _scheduled(samples, steps=1000):
+    """A profile whose schedule samples are (tokens, seconds) pairs."""
+    batches = [{"batches": [{"text_tokens": t}], "median_seconds": s} for t, s in samples]
+    return {
+        "max_seconds": max(s for _, s in samples),
+        "schedule": {
+            "planned_steps": steps,
+            "max_seconds": max(s for _, s in samples),
+            "batches": batches,
+        },
+    }
+
+
+def test_token_rate_forecast_uses_schedule_tokens_not_the_slowest_batch():
+    # Heavy-tailed batches: mostly 10k tokens in 5 s, one 80k-token batch in 60 s.
+    profile = _scheduled([(10_000, 5.0)] * 9 + [(80_000, 60.0)])
+    slowest = completion_plan(profile, 1000, 10**9, safety_factor=1)
+    assert slowest["forecast_backward_seconds_per_step"] == 60.0
+    rate = completion_plan(
+        profile, 1000, 10**9, safety_factor=1, basis="token_rate", scheduled_tokens=12_000_000
+    )
+    # 170k tokens in 105 s; 12M tokens at that rate over 1,000 steps.
+    expected = 12_000_000 / (170_000 / 105.0) / 1000
+    assert rate["forecast_backward_seconds_per_step"] == pytest.approx(expected)
+    assert rate["forecast_basis"].startswith("complete schedule tokens")
+    assert rate["scheduled_tokens"] == 12_000_000
+    assert rate["estimated_remaining_seconds"] < slowest["estimated_remaining_seconds"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"basis": "mean"}, "basis"),
+        ({"basis": "token_rate"}, "schedule's tokens"),
+        ({"basis": "token_rate", "scheduled_tokens": 0}, "schedule's tokens"),
+    ],
+)
+def test_token_rate_forecast_requires_its_inputs(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        completion_plan(_scheduled([(10_000, 5.0)]), 1000, 10**9, **kwargs)
+    if kwargs.get("basis") == "token_rate":
+        with pytest.raises(ValueError):
+            completion_plan(
+                {"max_seconds": 5.0}, 1000, 10**9, basis="token_rate", scheduled_tokens=10
+            )
+
+
 def test_backward_profile_uses_oom_fallback_without_optimizer_updates(monkeypatch):
     import itertools
 

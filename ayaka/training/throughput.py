@@ -112,9 +112,21 @@ def completion_plan(
     safety_factor=1.25,
     overheads=None,
     checkpoint_every=100,
+    basis="max",
+    scheduled_tokens=None,
 ):
+    """Forecast the remaining training time of a fixed schedule.
+
+    ``basis="max"`` (default) charges every step the slowest sampled scheduled
+    batch. ``basis="token_rate"`` divides ``scheduled_tokens`` (every token of
+    the complete schedule) by the aggregate tokens per second of the sampled
+    scheduled batches, which suits a corpus whose batch lengths are heavy-tailed.
+    The safety factor applies to both.
+    """
     if type(steps) is not int or steps < 1:
         raise ValueError("completion plan requires a positive fixed optimizer step count")
+    if basis not in ("max", "token_rate"):
+        raise ValueError("completion forecast basis must be 'max' or 'token_rate'")
     numbers = [
         profile["max_seconds"],
         remaining_seconds,
@@ -147,6 +159,20 @@ def completion_plan(
     if schedule is not None and schedule["planned_steps"] != steps:
         raise ValueError("completion forecast must match the profiled fixed schedule")
     forecast_backward = schedule["max_seconds"] if schedule else profile["max_seconds"]
+    basis_name = "maximum sampled actual scheduled batch" if schedule else "global stress maximum"
+    if basis == "token_rate":
+        if not schedule or type(scheduled_tokens) is not int or scheduled_tokens < 1:
+            raise ValueError(
+                "a token-rate forecast needs schedule samples and the schedule's tokens"
+            )
+        sampled_tokens = sum(
+            b["text_tokens"] for row in schedule["batches"] for b in row["batches"]
+        )
+        sampled_seconds = sum(row["median_seconds"] for row in schedule["batches"])
+        if sampled_tokens < 1 or not math.isfinite(sampled_seconds) or sampled_seconds <= 0:
+            raise ValueError("token-rate forecast needs positive sampled tokens and seconds")
+        forecast_backward = scheduled_tokens / (sampled_tokens / sampled_seconds) / steps
+        basis_name = "complete schedule tokens at the sampled scheduled token rate"
     if not math.isfinite(forecast_backward) or forecast_backward <= 0:
         raise ValueError("scheduled backward timing must be finite and positive")
     estimated = (forecast_backward * steps + optimizer_total) * safety_factor + save_seconds * (
@@ -158,9 +184,8 @@ def completion_plan(
         "planned_steps": steps,
         "observed_max_backward_seconds": profile["max_seconds"],
         "forecast_backward_seconds_per_step": forecast_backward,
-        "forecast_basis": "maximum sampled actual scheduled batch"
-        if schedule
-        else "global stress maximum",
+        "forecast_basis": basis_name,
+        "scheduled_tokens": scheduled_tokens,
         "all_stress_seconds_estimate": (
             (profile["max_seconds"] * steps + optimizer_total) * safety_factor
             + save_seconds * (safety_factor if overheads else 1)

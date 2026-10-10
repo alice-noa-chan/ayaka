@@ -150,3 +150,20 @@ def test_direct_run_reads_selection_split_and_exports_the_selected_weights(tmp_p
         )
     with pytest.raises(ValueError, match="both an interval and a patience"):
         run_pipeline(root, tmp_path / "bad2", action="train", mechanics_only=True, select_every=2)
+
+
+def test_direct_run_accepts_the_token_rate_forecast(tmp_path):
+    root = bundle(tmp_path, steps=2)
+    training = {"bf16": False, "log_every": 0, "micro_batch_tokens": 8192}
+    completed = run_pipeline(
+        root,
+        tmp_path / "full",
+        action="train",
+        mechanics_only=True,
+        training=training,
+        forecast_basis="token_rate",
+    )
+    plan = json.loads((tmp_path / "full/completion_plan.json").read_bytes())["training"]
+    assert plan["forecast_basis"].startswith("complete schedule tokens")
+    assert plan["scheduled_tokens"] > 0
+    assert completed["reload_probability_parity"]

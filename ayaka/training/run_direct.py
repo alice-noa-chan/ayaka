@@ -197,6 +197,7 @@ def run_pipeline(
     select_patience=None,
     select_min_delta=0.0,
     select_split="router_train",
+    forecast_basis="max",
     paid_elapsed_seconds=None,
     expected_bundle_sha256=None,
     saved_base_reads=None,
@@ -366,6 +367,14 @@ def run_pipeline(
         overheads=overheads,
         checkpoint_every=checkpoint_every,
         safety_factor=1,
+        basis=forecast_basis,
+        scheduled_tokens=sum(
+            len(item.enc.prefix_ids) + len(item.enc.rendered.suffix_ids)
+            for batch in training_batches(recipe, inventory, groups)
+            for item in batch
+        )
+        if forecast_basis == "token_rate"
+        else None,
     )
     measured = admit_workflow(
         budget,
@@ -579,6 +588,13 @@ def main(argv=None):
     parser.add_argument("--select-min-delta", type=float, default=0.0)
     parser.add_argument("--select-split", choices=("router_train", "dev"), default="router_train")
     parser.add_argument(
+        "--forecast-basis",
+        choices=("max", "token_rate"),
+        default="max",
+        help="training-time forecast for admission: slowest sampled batch per step, or "
+        "schedule tokens at the sampled token rate",
+    )
+    parser.add_argument(
         "--paid-elapsed-seconds",
         type=float,
         help="all already billed time including pod setup, downloads and teacher collection",
@@ -614,6 +630,7 @@ def main(argv=None):
         select_patience=args.select_patience,
         select_min_delta=args.select_min_delta,
         select_split=args.select_split,
+        forecast_basis=args.forecast_basis,
         paid_elapsed_seconds=args.paid_elapsed_seconds,
         expected_bundle_sha256=args.expected_bundle_sha256,
         saved_base_reads=read(args.base_reads),
