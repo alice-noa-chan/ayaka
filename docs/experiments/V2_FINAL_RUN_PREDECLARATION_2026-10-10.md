@@ -175,3 +175,18 @@ The first rental (instance 55120004, RTX PRO 6000 S) stopped at run_direct's who
 - **Change:** commit `8cc7433` adds `run_direct --forecast-basis token_rate`. It divides every scheduled token by the sampled scheduled token rate. The 1.25 safety factor and the credit admission are unchanged.
 - **What did not change:** corpus, plan, schedule, model, selection, tuning, final_test and decision rule. Only the source commit, and so the bundle and audit anchors, change.
 - **Rental time limit:** raised from 16 h to 20 h, to cover the rental time already used. The compute ceiling becomes about $27.5 at $1.38/h.
+
+## Amendment: learning rate, after a training-internal divergence (2026-10-10)
+
+The second rental (instance 55134917) trained with the declared learning rates: LoRA 1e-4, head 5e-4. The checkpoint-selection reads on the bundle's own router_train split showed a divergence:
+
+| Step | Choice NLL | Noul NLL | Score NLL | Equal-type CC |
+|---|---|---|---|---|
+| 250 | 0.602 | 0.256 | 1.008 | 65.5 |
+| 500 | 1.479 | 0.697 | 1.438 | −23.7 |
+
+A CC below chance is a divergence, not overfitting. The previous v2 run (74 steps) never trained at the peak learning rate for long.
+
+- **Change:** the run was stopped at step ~600. It restarts from the backbone with both learning rates scaled by 0.3: LoRA 3e-5, head 1.5e-4. The new rates are set in the payload's `training-config.json`.
+- **What did not change:** corpus, bundle and audit anchors, schedule, warmup fraction, selection rule, tuning, final_test and the decision rule.
+- **Integrity:** the evidence for this change is the training-internal selection split only. No held-out cohort and no final_test question had been read by the new model.
