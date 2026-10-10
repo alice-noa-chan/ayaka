@@ -17,6 +17,9 @@ none is an official JevBench score or rank.
 
 | Report | What it says | Status |
 |---|---|---|
+| [Final v2 run result, 10-10](V2_FINAL_RUN_RESULT_2026-10-10.md) | Last predeclared v2 run: on the unseen final_test cohort the frozen noul_always+router policy gains +10.8 CC over v1 (CI +7.2…+14.2), Speed 58.9, but fails the zero-tolerance Score checks and the clustered HelpSteer2 check, so it is not adopted. The owner published it separately as ayaka-v2-large with the result disclosed. | current |
+| [Final v2 run predeclaration, 10-10](V2_FINAL_RUN_PREDECLARATION_2026-10-10.md) | Corpus plan 3, training, selection, tuning and the once-only final_test decision rule, with two amendments made before results. | reference |
+| [V2 blocker causes, 10-09](V2_BLOCKER_CAUSES_2026-10-09.md) | Two of three gate blockers were noise-level; Noul NLL came from reasoned MASSIVE reads and missing StrategyQA; v2 was under-trained. | superseded by the final run |
 | [V2 gap analysis, 10-07](V2_GAP_ANALYSIS_2026-10-07.md) | The v2 direct deficit comes from the 27 questions where v1 reasons; on directly read questions v2 already leads. Remaining abstentions are calculation and ko/ja intent questions. | current |
 | [Held-out dev cohort, 10-07](HELDOUT_DEV_COHORT_2026-10-07.md) | Published v1 trained on ~96–99.6% of the train rows the 10-07 dev drew from; a new 668-question, 342-case cohort uses only validation/test splits neither model trained on. | current |
 | [CPU cause checks, 10-07](CAUSE_CHECKS_CPU_2026-10-07.md) | Test 1's Noul regression is a lost "false" bias on calculation items with no ranking skill (AUC 0.50–0.55); direct reads are under-confident on gold-true answers; tokenizer reserialization causes the 2.1 s v2 latency. | current |
