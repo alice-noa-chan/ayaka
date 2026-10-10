@@ -4,6 +4,29 @@
   "parameter_basis": "official Hub safetensors total including multimodal weights; active/effective size is not substituted",
   "candidates": [
     {
+      "repo": "google/gemma-4-E2B-it",
+      "revision": "3e22461f65e89153144f8adb70e3b8c2cc9845a7",
+      "license": "apache-2.0",
+      "total_parameters": 5123178051,
+      "model_type": "gemma4_text",
+      "tie_word_embeddings": true,
+      "layers": 35,
+      "hidden_size": 1536,
+      "name": "gemma4-e2b",
+      "support": "builtin",
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "card_url": "https://huggingface.co/google/gemma-4-E2B-it",
+      "config_url": "https://huggingface.co/google/gemma-4-E2B-it/blob/3e22461f65e89153144f8adb70e3b8c2cc9845a7/config.json"
+    },
+    {
       "repo": "google/gemma-4-E4B-it",
       "revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
       "license": "apache-2.0",

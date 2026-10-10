@@ -38,9 +38,10 @@ def test_simple_multilingual_regressions_really_generate_at_forced_high():
 
 def test_pinned_manifest_enforces_license_total_size_and_lora_targets():
     manifest = load_manifest(str(Path(__file__).parents[1] / "docs/experiments/v2_candidates.json"))
-    assert len(manifest["candidates"]) == 12
+    assert len(manifest["candidates"]) == 13
     by_name = {r["name"]: r for r in manifest["candidates"]}
     assert by_name["gemma4-e4b"]["total_parameters"] > 7e9
+    assert by_name["gemma4-e2b"]["total_parameters"] > 5e9
     assert "in_proj_qkv" in candidate_config(by_name["qwen35-9b"]).lora_targets
     assert "qkv_proj" in candidate_config(by_name["phi4-mini"]).lora_targets
     assert candidate_config(by_name["granite42-8b"]).version == 2
