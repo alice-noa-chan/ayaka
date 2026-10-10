@@ -42,10 +42,34 @@ backbone. The learned pointer gate stays near 0 (0.001-0.04 on 12B), and it
 is kept for candidate sets larger than the 26-letter label alphabet.
 
 Published Ayaka v1 checkpoints are **text-only**: only the Gemma 4 text stack
-is loaded, and states are text or JSON. Experimental v2 native image support
-loads the pinned vision components separately; see the development notes below.
+is loaded, and states are text or JSON. Ayaka v2 adds experimental native
+image inputs that load the pinned vision components separately; see
+[Images and generated candidates](docs/MULTIMODAL_AND_CANDIDATES.md).
 
-## Results (JevBench public tiers)
+## Results: Ayaka v2 large against v1 large (held-out)
+
+[Ayaka v2 large](https://huggingface.co/alice-noa-chan/ayaka-v2-large) was
+compared with v1 large on the final_test cohort: 836 questions and 431 cases
+from validation and test splits that neither model trained on. No fit or
+choice saw the cohort, and it was read once after v2's serving policy was
+frozen. These are local measurements, not official JevBench scores. Hardware:
+one RTX PRO 6000, one request at a time.
+
+| system | equal-type CC | Choice CC / NLL | Noul CC / NLL | Noul abstentions | Score CC / NLL | Speed axis | mean latency |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **[Ayaka v2 large](https://huggingface.co/alice-noa-chan/ayaka-v2-large), frozen policy (default)** | **81.0** | **82.6 / 0.376** | **93.2 / 0.118** | **2** | 67.2 / 0.812 | 58.9 | 3.46 s |
+| Ayaka v2 large, single pass | 73.7 | 79.0 / 0.437 | 75.0 / 0.176 | 35 | 67.2 / 0.804 | 85.9 | 0.13 s |
+| [Ayaka large](https://huggingface.co/alice-noa-chan/ayaka-large) (v1) + worked-steps route | 70.2 | 75.4 / 0.507 | 67.2 / 0.197 | 50 | 68.0 / 0.792 | 82.4 | 0.41 s |
+
+- **Overall:** v2 gains +10.8 CC over v1 (paired 95% CI [+7.2, +14.2]).
+- **Score:** within noise overall (CI [−5.1, +3.9]). HelpSteer2 rubric questions are slightly worse (CI [−8.6, −0.1]).
+- **New in v2:**
+  - a learned reasoning router, with Noul always reasoned;
+  - experimental generated Choice candidates with an Other residual;
+  - experimental image inputs.
+- **Full report:** [V2_FINAL_RUN_RESULT_2026-10-10](docs/experiments/V2_FINAL_RUN_RESULT_2026-10-10.md). v2 has not yet been scored on the JevBench public tiers below.
+
+## Results (JevBench public tiers, v1 models)
 
 The public items are 48 easy, 72 original and 111 hard. The Intelligence
 proxy is chance-corrected with the official tier weights over these public
