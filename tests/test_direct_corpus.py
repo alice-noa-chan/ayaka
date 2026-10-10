@@ -42,7 +42,7 @@ def test_actual_plan_prepare_cli_uses_cached_only_inputs_and_publishes_portable_
     config.write_bytes(canonical(asdict(cfg)))
     settings = tmp_path / "settings.json"
     settings.write_bytes(canonical(plan["settings"]))
-    monkeypatch.setattr(module, "NaturalGoldRegistry", lambda: registry)
+    monkeypatch.setattr(module, "NaturalGoldRegistry", lambda **kwargs: registry)
     plan_path = tmp_path / "input-plan.json"
     common = [
         "--config",
@@ -346,7 +346,7 @@ def test_input_plan_checks_actual_tokenizer_at_exit_and_before_cli_write(
         config.write_bytes(canonical(asdict(cfg)))
         settings.write_bytes(canonical(plan["settings"]))
         monkeypatch.setattr(module, "local_tokenizer", lambda *a, **k: tok)
-        monkeypatch.setattr(module, "NaturalGoldRegistry", lambda: registry)
+        monkeypatch.setattr(module, "NaturalGoldRegistry", lambda **kwargs: registry)
         original = module.create_plan
 
         def mutate(*args, **kwargs):
