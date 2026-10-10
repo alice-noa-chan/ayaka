@@ -12,16 +12,36 @@ everything the final gate measured besides the weights:
 that ships ``frozen_tuning.json`` next to its weights is served this way by
 default, so a downloaded model behaves as it did in the gate without extra
 flags.
+
+``package`` builds that release folder from a trained checkpoint and its
+frozen fit::
+
+    python -m ayaka.frozen_tuning package --checkpoint results/train/checkpoint \\
+        --frozen results/frozen.json --out release/ayaka-v2-large
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+import shutil
 from pathlib import Path
 
 FROZEN_FILE = "frozen_tuning.json"
 # The held-out reads ran every question with an 8192-token prompt budget.
 READ_MAX_SEQ_LEN = 8192
+# Checkpoint files a release ships. head.pt is the legacy pickle of the same
+# head; releases carry head.safetensors only.
+RELEASE_FILES = (
+    "ayaka_config.json",
+    "electra_config.json",
+    "head.safetensors",
+    "meta.json",
+    "noul_calibration.json",
+    "adapter/adapter_config.json",
+    "adapter/adapter_model.safetensors",
+)
+OPTIONAL_FILES = ("electra_config.json", "noul_calibration.json")
 
 
 def load_frozen(path):
@@ -65,3 +85,68 @@ def frozen_decision(model, tok, frozen, max_seq_len=None):
         # direct correction, so it stays on beneath them.
         direct_correction=True,
     )
+
+
+def package(checkpoint, frozen_path, out):
+    """Copy a checkpoint's release files and its frozen fit into a new folder.
+
+    Files are copied byte for byte: the Noul calibration is bound to the
+    hash of the config, head and adapter files, and is re-verified here.
+    """
+    checkpoint, out = Path(checkpoint), Path(out)
+    if out.exists():
+        raise ValueError("choose a new release folder; existing releases must remain intact")
+    frozen = load_frozen(frozen_path)
+    missing = [
+        name
+        for name in RELEASE_FILES
+        if name not in OPTIONAL_FILES and not (checkpoint / name).is_file()
+    ]
+    if missing:
+        raise ValueError(f"checkpoint is missing release files: {missing}")
+    out.mkdir(parents=True)
+    copied = []
+    for name in RELEASE_FILES:
+        source = checkpoint / name
+        if source.is_file():
+            (out / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, out / name)
+            copied.append(name)
+    (out / FROZEN_FILE).write_text(json.dumps(frozen, indent=2) + "\n", encoding="utf-8")
+    _verify_calibration(out)
+    return {"out": str(out), "files": copied + [FROZEN_FILE], "policy": frozen["policy"]}
+
+
+def _verify_calibration(folder):
+    path = folder / "noul_calibration.json"
+    if not path.is_file():
+        return
+    from .checkpoint import load_config, read_contract
+    from .training.noul_calibration import NoulCalibration
+    from .training.scoped_calibration import checkpoint_fingerprint
+
+    contract = read_contract(str(folder), load_config(str(folder)))
+    NoulCalibration.load(
+        str(path),
+        checkpoint_fingerprint(folder, include_calibration=False),
+        input_recipe_sha256=contract["input_recipe_sha256"] if contract else None,
+    )
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    pack = commands.add_parser("package", help="build a release folder with the frozen fit")
+    pack.add_argument("--checkpoint", required=True, type=Path)
+    pack.add_argument("--frozen", required=True, type=Path)
+    pack.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args(argv)
+    try:
+        result = package(args.checkpoint, args.frozen, args.out)
+    except ValueError as error:
+        parser.error(str(error))
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()

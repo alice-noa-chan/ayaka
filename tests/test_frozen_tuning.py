@@ -78,3 +78,31 @@ def test_an_invalid_frozen_file_is_refused(tmp_path):
     (tmp_path / ft.FROZEN_FILE).write_text(json.dumps(broken), encoding="utf-8")
     with pytest.raises(ValueError, match="unknown or missing fields"):
         serve._frozen_tuning("auto", tmp_path, False)
+
+
+def test_package_copies_release_files_and_the_frozen_fit(tmp_path):
+    checkpoint = tmp_path / "checkpoint"
+    (checkpoint / "adapter").mkdir(parents=True)
+    for name in ft.RELEASE_FILES:
+        if name != "noul_calibration.json":
+            (checkpoint / name).write_bytes(name.encode())
+    (checkpoint / "head.pt").write_bytes(b"pickle")
+    frozen_path = tmp_path / "frozen.json"
+    frozen_path.write_text(json.dumps(frozen()), encoding="utf-8")
+    out = tmp_path / "release"
+    result = ft.package(checkpoint, frozen_path, out)
+    assert result["policy"] == "noul_always+router"
+    assert not (out / "head.pt").exists()
+    assert (out / "adapter/adapter_model.safetensors").read_bytes() == (
+        b"adapter/adapter_model.safetensors"
+    )
+    assert ft.load_frozen(out / ft.FROZEN_FILE) == frozen()
+    with pytest.raises(ValueError, match="new release folder"):
+        ft.package(checkpoint, frozen_path, out)
+
+
+def test_package_refuses_an_incomplete_checkpoint(tmp_path):
+    frozen_path = tmp_path / "frozen.json"
+    frozen_path.write_text(json.dumps(frozen()), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing release files"):
+        ft.package(tmp_path, frozen_path, tmp_path / "release")
