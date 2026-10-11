@@ -152,6 +152,9 @@ def test_runner_profiles_or_refuses_an_unfinishable_schedule_before_optimizer(
         "training": {"seed": 7, "bf16": False, "questions_per_step": 2},
         "language_sampling": {"en": 1},
     }
+    if not profile_only:
+        # A zero completion target can never fit, however fast the runner is.
+        recipe["completion_target_seconds"] = 0
     if profile_only:
         result = run_v2.execute_training(args, trainer.model.cfg, recipe, {"train": [sample]})
         assert result["optimizer_steps"] == 0 and result["status"] == "throughput_profile_only"
