@@ -1,0 +1,114 @@
+{
+  "version": "ayaka-qwen-pilot-compare-1",
+  "rule": "proceed to a Qwen v2 predeclaration iff the paired dev CC 95% CI lower bound > 0",
+  "reference": {
+    "results": ".dev/v2-family-20261011/retrieved/results/base",
+    "cc_equal_types": 66.11111445728743,
+    "by_type": {
+      "choice": {
+        "n": 196,
+        "cc": 77.75975906405652,
+        "nll": 0.5032669967269711,
+        "ece": 0.09795670721342842,
+        "brier": 0.2603459828055612
+      },
+      "noul": {
+        "n": 320,
+        "cc": 63.75,
+        "nll": 0.21205681622807462,
+        "ece": 0.04117712234044349,
+        "brier": 0.06342300925166054,
+        "abstentions": 45
+      },
+      "score": {
+        "n": 152,
+        "cc": 56.82358430780572,
+        "nll": 1.1139898267887545,
+        "ece": 0.0830312525800763,
+        "brier": 0.5959102624238971
+      }
+    },
+    "latency": {
+      "mean_s": 0.11334359225423861,
+      "p50_s": 0.08168701222166419,
+      "p95_s": 0.2432140908204019,
+      "speed_axis": 87.00187602652619
+    }
+  },
+  "candidate": {
+    "results": ".dev/qwen-pilot-20261011/retrieved/results/qwen",
+    "cc_equal_types": 68.55953640431215,
+    "by_type": {
+      "choice": {
+        "n": 196,
+        "cc": 80.53978918104943,
+        "nll": 0.4089931704885821,
+        "ece": 0.0720594967402688,
+        "brier": 0.21364249632712154
+      },
+      "noul": {
+        "n": 320,
+        "cc": 70.625,
+        "nll": 0.18694785979763878,
+        "ece": 0.027929817131672696,
+        "brier": 0.052029705364316246,
+        "abstentions": 36
+      },
+      "score": {
+        "n": 152,
+        "cc": 54.51382003188703,
+        "nll": 1.1079963120280005,
+        "ece": 0.06580596299745105,
+        "brier": 0.5886792037789513
+      }
+    },
+    "latency": {
+      "mean_s": 0.12817192863753835,
+      "p50_s": 0.10456899600103498,
+      "p95_s": 0.24546066531911492,
+      "speed_axis": 86.37933924217955
+    }
+  },
+  "temperatures": {
+    "reference": {
+      "choice": 1.4408911260290003,
+      "choice/direct/low": 1.4408911260290003,
+      "noul": 0.9554427235438838,
+      "noul/direct/low": 0.9554427235438838,
+      "score": 0.909159616611069,
+      "score/direct/low": 0.909159616611069
+    },
+    "candidate": {
+      "choice": 1.0280072604815018,
+      "choice/direct/low": 1.0280072604815018,
+      "noul": 0.8587933363001684,
+      "noul/direct/low": 0.8587933363001684,
+      "score": 1.0157148289314888,
+      "score/direct/low": 1.0157148289314888
+    }
+  },
+  "comparison": {
+    "subgroup_rule": "zero_tolerance",
+    "cc_delta": 2.448421947024727,
+    "cc_delta_95ci": [
+      -1.4390947048168443,
+      5.960739905407791
+    ],
+    "screen_passed": false,
+    "failed_checks": [
+      "paired_cc_ci_lower_above_zero",
+      "score/cc_not_worse",
+      "score/rps_not_worse",
+      "score/nmae_not_worse",
+      "source:ayaka-v2-verified/score/cc_not_worse",
+      "source:commonsense_qa/choice/cc_not_worse",
+      "source:helpsteer2/score/cc_not_worse",
+      "source:massive_ja/noul/cc_not_worse",
+      "language:en/score/cc_not_worse",
+      "language:ja/noul/cc_not_worse"
+    ]
+  },
+  "proceed": false,
+  "optimizer_updates": 0,
+  "final_test_read": false
+}

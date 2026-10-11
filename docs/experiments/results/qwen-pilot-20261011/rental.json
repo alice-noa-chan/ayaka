@@ -1,0 +1,18 @@
+{
+  "status": "complete_results_verified_rental_destroyed",
+  "instance_id": 55353734,
+  "label": "ayaka-qwen-pilot-20261011",
+  "rental_absent": true,
+  "rows_per_run": {
+    "qwen": {
+      "calibration/v2_off-merged": 334,
+      "router_train/v2_off-merged": 334,
+      "dev/v2_off-merged": 668
+    }
+  },
+  "rental_elapsed_seconds": 7429.439674377441,
+  "compute_cost_estimate_usd": 2.9744663664231785,
+  "credit_after_destroy_usd": 5.39219800282072,
+  "cost_is_final_invoice": false,
+  "other_instances_present": []
+}

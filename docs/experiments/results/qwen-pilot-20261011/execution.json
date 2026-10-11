@@ -1,0 +1,49 @@
+{
+  "status": "complete",
+  "sizes": {
+    "qwen": {
+      "size": "qwen",
+      "training_seconds": 6556.109990596771,
+      "trained_dir": "train",
+      "v2_model_id": "53d6021400b0859ec136471e095b93edffed9864a252827a36b0f4652f35bc12",
+      "runs": [
+        {
+          "run": "calibration/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 70.38043403625488
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "run": "router_train/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 60.76543474197388
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "run": "dev/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 105.76492738723755
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        }
+      ]
+    }
+  },
+  "optimizer_updates_outside_training": 0,
+  "original_private_test_opened": false,
+  "elapsed_job_seconds": 6870.071711778641
+}
