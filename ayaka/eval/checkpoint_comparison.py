@@ -32,6 +32,7 @@ SYSTEMS = ("v1_on", "v2_off", "v2_on")
 # weights: about 1.65x faster generation, but an approximation of the adapter,
 # so its reads are a separate system state that must be validated on its own.
 ADAPTERS = ("unmerged", "merged")
+SURVEY = Path(__file__).resolve().parents[2] / "docs/experiments/v2_candidates.json"
 
 
 def _json_ordinal(value):
@@ -77,18 +78,51 @@ def questions(samples, split="dev"):
     return prepared
 
 
-def make_protocol(samples, v1_model_id, v2_model_id, split="dev", size="large"):
+def surveyed_backbone(backbone):
+    """A v2 backbone other than v1's must be pinned in the approved survey."""
+    if (
+        not isinstance(backbone, dict)
+        or set(backbone) != {"repo", "revision"}
+        or not all(isinstance(value, str) and value for value in backbone.values())
+    ):
+        raise ValueError("a v2 backbone needs exactly a repository and a revision")
+    survey = json.loads(SURVEY.read_bytes())
+    candidate = next(
+        (
+            c
+            for c in survey["candidates"]
+            if c["repo"] == backbone["repo"] and c["revision"] == backbone["revision"]
+        ),
+        None,
+    )
+    if (
+        candidate is None
+        or candidate["license"] not in {"apache-2.0", "mit"}
+        or candidate["support"] != "builtin"
+    ):
+        raise ValueError("v2 backbone must be pinned in the approved backbone survey")
+    return {"repo": backbone["repo"], "revision": backbone["revision"]}
+
+
+def make_protocol(samples, v1_model_id, v2_model_id, split="dev", size="large", v2_backbone=None):
     """Fixed reading recipe. ``dev`` evaluates; ``calibration`` and ``router_train``
     collect tuning reads that are never scored against development results.
 
     ``size`` picks the published v1 model and backbone both systems read
-    with. Large protocols carry no size field, so earlier ones stay valid."""
+    with. Large protocols carry no size field, so earlier ones stay valid.
+    ``v2_backbone`` ({"repo", "revision"}) lets v2 read on a different,
+    survey-pinned backbone; v1 always reads on its own."""
     questions(samples, split)
     ids = {"v1": _model_id(v1_model_id), "v2": _model_id(v2_model_id)}
     if ids["v1"] == ids["v2"]:
         raise ValueError("v1 and v2 require distinct checkpoint identities")
     pins = V1_FAMILY[size]
     sized = {} if size == "large" else {"model_size": size}
+    if v2_backbone is not None:
+        v2_backbone = surveyed_backbone(v2_backbone)
+        if v2_backbone["revision"] == pins["backbone_revision"]:
+            raise ValueError("a separate v2 backbone must differ from v1's backbone")
+        sized["v2_backbone"] = v2_backbone
     return {
         "version": VERSION,
         "split": split,
@@ -124,7 +158,12 @@ def validate_protocol(protocol, samples):
     if size not in V1_FAMILY or "model_size" in protocol and size == "large":
         raise ValueError("protocol names an unknown model size")
     expected = make_protocol(
-        samples, protocol["model_ids"]["v1"], protocol["model_ids"]["v2"], split, size
+        samples,
+        protocol["model_ids"]["v1"],
+        protocol["model_ids"]["v2"],
+        split,
+        size,
+        protocol.get("v2_backbone"),
     )
     if fingerprint(expected) != fingerprint(protocol):
         raise ValueError("comparison protocol differs from its fixed development recipe")
@@ -419,6 +458,11 @@ def main(argv=None):
         default="large",
         help="protocol only: the published v1 size and backbone both systems read with",
     )
+    parser.add_argument(
+        "--v2-backbone",
+        metavar="REPO@REVISION",
+        help="protocol only: a survey-pinned backbone v2 reads on instead of v1's",
+    )
     parser.add_argument("--v1-model-id", help="external SHA-256 of the v1 checkpoint")
     parser.add_argument("--v2-model-id", help="external SHA-256 of the v2 checkpoint")
     parser.add_argument("--noul-order", choices=tuple(NOUL_ORDER_NAMES), default="false_first")
@@ -452,8 +496,12 @@ def main(argv=None):
             raise ValueError("protocols must use a new output file")
         if args.v1_model_id is None or args.v2_model_id is None:
             raise ValueError("a protocol needs both external checkpoint identities")
+        v2_backbone = None
+        if args.v2_backbone is not None:
+            repo, _, revision = args.v2_backbone.partition("@")
+            v2_backbone = {"repo": repo, "revision": revision}
         protocol = make_protocol(
-            samples, args.v1_model_id, args.v2_model_id, args.split, args.model_size
+            samples, args.v1_model_id, args.v2_model_id, args.split, args.model_size, v2_backbone
         )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(
@@ -520,7 +568,11 @@ def main(argv=None):
             local_files_only=True,
             strict_loading=True,
         )
-        if model.cfg.backbone_revision != protocol["backbone_revision"]:
+        separate = protocol.get("v2_backbone") if args.system != "v1_on" else None
+        if separate is not None and model.cfg.backbone != separate["repo"]:
+            raise ValueError("checkpoint uses a different native backbone repository")
+        expected_revision = separate["revision"] if separate else protocol["backbone_revision"]
+        if model.cfg.backbone_revision != expected_revision:
             raise ValueError("checkpoint uses a different native backbone revision")
         tok = HFTokenizer(
             AutoTokenizer.from_pretrained(str(args.backbone), local_files_only=True),

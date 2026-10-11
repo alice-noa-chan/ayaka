@@ -312,3 +312,36 @@ def test_smaller_sizes_bind_their_own_v1_and_backbone(cohort):
     for forged in ({**small, "model_size": "base"}, {**large, "model_size": "large"}):
         with pytest.raises(ValueError):
             checked_rows([], samples, forged, "v2_off", complete=False)
+
+
+QWEN = {"repo": "Qwen/Qwen3.5-4B", "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"}
+
+
+def test_v2_may_read_on_a_separate_survey_pinned_backbone(cohort):
+    samples, _ = cohort
+    pilot = make_protocol(samples, "a" * 64, "b" * 64, size="base", v2_backbone=QWEN)
+    assert pilot["v2_backbone"] == QWEN
+    # v1 keeps reading on its own published backbone.
+    assert pilot["backbone_revision"] == V1_FAMILY["base"]["backbone_revision"]
+    assert checked_rows([], samples, pilot, "v2_off", complete=False) == []
+    for forged in (
+        {**pilot, "v2_backbone": {**QWEN, "revision": "0" * 40}},
+        {**pilot, "v2_backbone": {**QWEN, "repo": "Qwen/Qwen3.5-9B"}},
+    ):
+        with pytest.raises(ValueError):
+            checked_rows([], samples, forged, "v2_off", complete=False)
+
+
+@pytest.mark.parametrize(
+    "backbone",
+    [
+        {"repo": "Qwen/Qwen3.5-4B", "revision": "0" * 40},
+        {"repo": "someone/unsurveyed", "revision": "1" * 40},
+        {**QWEN, "extra": True},
+        {"repo": "google/gemma-4-E4B-it", "revision": V1_FAMILY["base"]["backbone_revision"]},
+    ],
+)
+def test_separate_v2_backbone_must_be_surveyed_and_differ_from_v1(cohort, backbone):
+    samples, _ = cohort
+    with pytest.raises(ValueError):
+        make_protocol(samples, "a" * 64, "b" * 64, size="base", v2_backbone=backbone)
