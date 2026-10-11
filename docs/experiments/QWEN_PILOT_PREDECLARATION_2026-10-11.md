@@ -63,7 +63,7 @@ One vast.ai RTX PRO 6000 S at about $1.46/h, from the current credit of $8.43 wi
 | **Total** | **about 1.5–2 h, about $2.5–3** |
 
 - **Training estimate:** E4B trained in about 2.0 h while sharing the GPU with E2B.
-- **Guardian:** stops compute at 4 h, at most about $5.9.
+- **Guardian:** stops compute at 4.5 h, at most about $6.6. That limit leaves room for the longest training forecast that the credit admission accepts (about 2.5 h); a slower forecast is refused before training.
 - **Admission:** run_direct's credit admission (safety factor 1.25) fits within the credit.
 
 ## Integrity
