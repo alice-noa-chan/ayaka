@@ -1,0 +1,274 @@
+{
+  "status": "complete",
+  "sizes": {
+    "base": {
+      "size": "base",
+      "training_seconds": 7105.025318622589,
+      "trained_dir": "train",
+      "v2_model_id": "ea73afe766912fe231b7eef0294f46d3fd8fa3575325876bdfd7d3d915b1318c",
+      "runs": [
+        {
+          "size": "base",
+          "run": "calibration/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 55.191407918930054
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "base",
+          "run": "router_train/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 53.73474884033203
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "base",
+          "run": "dev/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 93.99088430404663
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        },
+        {
+          "size": "base",
+          "run": "dev/v1_on",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 358.885954618454
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        },
+        {
+          "size": "base",
+          "run": "calibration/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 1829.4280276298523
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "base",
+          "run": "router_train/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 1839.6944913864136
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "base",
+          "run": "dev/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 3636.4988117218018
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        },
+        {
+          "size": "base",
+          "run": "final_test/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 99.79499626159668
+            }
+          ],
+          "complete": true,
+          "rows": 836
+        },
+        {
+          "size": "base",
+          "run": "final_test/v1_on",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 334.05223083496094
+            }
+          ],
+          "complete": true,
+          "rows": 836
+        },
+        {
+          "size": "base",
+          "run": "final_test/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 1698.9179482460022
+            }
+          ],
+          "complete": true,
+          "rows": 481
+        }
+      ],
+      "routed_final_test_questions": 481,
+      "adopted": true
+    },
+    "small": {
+      "size": "small",
+      "stagger": "base_profiled",
+      "training_seconds": 7251.786258459091,
+      "trained_dir": "train",
+      "v2_model_id": "08d8a7df0544dbbe2d01774a6ef306cb3ebcb73ce6e51298c8d49ef05e48cb75",
+      "runs": [
+        {
+          "size": "small",
+          "run": "calibration/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 52.93151617050171
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "small",
+          "run": "router_train/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 50.47997760772705
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "small",
+          "run": "dev/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 90.6280415058136
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        },
+        {
+          "size": "small",
+          "run": "dev/v1_on",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 367.8245496749878
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        },
+        {
+          "size": "small",
+          "run": "calibration/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 1642.8697762489319
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "small",
+          "run": "router_train/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 1727.6232771873474
+            }
+          ],
+          "complete": true,
+          "rows": 334
+        },
+        {
+          "size": "small",
+          "run": "dev/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 3235.9371688365936
+            }
+          ],
+          "complete": true,
+          "rows": 668
+        },
+        {
+          "size": "small",
+          "run": "final_test/v2_off-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 77.91803741455078
+            }
+          ],
+          "complete": true,
+          "rows": 836
+        },
+        {
+          "size": "small",
+          "run": "final_test/v1_on",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 272.02012515068054
+            }
+          ],
+          "complete": true,
+          "rows": 836
+        },
+        {
+          "size": "small",
+          "run": "final_test/v2_on-merged",
+          "attempts": [
+            {
+              "return_code": 0,
+              "seconds": 1027.7208182811737
+            }
+          ],
+          "complete": true,
+          "rows": 384
+        }
+      ],
+      "routed_final_test_questions": 384,
+      "adopted": false
+    }
+  },
+  "completed_sizes": [
+    "base",
+    "small"
+  ],
+  "shared_phase_seconds": 15080.8064661026,
+  "optimizer_updates_outside_training": 0,
+  "original_private_test_opened": false,
+  "elapsed_job_seconds": 18711.53653359413
+}
