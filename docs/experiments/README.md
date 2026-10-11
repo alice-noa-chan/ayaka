@@ -17,6 +17,8 @@ none is an official JevBench score or rank.
 
 | Report | What it says | Status |
 |---|---|---|
+| [v2 base and small result, 10-11](V2_FAMILY_RUN_RESULT_2026-10-11.md) | The large recipe on E4B and E2B, trained together on one GPU. base gains +15.1 CC over v1 base (CI +11.1…+19.0) and passes the full predeclared gate; small gains +8.5 CC (CI +3.7…+13.0) but fails the zero-tolerance Score NLL and Brier checks. Both are published (ayaka-v2-base, ayaka-v2-small, the latter with the failure stated). | current |
+| [v2 base and small predeclaration, 10-11](V2_FAMILY_RUN_PREDECLARATION_2026-10-11.md) | Per-size settings, the one-GPU schedule (exclusive final_test reads for the Speed axis) and the unchanged decision rule. | reference |
 | [Final v2 run result, 10-10](V2_FINAL_RUN_RESULT_2026-10-10.md) | Last predeclared v2 run: on the unseen final_test cohort the frozen noul_always+router policy gains +10.8 CC over v1 (CI +7.2…+14.2), Speed 58.9, but fails the zero-tolerance Score checks and the clustered HelpSteer2 check, so it is not adopted. The owner published it separately as ayaka-v2-large with the result disclosed. | current |
 | [Final v2 run predeclaration, 10-10](V2_FINAL_RUN_PREDECLARATION_2026-10-10.md) | Corpus plan 3, training, selection, tuning and the once-only final_test decision rule, with two amendments made before results. | reference |
 | [V2 blocker causes, 10-09](V2_BLOCKER_CAUSES_2026-10-09.md) | Two of three gate blockers were noise-level; Noul NLL came from reasoned MASSIVE reads and missing StrategyQA; v2 was under-trained. | superseded by the final run |

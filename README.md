@@ -1,9 +1,13 @@
 # Ayaka: an open, license-clean Jev-class decision model
 
-> **Ayaka v2 large is out:** [alice-noa-chan/ayaka-v2-large](https://huggingface.co/alice-noa-chan/ayaka-v2-large).
-> On an unseen held-out cohort it gains +10.8 CC over v1 large (Choice and Noul up, Score within noise),
-> and it adds a learned reasoning router, generated Choice candidates and image inputs.
-> It did not pass the project's predeclared zero-tolerance gate on Score, so the v1 models stay
+> **Ayaka v2 is out in three sizes:**
+> [large](https://huggingface.co/alice-noa-chan/ayaka-v2-large) (12B),
+> [base](https://huggingface.co/alice-noa-chan/ayaka-v2-base) (E4B) and
+> [small](https://huggingface.co/alice-noa-chan/ayaka-v2-small) (E2B).
+> On an unseen held-out cohort they gain +10.8, +15.1 and +8.5 CC over the v1 model of the same size,
+> and they add a learned reasoning router, generated Choice candidates and image inputs.
+> **v2 base passed the project's predeclared release gate.** v2 large and v2 small missed its
+> zero-tolerance Score checks and are published with that result stated. The v1 models stay
 > available and unchanged. See [Ayaka v2](#ayaka-v2).
 > The JevBench public-tier results below describe v1.
 
@@ -68,6 +72,21 @@ one RTX PRO 6000, one request at a time.
   - experimental generated Choice candidates with an Other residual;
   - experimental image inputs.
 - **Full report:** [V2_FINAL_RUN_RESULT_2026-10-10](docs/experiments/V2_FINAL_RUN_RESULT_2026-10-10.md). v2 has not yet been scored on the JevBench public tiers below.
+
+### v2 base and v2 small against v1 base and v1 small
+
+Same cohort, protocol and hardware. Each v2 size is compared with the v1 model of the same size and backbone.
+
+| system | equal-type CC | Choice CC / NLL | Noul CC / NLL | Noul abstentions | Score CC / NLL | Speed axis | mean latency |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **[Ayaka v2 base](https://huggingface.co/alice-noa-chan/ayaka-v2-base), frozen policy (default)** | **78.1** | **75.9 / 0.502** | **89.6 / 0.153** | **7** | **68.9 / 0.787** | 64.0 | 2.11 s |
+| [Ayaka base](https://huggingface.co/alice-noa-chan/ayaka-base) (v1) + worked-steps route | 63.0 | 67.2 / 0.673 | 60.4 / 0.281 | 59 | 61.3 / 0.949 | 86.1 | 0.38 s |
+| **[Ayaka v2 small](https://huggingface.co/alice-noa-chan/ayaka-v2-small), frozen policy (default)** | **63.3** | **73.3 / 0.550** | **54.7 / 0.282** | **66** | **61.9** / 0.919 | 72.3 | 1.28 s |
+| [Ayaka small](https://huggingface.co/alice-noa-chan/ayaka-small) (v1) + worked-steps route | 54.8 | 68.2 / 0.637 | 35.4 / 0.410 | 105 | 60.6 / **0.898** | 77.4 | 0.31 s |
+
+- **v2 base:** +15.1 CC over v1 base (paired 95% CI [+11.1, +19.0]). Every type improves, Score included, and it **passed the full predeclared gate**.
+- **v2 small:** +8.5 CC over v1 small (CI [+3.7, +13.0]). Its Score NLL and Brier are slightly worse than v1's (0.919 vs 0.898, 0.499 vs 0.494), so it failed the zero-tolerance per-type gate. It is published with that result stated.
+- **Full report:** [V2_FAMILY_RUN_RESULT_2026-10-11](docs/experiments/V2_FAMILY_RUN_RESULT_2026-10-11.md).
 
 ## Results (JevBench public tiers, v1 models)
 
@@ -139,8 +158,9 @@ pip install -c constraints.txt -e .   # verified versions; see also the Dockerfi
 python -m ayaka.serve --model <export-dir> --device cuda --port 8000
 # with the worked-steps route (checkpoint with the LoRA unmerged)
 python -m ayaka.serve --ckpt <checkpoint-dir> --reasoning --device cuda --port 8000
-# v2 large with its frozen policy, router and temperatures (read from frozen_tuning.json)
-python -m ayaka.serve --ckpt alice-noa-chan/ayaka-v2-large --device cuda --port 8000
+# v2 with its frozen policy, router and temperatures (read from frozen_tuning.json)
+python -m ayaka.serve --ckpt alice-noa-chan/ayaka-v2-base --device cuda --port 8000
+# (or ayaka-v2-large / ayaka-v2-small)
 # score any running server on the public tiers
 python -m ayaka.eval.jevbench --endpoint http://127.0.0.1:8000 --out report.json
 ```
@@ -241,7 +261,9 @@ runs.
 | small | [alice-noa-chan/ayaka-small](https://huggingface.co/alice-noa-chan/ayaka-small) | `google/gemma-4-E2B-it` | lowest latency, memory and cost | single pass |
 | base | [alice-noa-chan/ayaka-base](https://huggingface.co/alice-noa-chan/ayaka-base) | `google/gemma-4-E4B-it` | a middle ground | single pass |
 | large | [alice-noa-chan/ayaka-large](https://huggingface.co/alice-noa-chan/ayaka-large) | `google/gemma-4-12B-it` | accuracy, especially the hard tier | single pass, or `--reasoning` |
-| v2 large | [alice-noa-chan/ayaka-v2-large](https://huggingface.co/alice-noa-chan/ayaka-v2-large) | `google/gemma-4-12B-it` | held-out accuracy, fewer abstentions | its frozen policy by default (`frozen_tuning.json`) |
+| v2 small | [alice-noa-chan/ayaka-v2-small](https://huggingface.co/alice-noa-chan/ayaka-v2-small) | `google/gemma-4-E2B-it` | lowest latency; failed the gate on Score calibration | its frozen policy by default (`frozen_tuning.json`) |
+| v2 base | [alice-noa-chan/ayaka-v2-base](https://huggingface.co/alice-noa-chan/ayaka-v2-base) | `google/gemma-4-E4B-it` | passed the release gate; every type better than v1 base | its frozen policy by default (`frozen_tuning.json`) |
+| v2 large | [alice-noa-chan/ayaka-v2-large](https://huggingface.co/alice-noa-chan/ayaka-v2-large) | `google/gemma-4-12B-it` | highest held-out accuracy, fewer abstentions | its frozen policy by default (`frozen_tuning.json`) |
 
 Each repository holds the LoRA adapter (bf16), `head.safetensors` and the
 config. The base model is fetched at a pinned revision. Merged bf16/int8
@@ -373,6 +395,16 @@ not an official JevBench score):
   - generated Choice candidates with an Other residual;
   - native image inputs ([details](docs/MULTIMODAL_AND_CANDIDATES.md)).
 - **JevBench public tiers:** not yet measured for v2.
+
+The same recipe, with only the v1 size settings changed, produced
+[v2 base](https://huggingface.co/alice-noa-chan/ayaka-v2-base) and
+[v2 small](https://huggingface.co/alice-noa-chan/ayaka-v2-small). Both trained at once on one GPU
+([V2_FAMILY_RUN_RESULT_2026-10-11](docs/experiments/V2_FAMILY_RUN_RESULT_2026-10-11.md)):
+
+| Size | Equal-type CC, v1 → v2 | Paired 95% CI | Predeclared gate |
+|---|---:|---:|---|
+| base (E4B) | 63.0 → **78.1** | [+11.1, +19.0] | **passed** |
+| small (E2B) | 54.8 → **63.3** | [+3.7, +13.0] | failed: Score NLL and Brier slightly worse than v1 |
 
 The validated recipe is the default of the training CLIs
 ([`ayaka/training/v2_recipe.py`](ayaka/training/v2_recipe.py)), and
