@@ -122,6 +122,26 @@ def test_unchanged_template_keeps_exact_cache_reuse(monkeypatch):
     assert observed.readout_tokens == len(expected) - prefix
 
 
+class SlidingCache:
+    def crop(self, length):
+        raise RuntimeError("`crop` was called, but the sliding window size was already reached")
+
+
+def test_uncroppable_sliding_cache_falls_back_to_complete_canonical_read(monkeypatch):
+    gen = generator(monkeypatch, generation_channel=False)
+    observed = trace(gen)
+    # Generated tokens the final template does not reproduce force a rollback.
+    observed.token_ids = [*observed.text.encode(), *b" extra", 999]
+    observed.cache = SlidingCache()
+    expected = gen.prepare(gen._final_messages(observed.messages, observed.text))[0]
+    gen.readout(observed, spec())
+    batch, kwargs = gen.model.calls[0]
+    assert kwargs["past_key_values"] is None
+    assert batch.input_ids[0].tolist() == expected
+    assert observed.cache is None and observed.readout_execution == "canonical_full_read"
+    assert observed.readout_tokens == len(expected)
+
+
 def test_rewritten_original_evidence_is_rejected_before_model_read(monkeypatch):
     gen = generator(monkeypatch, rewrite_user=True)
     observed = trace(gen)

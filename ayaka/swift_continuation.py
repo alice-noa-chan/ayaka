@@ -138,9 +138,18 @@ class SwiftTraceGenerator(TraceGenerator):
             crop = getattr(trace.cache, "crop", None)
             if not callable(crop):
                 raise ValueError("Swift trace cache cannot roll back the final template boundary")
-            crop(common - len(generated))
-            if int(trace.cache.get_seq_length()) != common:
-                raise ValueError("Swift trace cache rollback length differs from token prefix")
+            try:
+                crop(common - len(generated))
+            except RuntimeError:
+                # A sliding-window layer that has already dropped the rolled-back
+                # positions cannot crop (Gemma 4 E2B/E4B keep 512 tokens). The
+                # cache may be partly cropped, so discard it and read in full.
+                common, cache = 0, None
+                trace.cache = None
+                trace.readout_execution = "canonical_full_read"
+            else:
+                if int(trace.cache.get_seq_length()) != common:
+                    raise ValueError("Swift trace cache rollback length differs from token prefix")
         original_ids = [candidate.id for candidate in question.candidates]
         label_ids = [
             bound["canonical_token_ids"][letters[displayed.index(key)]][0] for key in original_ids
